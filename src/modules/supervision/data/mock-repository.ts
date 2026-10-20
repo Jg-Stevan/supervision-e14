@@ -1,31 +1,60 @@
 /**
- * Implementación mock de SupervisionRepository (kit SUP-1 §3-T2).
+ * Implementación mock de SupervisionRepository.
  *
- * Datos demo del mockup (§2.4) + relleno creíble autorizado por el kit para
- * que los conteos cuadren EXACTAMENTE con los KPIs: total 20, completo 5,
- * crítico 1, pendiente 4, no iniciado 10. Ajuste aplicado: España pasa de
- * CRÍTICO (mockup) a PENDIENTE — ver docs/DECISIONS.md (D6).
+ * Datos demo del mockup (SUP-1 §2.4) + relleno creíble autorizado para que
+ * los conteos cuadren EXACTAMENTE con los KPIs iniciales (D6): total 20,
+ * completo 5, crítico 1, pendiente 4, no iniciado 10.
+ *
+ * KIT SUP-3 (T2): mesas determinísticas para los 20 puestos (cantidad
+ * EXACTA = numeroMesas; Italia conserva sus 3 mesas EXACTAS del mockup
+ * original — no se tocan — y se le generan las 5 restantes coherentes con
+ * CRÍTICO). Los pctDelegado/pctTransmision se DERIVAN de las mesas
+ * (≈ % de partes ok) — kit T2. Interfaz async con latencia simulada
+ * ~400 ms (D12). Mutaciones de T4 + transición de vida de T3 (D13).
+ * Sin backend, sin persistencia: el estado vive en memoria del módulo.
  */
 
 import type {
+  Anomalia,
   FiltrosPuestos,
   Mesa,
+  Notificacion,
   Puesto,
   ResumenGlobal,
-  Supervisor,
 } from "../domain/types";
 import type { SupervisionRepository } from "./supervision-repository";
 
-/** Supervisor de la sesión (header del mockup). El repositorio mantiene
- * exactamente los 3 métodos del kit; el supervisor es texto fijo del shell. */
-export const SUPERVISOR: Supervisor = {
+/** Supervisor de la sesión (header del mockup). */
+export const SUPERVISOR = {
   nombre: "SUPERVISOR",
   id: "ADM-9482",
-};
+} as const;
+
+/** Latencia simulada del mock (D12): el contrato es async desde hoy. */
+const LATENCIA_MS = 400;
+/** Latencia simulada de REINSPECCIONAR (T4): ~2.5 s de spinner. */
+const LATENCIA_REINSPECCION_MS = 2500;
+/** Intervalo del ticker de sincronización (T3). */
+export const TICKER_SEGUNDOS = 5;
+/** Cada cuántos segundos del ticker aplica UNA transición de vida (T3). */
+export const TRANSICION_CADA_SEGUNDOS = 45;
+
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Con latencia simulada (sin romper el determinismo de los datos). */
+async function conLatencia<T>(valor: T, ms = LATENCIA_MS): Promise<T> {
+  await esperar(ms);
+  return valor;
+}
 
 /**
  * 20 puestos: los 5 visibles del mockup + 15 de relleno creíble
- * (países/zonas variados, autorizado en kit §2.4 "Decisión de consistencia").
+ * (países/zonas variados, autorizado en SUP-1 §2.4 "Decisión de
+ * consistencia"). Los pcts se recalculan al inicializar (derivación de
+ * mesas, D16) — los valores literales de aquí abajo son el punto de
+ * partida del mockup y quedan documentados en docs/DECISIONS.md.
  */
 const PUESTOS: Puesto[] = [
   // ── Mockup §2.4 (5 visibles) ────────────────────────────────────────────
@@ -60,8 +89,8 @@ const PUESTOS: Puesto[] = [
     estadoGlobal: "COMPLETO",
   },
   {
-    // Ajuste de consistencia: el mockup la muestra CRÍTICO, pero el KPI
-    // oficial del sistema es CRÍTICO: 1 → se rebaja a PENDIENTE (kit §2.4).
+    // Ajuste de consistencia SUP-1: el mockup la muestra CRÍTICO, pero el
+    // KPI oficial es CRÍTICO: 1 → se rebaja a PENDIENTE (D6).
     id: "puesto-365",
     codigoPais: "365",
     pais: "España",
@@ -334,49 +363,298 @@ const PUESTOS: Puesto[] = [
   },
 ];
 
-/** Mesas del demo (kit §2.4): solo Italia define detalle de mesas. */
-const MESAS_POR_PUESTO: Record<string, Mesa[]> = {
-  "puesto-499": [
-    {
-      id: "001",
-      delegados: { p1: "ok", p2: "ok" },
-      transmision: {
-        p1: { estado: "ok" },
-        p2: { estado: "ok", alerta: "Rescaneo" },
-      },
-      estadoMesa: "INCOMPLETO",
-      ultimaCarga: "Hace 12 min",
-      accionSugerida: "reinspeccionar",
+// ─── Generación determinística de mesas (T2 / D13) ─────────────────────────
+
+function ok(): Mesa["delegados"]["p1"] {
+  return "ok";
+}
+function pend(): Mesa["delegados"]["p1"] {
+  return "pendiente";
+}
+
+/** Mesas EXACTAS del mockup original (SUP-1 §2.4) — NO SE TOCAN (kit T2). */
+const MESAS_ITALIA_MOCKUP: Mesa[] = [
+  {
+    id: "001",
+    delegados: { p1: "ok", p2: "ok" },
+    transmision: {
+      p1: { estado: "ok" },
+      p2: { estado: "ok", alerta: "Rescaneo" },
     },
-    {
-      id: "002",
-      delegados: { p1: "ok", p2: "ok" },
-      transmision: {
-        p1: { estado: "pendiente" },
-        p2: { estado: "pendiente" },
-      },
-      estadoMesa: "EN_PROCESO",
-      ultimaCarga: "Hace 45 min",
+    estadoMesa: "INCOMPLETO",
+    ultimaCarga: "Hace 12 min",
+    accionSugerida: "reinspeccionar",
+  },
+  {
+    id: "002",
+    delegados: { p1: "ok", p2: "ok" },
+    transmision: {
+      p1: { estado: "pendiente" },
+      p2: { estado: "pendiente" },
+    },
+    estadoMesa: "EN_PROCESO",
+    ultimaCarga: "Hace 45 min",
+    accionSugerida: "notificar",
+  },
+  {
+    id: "003",
+    delegados: { p1: "pendiente", p2: "pendiente" },
+    transmision: {
+      p1: { estado: "pendiente" },
+      p2: { estado: "pendiente" },
+    },
+    estadoMesa: "NO_INICIADO",
+    ultimaCarga: null,
+    accionSugerida: "notificar",
+  },
+];
+
+/**
+ * Mesas por puesto, DETERMINÍSTICAS (sin random por render — arrays
+ * fijos). Recetas del kit T2:
+ * - COMPLETO → todas COMPLETO, ok, sin alertas, carga reciente.
+ * - PENDIENTE → mezcla EN_PROCESO/NO_INICIADO, pendientes en partes.
+ * - CRÍTICO → mayormente NO_INICIADO/INCOMPLETO, alerta "Rescaneo"
+ *   presente (Italia: 3 exactas del mockup + 004-008 generadas).
+ * - NO_INICIADO → todas NO_INICIADO, sin carga ("—").
+ */
+function generarMesasPuesto(puesto: Puesto): Mesa[] {
+  const n = puesto.numeroMesas;
+  const numero = (i: number) => String(i + 1).padStart(3, "0");
+  const carga = (min: number) => `Hace ${min} min`;
+
+  if (puesto.estadoGlobal === "COMPLETO") {
+    return Array.from({ length: n }, (_, i) => ({
+      id: numero(i),
+      delegados: { p1: ok(), p2: ok() },
+      transmision: { p1: { estado: "ok" }, p2: { estado: "ok" } },
+      estadoMesa: "COMPLETO",
+      ultimaCarga: carga(5 + i * 3),
       accionSugerida: "notificar",
-    },
-    {
-      id: "003",
-      delegados: { p1: "pendiente", p2: "pendiente" },
-      transmision: {
-        p1: { estado: "pendiente" },
-        p2: { estado: "pendiente" },
-      },
+    })) as Mesa[];
+  }
+
+  if (puesto.estadoGlobal === "NO_INICIADO") {
+    return Array.from({ length: n }, (_, i) => ({
+      id: numero(i),
+      delegados: { p1: pend(), p2: pend() },
+      transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
       estadoMesa: "NO_INICIADO",
       ultimaCarga: null,
       accionSugerida: "notificar",
-    },
-  ],
-};
+    })) as Mesa[];
+  }
 
-function coincide(
-  puesto: Puesto,
-  f: FiltrosPuestos | undefined
-): boolean {
+  // Italia (CRÍTICO): 3 exactas del mockup + las restantes generadas
+  // coherentes con CRÍTICO (mayoría NO_INICIADO, Rescaneo presente).
+  if (puesto.id === "puesto-499") {
+    const restantes = Math.max(0, n - MESAS_ITALIA_MOCKUP.length);
+    const generadas: Mesa[] = Array.from({ length: restantes }, (_, i) => {
+      const indice = MESAS_ITALIA_MOCKUP.length + i;
+      // 004 → INCOMPLETO con Rescaneo (coherente con CRÍTICO y con la
+      // anomalía sembrada); 005 → EN_PROCESO; 006+ → NO_INICIADO.
+      if (i === 0) {
+        return {
+          id: numero(indice),
+          delegados: { p1: ok(), p2: ok() },
+          transmision: {
+            p1: { estado: "ok" },
+            p2: { estado: "ok", alerta: "Rescaneo" },
+          },
+          estadoMesa: "INCOMPLETO",
+          ultimaCarga: carga(21),
+          accionSugerida: "reinspeccionar",
+        } as Mesa;
+      }
+      if (i === 1) {
+        return {
+          id: numero(indice),
+          delegados: { p1: ok(), p2: pend() },
+          transmision: {
+            p1: { estado: "ok" },
+            p2: { estado: "pendiente" },
+          },
+          estadoMesa: "EN_PROCESO",
+          ultimaCarga: carga(52),
+          accionSugerida: "notificar",
+        } as Mesa;
+      }
+      return {
+        id: numero(indice),
+        delegados: { p1: pend(), p2: pend() },
+        transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+        estadoMesa: "NO_INICIADO",
+        ultimaCarga: null,
+        accionSugerida: "notificar",
+      } as Mesa;
+    });
+    return [...MESAS_ITALIA_MOCKUP.map((m) => ({ ...m })), ...generadas];
+  }
+
+  // PENDIENTE: mezcla EN_PROCESO / NO_INICIADO (receta del kit).
+  // - Con varias mesas: la ÚLTIMA es EN_PROCESO (delegados completos,
+  //   transmisión a medias → candidato de transición de vida), el resto
+  //   NO_INICIADO. Con 1 mesa: la mesa única es EN_PROCESO con partes a
+  //   medias (España 50/50; Inglaterra transmisión completa 0/100).
+  const mesas: Mesa[] = [];
+  for (let i = 0; i < n; i++) {
+    const esUltima = i === n - 1;
+    const indice = i;
+    if (puesto.id === "puesto-466") {
+      // Inglaterra: transmisión completa, delegados sin iniciar (≈ mockup
+      // 10/100 → 0/100 derivable de 1 mesa).
+      mesas.push({
+        id: numero(indice),
+        delegados: { p1: pend(), p2: pend() },
+        transmision: { p1: { estado: "ok" }, p2: { estado: "ok" } },
+        estadoMesa: "EN_PROCESO",
+        ultimaCarga: carga(33),
+        accionSugerida: "notificar",
+      });
+      continue;
+    }
+    if (esUltima) {
+      mesas.push({
+        id: numero(indice),
+        delegados: { p1: ok(), p2: ok() },
+        transmision: { p1: { estado: "ok" }, p2: { estado: "pendiente" } },
+        estadoMesa: "EN_PROCESO",
+        ultimaCarga: carga(47),
+        accionSugerida: "notificar",
+      });
+    } else {
+      mesas.push({
+        id: numero(indice),
+        delegados: { p1: pend(), p2: pend() },
+        transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+        estadoMesa: "NO_INICIADO",
+        ultimaCarga: null,
+        accionSugerida: "notificar",
+      });
+    }
+  }
+  return mesas;
+}
+
+/** Estado de mesa derivado de sus partes (regla única, D13). */
+function estadoMesaDePartes(mesa: Mesa): Mesa["estadoMesa"] {
+  if (
+    mesa.transmision.p1.alerta ||
+    mesa.transmision.p2.alerta
+  ) {
+    return "INCOMPLETO";
+  }
+  const partesOk =
+    (mesa.delegados.p1 === "ok" ? 1 : 0) +
+    (mesa.delegados.p2 === "ok" ? 1 : 0) +
+    (mesa.transmision.p1.estado === "ok" ? 1 : 0) +
+    (mesa.transmision.p2.estado === "ok" ? 1 : 0);
+  if (partesOk === 4) return "COMPLETO";
+  if (partesOk === 0) return "NO_INICIADO";
+  return "EN_PROCESO";
+}
+
+/** Recalcula estadoMesa + accionSugerida de una mesa (in place). */
+function refrescarMesa(mesa: Mesa): void {
+  mesa.estadoMesa = estadoMesaDePartes(mesa);
+  mesa.accionSugerida = mesa.estadoMesa === "INCOMPLETO" ? "reinspeccionar" : "notificar";
+}
+
+/** pcts derivables de las mesas (≈ % de partes ok, kit T2). */
+function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
+  const total = mesas.length * 2;
+  if (total === 0) return { delegado: 0, transmision: 0 };
+  const delegOk = mesas.reduce(
+    (s, m) =>
+      s + (m.delegados.p1 === "ok" ? 1 : 0) + (m.delegados.p2 === "ok" ? 1 : 0),
+    0
+  );
+  const transOk = mesas.reduce(
+    (s, m) =>
+      s +
+      (m.transmision.p1.estado === "ok" ? 1 : 0) +
+      (m.transmision.p2.estado === "ok" ? 1 : 0),
+    0
+  );
+  return {
+    delegado: Math.round((delegOk / total) * 100),
+    transmision: Math.round((transOk / total) * 100),
+  };
+}
+
+/** Estado global derivado: COMPLETO si TODAS las mesas lo están; si no, se
+ * conserva el estado actual (el kit solo define transición → COMPLETO). */
+function estadoGlobalTrasMesas(actual: Puesto["estadoGlobal"], mesas: Mesa[]): Puesto["estadoGlobal"] {
+  const todasCompletas = mesas.length > 0 && mesas.every((m) => m.estadoMesa === "COMPLETO");
+  return todasCompletas ? "COMPLETO" : actual;
+}
+
+// ─── Estado mutable del mock (en memoria — sin persistencia, §0-5) ─────────
+
+const MESAS_POR_PUESTO: Record<string, Mesa[]> = {};
+for (const puesto of PUESTOS) {
+  const mesas = generarMesasPuesto(puesto);
+  MESAS_POR_PUESTO[puesto.id] = mesas;
+  // T2: los pcts del puesto deben ser DERIVABLES de sus mesas — se
+  // corrigen al inicializar (D16 documenta los valores que cambian).
+  const pcts = pctsDeMesas(mesas);
+  puesto.pctDelegado = pcts.delegado;
+  puesto.pctTransmision = pcts.transmision;
+}
+
+const AHORA = Date.now();
+const MIN = 60_000;
+
+/** Semillas T5 (7): coherentes con los datos (Italia rescaneo, España
+ * retraso…). 3 no leídas → badge inicial 3. */
+const NOTIFICACIONES: Notificacion[] = [
+  { id: "notif-1", tipo: "rescaneo", texto: "Rescaneo requerido en Mesa 001 (Italia — 02 - Roma)", fecha: AHORA - 12 * MIN, leida: false },
+  { id: "notif-2", tipo: "retraso", texto: "Retraso en transmisión — España (06 - Tarragona)", fecha: AHORA - 38 * MIN, leida: false },
+  { id: "notif-3", tipo: "transmision", texto: "Transmisión en curso — Mesa 004 (México — 01 - Ciudad de México)", fecha: AHORA - 47 * MIN, leida: false },
+  { id: "notif-4", tipo: "sistema", texto: "Sincronización completada: 20 puestos al día", fecha: AHORA - 65 * MIN, leida: true },
+  { id: "notif-5", tipo: "rescaneo", texto: "Rescaneo requerido en Mesa 004 (Italia — 02 - Roma)", fecha: AHORA - 21 * MIN, leida: false },
+  { id: "notif-6", tipo: "sistema", texto: "Respaldo de datos del consolidado completado", fecha: AHORA - 5 * 60 * MIN, leida: true },
+  { id: "notif-7", tipo: "transmision", texto: "Transmisión restablecida — Países Bajos (04 - La Haya)", fecha: AHORA - 26 * 60 * MIN, leida: true },
+];
+
+/** Semillas T6: 5 ABIERTAS (badge dinámico real del mockup) + 2 revisadas
+ * de histórico (para el filtro por estado). */
+const ANOMALIAS: Anomalia[] = [
+  { id: "anom-1", tipo: "Rescaneo", puestoId: "puesto-499", puesto: "Italia — 02 - Roma", mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
+  { id: "anom-2", tipo: "Mesa incompleta", puestoId: "puesto-499", puesto: "Italia — 02 - Roma", mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
+  { id: "anom-3", tipo: "Transmisión caída", puestoId: "puesto-365", puesto: "España — 06 - Tarragona", mesaId: "001", severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
+  { id: "anom-4", tipo: "Desfase de hora", puestoId: "puesto-365", puesto: "España — 06 - Tarragona", severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
+  { id: "anom-5", tipo: "Mesa incompleta", puestoId: "puesto-555", puesto: "México — 01 - Ciudad de México", mesaId: "002", severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
+  { id: "anom-6", tipo: "Rescaneo", puestoId: "puesto-435", puesto: "Países Bajos — 04 - La Haya", mesaId: "001", severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
+  { id: "anom-7", tipo: "Desfase de hora", puestoId: "puesto-466", puesto: "Inglaterra — 03 - Londres", severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
+];
+
+let contadorNotificaciones = 0;
+
+function crearNotificacion(tipo: Notificacion["tipo"], texto: string): Notificacion {
+  contadorNotificaciones += 1;
+  return {
+    id: `notif-nueva-${contadorNotificaciones}`,
+    tipo,
+    texto,
+    fecha: Date.now(),
+    leida: false,
+  };
+}
+
+function puestoPorId(puestoId: string): Puesto | undefined {
+  return PUESTOS.find((p) => p.id === puestoId);
+}
+
+function refrescarPuesto(puesto: Puesto): void {
+  const mesas = MESAS_POR_PUESTO[puesto.id] ?? [];
+  const pcts = pctsDeMesas(mesas);
+  puesto.pctDelegado = pcts.delegado;
+  puesto.pctTransmision = pcts.transmision;
+  puesto.estadoGlobal = estadoGlobalTrasMesas(puesto.estadoGlobal, mesas);
+}
+
+function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   if (!f) return true;
   if (f.pais && puesto.codigoPais !== f.pais) return false;
   if (f.zona && puesto.zonaId !== f.zona) return false;
@@ -399,7 +677,7 @@ function coincide(
 }
 
 export const mockSupervisionRepository: SupervisionRepository = {
-  getResumen(): ResumenGlobal {
+  async getResumen(): Promise<ResumenGlobal> {
     const resumen: ResumenGlobal = {
       total: PUESTOS.length,
       completo: 0,
@@ -413,14 +691,100 @@ export const mockSupervisionRepository: SupervisionRepository = {
       if (puesto.estadoGlobal === "PENDIENTE") resumen.pendiente += 1;
       if (puesto.estadoGlobal === "NO_INICIADO") resumen.noIniciado += 1;
     }
-    return resumen;
+    return conLatencia(resumen);
   },
 
-  getPuestos(filtros?: FiltrosPuestos): Puesto[] {
-    return PUESTOS.filter((puesto) => coincide(puesto, filtros));
+  async getPuestos(filtros?: FiltrosPuestos): Promise<Puesto[]> {
+    return conLatencia(PUESTOS.filter((puesto) => coincide(puesto, filtros)).map((p) => ({ ...p })));
   },
 
-  getMesasDePuesto(puestoId: string): Mesa[] {
-    return MESAS_POR_PUESTO[puestoId] ?? [];
+  async getMesasDePuesto(puestoId: string): Promise<Mesa[]> {
+    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map((m) => ({ ...m })));
+  },
+
+  async getNotificaciones(): Promise<Notificacion[]> {
+    return conLatencia(NOTIFICACIONES.map((n) => ({ ...n })));
+  },
+
+  async getAnomalias(): Promise<Anomalia[]> {
+    return conLatencia(ANOMALIAS.map((a) => ({ ...a })));
+  },
+
+  async resolverRescaneo(puestoId, mesaId) {
+    await esperar(LATENCIA_REINSPECCION_MS);
+    const puesto = puestoPorId(puestoId);
+    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+    if (!puesto || !mesa) return null;
+    const teniaAlerta =
+      Boolean(mesa.transmision.p1.alerta) || Boolean(mesa.transmision.p2.alerta);
+    if (!teniaAlerta) return null;
+    // T4: la alerta "Rescaneo" se resuelve (desaparece) y se recalcula.
+    mesa.transmision.p1 = { ...mesa.transmision.p1, alerta: undefined };
+    mesa.transmision.p2 = { ...mesa.transmision.p2, alerta: undefined };
+    refrescarMesa(mesa);
+    refrescarPuesto(puesto);
+    const notificacion = crearNotificacion(
+      "rescaneo",
+      `Rescaneo completado en Mesa ${mesa.id} (${puesto.pais} — ${puesto.puesto})`
+    );
+    NOTIFICACIONES.unshift(notificacion);
+    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
+  },
+
+  async notificarMesa(puestoId, mesaId) {
+    await conLatencia(true);
+    const puesto = puestoPorId(puestoId);
+    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+    if (!puesto || !mesa) {
+      // Sin puesto/mesa no hay notificación posible (jamás inventar).
+      return crearNotificacion("sistema", "Supervisor notificó a la mesa (dato no encontrado)");
+    }
+    // T4: el estado de la mesa NO cambia — solo se registra la notificación.
+    const notificacion = crearNotificacion(
+      "sistema",
+      `Supervisor notificó a la mesa ${mesa.id} (${puesto.pais} — ${puesto.puesto})`
+    );
+    NOTIFICACIONES.unshift(notificacion);
+    return { ...notificacion };
+  },
+
+  async aplicarTransicionVida() {
+    await conLatencia(true);
+    // Candidatas: mesas EN_PROCESO. Preferencia (D13): la primera cuya
+    // transición COMPLETA su puesto (KPIs en vivo); si ninguna completa,
+    // la primera EN_PROCESO en orden del mock.
+    const candidatas: { puesto: Puesto; mesa: Mesa }[] = [];
+    for (const puesto of PUESTOS) {
+      for (const mesa of MESAS_POR_PUESTO[puesto.id] ?? []) {
+        if (mesa.estadoMesa === "EN_PROCESO") candidatas.push({ puesto, mesa });
+      }
+    }
+    if (candidatas.length === 0) return null;
+    const elegida =
+      candidatas.find(({ puesto, mesa }) => {
+        const restantes = (MESAS_POR_PUESTO[puesto.id] ?? []).filter(
+          (m) => m.id !== mesa.id && m.estadoMesa !== "COMPLETO"
+        ).length;
+        return restantes === 0;
+      }) ?? candidatas[0];
+    const { puesto, mesa } = elegida;
+    // La transición completa las partes pendientes de la mesa.
+    if (mesa.delegados.p1 !== "ok") mesa.delegados.p1 = "ok";
+    if (mesa.delegados.p2 !== "ok") mesa.delegados.p2 = "ok";
+    if (mesa.transmision.p1.estado !== "ok")
+      mesa.transmision.p1 = { ...mesa.transmision.p1, estado: "ok" };
+    if (mesa.transmision.p2.estado !== "ok")
+      mesa.transmision.p2 = { ...mesa.transmision.p2, estado: "ok" };
+    refrescarMesa(mesa);
+    mesa.ultimaCarga = "Hace 1 min";
+    const estadoAntes = puesto.estadoGlobal;
+    refrescarPuesto(puesto);
+    return {
+      puestoId: puesto.id,
+      mesaId: mesa.id,
+      puestoEstado: puesto.estadoGlobal,
+      puestoCompletado:
+        estadoAntes !== "COMPLETO" && puesto.estadoGlobal === "COMPLETO",
+    };
   },
 };
