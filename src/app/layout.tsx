@@ -20,7 +20,9 @@ export const metadata: Metadata = {
   description: "Módulo de monitoreo y auditoría electoral E-14",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="es"
