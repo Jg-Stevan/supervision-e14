@@ -92,3 +92,56 @@ export interface FiltrosPuestos {
   /** Búsqueda rápida: coincide con id, código, nombre, zona o puesto. */
   busqueda?: string;
 }
+
+// ─── KIT INSTRUCCIONES-sup-e14-vida-v1 (SUP-3) — tipos nuevos ──────────────
+
+/** Tipo de notificación del Centro de Notificaciones (T5). */
+export type TipoNotificacion =
+  | "rescaneo"
+  | "retraso"
+  | "transmision"
+  | "sistema";
+
+/** Notificación del demo (T5). Se sembrada en el mock; las acciones de T4
+ * agregan más. `fecha` = epoch ms; la vista muestra timestamp relativo. */
+export interface Notificacion {
+  id: string;
+  tipo: TipoNotificacion;
+  texto: string;
+  fecha: number;
+  /** Punto de no-leída (badge del sidebar = contador de no leídas). */
+  leida: boolean;
+}
+
+/** Tipo de anomalía (T6) — catálogo del kit. */
+export type TipoAnomalia =
+  | "Rescaneo"
+  | "Mesa incompleta"
+  | "Transmisión caída"
+  | "Desfase de hora";
+
+export type SeveridadAnomalia = "critica" | "alta" | "media";
+
+/** Anomalía del demo (T6): 5 abiertas sembradas (badge dinámico real). */
+export interface Anomalia {
+  id: string;
+  tipo: TipoAnomalia;
+  puestoId: string;
+  puesto: string;
+  /** Mesa afectada, si aplica. */
+  mesaId?: string;
+  severidad: SeveridadAnomalia;
+  fecha: number;
+  /** Abierta (false) o revisada (true). Badge = abiertas restantes. */
+  revisada: boolean;
+}
+
+/** Resultado de UNA transición de vida (T3): mesa EN_PROCESO → COMPLETO. */
+export interface TransicionVida {
+  puestoId: string;
+  mesaId: string;
+  /** Estado del puesto tras recalcular (COMPLETO solo si completó). */
+  puestoEstado: EstadoGlobal;
+  /** true si el puesto completó y los KPIs deben moverse en vivo. */
+  puestoCompletado: boolean;
+}
