@@ -15,6 +15,11 @@ import {
   TICKER_SEGUNDOS,
   TRANSICION_CADA_SEGUNDOS,
 } from "../data/mock-repository";
+import { tieneActa } from "../data/actas-mock";
+import type {
+  ActaMesa,
+  FormularioTipo,
+} from "../domain/acta";
 import type {
   Anomalia,
   Mesa,
@@ -22,13 +27,31 @@ import type {
   Puesto,
   ResumenGlobal,
 } from "../domain/types";
+import { ActaViewerModal } from "./actas/acta-viewer-modal";
 
 /**
  * Store cliente del shell (kit SUP-3 T4: «los datos viven en el store
  * client del shell»). Carga el mock async (D12) con skeletons en T3 y
  * expone las mutaciones de T4 + la vida de T3 (ticker). React state — sin
  * libs nuevas (§1) y sin persistencia (§0-5).
- */
+ *
+ * KIT SUP-4 (T3.2): añade el estado del VISOR DE ACTAS (modal por estado,
+ * D17) — `visorActa` + acciones abrir/cerrar/navegar/cambiar — y el acta
+ * actual, que llega SIEMPRE por `SupervisionRepository` (~400 ms, §0-9:
+ * nada se lee directo del mock desde componentes). Las 2 acciones del
+ * visor siguen el patrón vida-v1: spinner 2.5 s → notificación + toast +
+ * efectos enlazados (anomalía revisada, D19). El modal se monta aquí
+ * dentro (el shell no está en la whitelist del kit). */
+
+/** Estado del visor (kit T3.2) + puestoId: el breadcrumb y el navegador
+ * MESA n/N necesitan el puesto dueño de la mesa (ids de mesa se repiten
+ * entre puestos). Desviación menor del kit, documentada en el REPORTE. */
+export interface EstadoVisorActa {
+  puestoId: string;
+  mesaId: string | null;
+  tipo: FormularioTipo;
+  pagina: number;
+}
 
 interface EstadoDatos {
   cargando: boolean;
@@ -54,6 +77,33 @@ interface DatosContexto extends EstadoDatos, AccionesDatos {
   resumen: ResumenGlobal;
   notificacionesNoLeidas: number;
   anomaliasAbiertas: number;
+  // ── KIT SUP-4 — visor de actas (T3) ─────────────────────────────────
+  visorActa: EstadoVisorActa | null;
+  /** El acta de la mesa abierta; null mientras carga o si no hay acta. */
+  actaActual: ActaMesa | null;
+  actaCargando: boolean;
+  /** Acción del visor en curso (spinner 2.5 s en el botón — kit T5). */
+  accionActaEnCurso: "aprobar" | "rescanear" | null;
+  /** Mesas CON acta de un puesto (en orden — alimenta MESA n/N). */
+  mesasConActaDelPuesto: (puestoId: string) => Mesa[];
+  abrirVisor: (
+    puestoId: string,
+    mesaId: string,
+    opciones?: { tipo?: FormularioTipo; pagina?: number }
+  ) => void;
+  /** 👁 de la fila de puesto: primera mesa con acta (T3.4). */
+  abrirVisorDePuesto: (puestoId: string) => void;
+  /** VER ACTA de una anomalía: aterriza en PÁGINA 2 si su advertencia
+   * es de página 2 (mesa no COMPLETA) — T3.4. */
+  abrirVisorDeAnomalia: (anomalia: Anomalia) => void;
+  cerrarVisor: () => void;
+  navegarMesa: (delta: 1 | -1) => void;
+  cambiarTipo: (tipo: FormularioTipo) => void;
+  cambiarPagina: (pagina: number) => void;
+  /** T5 — APROBAR Y MARCAR COMO VÁLIDA (spinner 2.5 s + toast + efectos). */
+  aprobarActaVisor: (observacion: string) => Promise<void>;
+  /** T5 — CONFIRMAR RESCANEO (spinner 2.5 s + toast + versión 2). */
+  confirmarRescanVisor: (observacion: string) => Promise<void>;
 }
 
 const Contexto = createContext<DatosContexto | null>(null);
@@ -86,6 +136,20 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     segundosDesdeSync: 0,
     mesaEnAccionId: null,
   });
+
+  // ── KIT SUP-4 — estado del visor de actas (T3.2) ─────────────────────
+  const [visorActa, setVisorActa] = useState<EstadoVisorActa | null>(null);
+  /** Última respuesta del repositorio (acta + a qué mesa pertenece): de
+   * aquí se DERIVAN actaActual y actaCargando (evita setState sincrónico
+   * en el effect — regla de lint del proyecto). */
+  const [actaCargada, setActaCargada] = useState<{
+    puestoId: string;
+    mesaId: string;
+    acta: ActaMesa | null;
+  } | null>(null);
+  const [accionActaEnCurso, setAccionActaEnCurso] = useState<
+    "aprobar" | "rescanear" | null
+  >(null);
   // ── Carga inicial (T2/T3): skeletons visibles durante la latencia ──────
   // (sin guard de una-sola-vez: StrictMode monta dos veces y la carga es
   // idempotente — cada instancia solo aplica su setState si sigue viva).
@@ -212,6 +276,169 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // ── KIT SUP-4 — visor de actas: carga por contrato async (§0-9) ───────
+  const puestoIdVisor = visorActa?.puestoId ?? null;
+  const mesaIdVisor = visorActa?.mesaId ?? null;
+  useEffect(() => {
+    if (!puestoIdVisor || !mesaIdVisor) return;
+    let vivo = true;
+    (async () => {
+      const acta = await mockSupervisionRepository.getActaDeMesa(
+        puestoIdVisor,
+        mesaIdVisor
+      );
+      if (!vivo) return;
+      setActaCargada({ puestoId: puestoIdVisor, mesaId: mesaIdVisor, acta });
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [puestoIdVisor, mesaIdVisor]);
+
+  // Derivaciones: ¿la respuesta en memoria corresponde a la mesa abierta?
+  const actaAlDia =
+    actaCargada !== null &&
+    actaCargada.puestoId === (visorActa?.puestoId ?? "") &&
+    actaCargada.mesaId === (visorActa?.mesaId ?? "");
+  const actaCargando = visorActa !== null && !actaAlDia;
+  const actaActual = visorActa !== null && actaAlDia ? actaCargada!.acta : null;
+
+  const abrirVisor = useCallback(
+    (
+      puestoId: string,
+      mesaId: string,
+      opciones?: { tipo?: FormularioTipo; pagina?: number }
+    ) => {
+      setVisorActa({
+        puestoId,
+        mesaId,
+        tipo: opciones?.tipo ?? "TRANSMISION",
+        pagina: opciones?.pagina ?? 1,
+      });
+    },
+    []
+  );
+
+  const cerrarVisor = useCallback(() => setVisorActa(null), []);
+
+  const mesasConActaDelPuesto = useCallback(
+    (puestoId: string) =>
+      (estado.mesasPorPuesto[puestoId] ?? []).filter(tieneActa),
+    [estado.mesasPorPuesto]
+  );
+
+  const abrirVisorDePuesto = useCallback(
+    (puestoId: string) => {
+      const primera = (estado.mesasPorPuesto[puestoId] ?? []).find(tieneActa);
+      if (primera) abrirVisor(puestoId, primera.id);
+    },
+    [estado.mesasPorPuesto, abrirVisor]
+  );
+
+  const abrirVisorDeAnomalia = useCallback(
+    (anomalia: Anomalia) => {
+      if (!anomalia.mesaId) return;
+      const mesa = (estado.mesasPorPuesto[anomalia.puestoId] ?? []).find(
+        (m) => m.id === anomalia.mesaId
+      );
+      if (!mesa || !tieneActa(mesa)) return;
+      // La advertencia del acta es de PÁGINA 2 cuando la mesa no está
+      // COMPLETA (su P2 es ADVERTENCIA o PENDIENTE) — kit T3.4.
+      abrirVisor(anomalia.puestoId, anomalia.mesaId, {
+        tipo: "TRANSMISION",
+        pagina: mesa.estadoMesa === "COMPLETO" ? 1 : 2,
+      });
+    },
+    [estado.mesasPorPuesto, abrirVisor]
+  );
+
+  const navegarMesa = useCallback(
+    (delta: 1 | -1) => {
+      setVisorActa((prev) => {
+        if (!prev) return prev;
+        const lista = (estado.mesasPorPuesto[prev.puestoId] ?? []).filter(
+          tieneActa
+        );
+        const indice = lista.findIndex((m) => m.id === prev.mesaId);
+        const siguiente = lista[indice + delta];
+        if (!siguiente) return prev;
+        // El tipo se conserva; DELEGADOS solo tiene 1 página.
+        return {
+          ...prev,
+          mesaId: siguiente.id,
+          pagina: prev.tipo === "DELEGADOS" ? 1 : prev.pagina,
+        };
+      });
+    },
+    [estado.mesasPorPuesto]
+  );
+
+  const cambiarTipo = useCallback((tipo: FormularioTipo) => {
+    setVisorActa((prev) => (prev ? { ...prev, tipo, pagina: 1 } : prev));
+  }, []);
+
+  const cambiarPagina = useCallback((pagina: number) => {
+    setVisorActa((prev) => {
+      if (!prev) return prev;
+      const maxima = prev.tipo === "TRANSMISION" ? 2 : 1;
+      return { ...prev, pagina: Math.min(Math.max(1, pagina), maxima) };
+    });
+  }, []);
+
+  // ── KIT SUP-4 — acciones del visor (patrón vida-v1, D19) ─────────────
+  const aprobarActaVisor = useCallback(
+    async (observacion: string) => {
+      if (!actaActual || accionActaEnCurso) return;
+      setAccionActaEnCurso("aprobar");
+      try {
+        const resultado = await mockSupervisionRepository.aprobarActa(
+          actaActual.id,
+          observacion
+        );
+        if (resultado) {
+          setActaCargada((prev) => (prev ? { ...prev, acta: resultado.acta } : prev));
+          setEstado((prev) => ({
+            ...prev,
+            notificaciones: [resultado.notificacion, ...prev.notificaciones],
+            anomalias: resultado.anomalia
+              ? prev.anomalias.map((a) =>
+                  a.id === resultado.anomalia!.id ? resultado.anomalia! : a
+                )
+              : prev.anomalias,
+          }));
+          toast.success("Acta marcada como válida");
+        }
+      } finally {
+        setAccionActaEnCurso(null);
+      }
+    },
+    [actaActual, accionActaEnCurso]
+  );
+
+  const confirmarRescanVisor = useCallback(
+    async (observacion: string) => {
+      if (!actaActual || accionActaEnCurso) return;
+      setAccionActaEnCurso("rescanear");
+      try {
+        const resultado = await mockSupervisionRepository.confirmarRescanActa(
+          actaActual.id,
+          observacion
+        );
+        if (resultado) {
+          setActaCargada((prev) => (prev ? { ...prev, acta: resultado.acta } : prev));
+          setEstado((prev) => ({
+            ...prev,
+            notificaciones: [resultado.notificacion, ...prev.notificaciones],
+          }));
+          toast.success("Rescan confirmado y recibido");
+        }
+      } finally {
+        setAccionActaEnCurso(null);
+      }
+    },
+    [actaActual, accionActaEnCurso]
+  );
+
   const resumen = useMemo(
     () => resumenDePuestos(estado.puestos),
     [estado.puestos]
@@ -235,9 +462,30 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     marcarNotificacionLeida,
     marcarTodasLeidas,
     marcarAnomaliaRevisada,
+    visorActa,
+    actaActual,
+    actaCargando,
+    accionActaEnCurso,
+    mesasConActaDelPuesto,
+    abrirVisor,
+    abrirVisorDePuesto,
+    abrirVisorDeAnomalia,
+    cerrarVisor,
+    navegarMesa,
+    cambiarTipo,
+    cambiarPagina,
+    aprobarActaVisor,
+    confirmarRescanVisor,
   };
 
-  return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;
+  return (
+    <Contexto.Provider value={valor}>
+      {children}
+      {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
+          monta desde el store del módulo (estado visorActa). */}
+      <ActaViewerModal />
+    </Contexto.Provider>
+  );
 }
 
 export function useDatos(): DatosContexto {
