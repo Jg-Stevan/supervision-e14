@@ -10,6 +10,7 @@
  * implementación sigue siendo el mock.
  */
 
+import type { ActaMesa } from "../domain/acta";
 import type {
   Anomalia,
   FiltrosPuestos,
@@ -41,4 +42,22 @@ export interface SupervisionRepository {
   /** T3 — una transición de vida (mesa EN_PROCESO → COMPLETO), con
    * preferencia por la que COMPLETA su puesto (KPIs en vivo). */
   aplicarTransicionVida(): Promise<TransicionVida | null>;
+
+  // ── KIT SUP-4 (actas-v1) ────────────────────────────────────────────────
+  /** T1 — el acta de una mesa (null = mesa sin transmisión). Latencia
+   * ~400 ms igual que el resto. Firma (puestoId, mesaId) igual que
+   * resolverRescaneo: los ids de mesa NO son únicos entre puestos. */
+  getActaDeMesa(puestoId: string, mesaId: string): Promise<ActaMesa | null>;
+  /** T5 — APROBAR Y MARCAR COMO VÁLIDA (spinner ~2.5 s). Devuelve el acta
+   * actualizada + la notificación generada; null si el acta no existe. */
+  aprobarActa(
+    actaId: string,
+    observacion: string
+  ): Promise<{ acta: ActaMesa; notificacion: Notificacion; anomalia?: Anomalia } | null>;
+  /** T5 — CONFIRMAR RESCANEO (spinner ~2.5 s, versión 1→2). La
+   * observación es obligatoria para ambas acciones (T5.2). */
+  confirmarRescanActa(
+    actaId: string,
+    observacion: string
+  ): Promise<{ acta: ActaMesa; notificacion: Notificacion } | null>;
 }

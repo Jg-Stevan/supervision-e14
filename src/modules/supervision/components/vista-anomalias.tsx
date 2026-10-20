@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 import { useDatos } from "./datos-provider";
@@ -32,8 +32,13 @@ const CLASE_CHIP =
   "label-caps inline-flex h-11 items-center gap-1.5 rounded-[4px] border px-3 text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)";
 
 export function VistaAnomalias() {
-  const { cargando, anomalias, anomaliasAbiertas, marcarAnomaliaRevisada } =
-    useDatos();
+  const {
+    cargando,
+    anomalias,
+    anomaliasAbiertas,
+    marcarAnomaliaRevisada,
+    abrirVisorDeAnomalia,
+  } = useDatos();
   const [filtro, setFiltro] = useState<Filtro>("abiertas");
 
   if (cargando) {
@@ -116,6 +121,22 @@ export function VistaAnomalias() {
               >
                 {ETIQUETA_SEVERIDAD[a.severidad]}
               </span>
+              {/* KIT SUP-4 T3.4 — VER ACTA (punto de entrada 2/3): aterriza
+                  en PÁGINA 2 cuando la advertencia de la anomalía es de
+                  página 2 (lo decide el store). Sin mesa vinculada →
+                  deshabilitado. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="label-caps h-11 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground disabled:opacity-40"
+                disabled={!a.mesaId}
+                title={a.mesaId ? "Ver acta" : "Sin mesa vinculada"}
+                aria-label={`Ver acta: ${a.tipo}${a.mesaId ? ` Mesa ${a.mesaId}` : ""} (${a.puesto})`}
+                onClick={() => abrirVisorDeAnomalia(a)}
+              >
+                <FileText className="size-4" aria-hidden />
+                Ver acta
+              </Button>
               {a.revisada ? (
                 <span className="label-caps inline-flex items-center gap-1.5 rounded-[4px] border border-(--success) px-2 py-1 text-(--success)">
                   <Check className="size-3" aria-hidden />

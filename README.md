@@ -91,7 +91,45 @@ el botón ☰ (se cierra con ✕, Escape o clic fuera).
 4. **Revisión de anomalías** — 5 abiertas sembradas; marcar revisada;
    badge = abiertas restantes.
 
-**Flujo de demostración sugerido:** abre ☰ → visita las 4 vistas →
+## Visor de Actas (kit `SUP-4` / `actas-v1`)
+
+El **visor de actas** permite revisar el documento E-14 digitalizado de
+cualquier mesa con transmisión. Es un **modal por estado** (no una ruta —
+ver `docs/DECISIONS.md` D17): el export estático no cambia.
+
+**Entradas (exactamente 3):**
+
+1. Botón VER ACTA (`FileText`) en cada fila de la sub-tabla de mesas
+   (deshabilitado en mesas NO INICIADO — sin transmisión).
+2. Botón VER ACTA en las tarjetas de anomalías — aterriza directamente en
+   PÁGINA 2 cuando la advertencia de la anomalía es de página 2.
+3. Botón 👁 (`Eye`) en la fila del puesto — abre la primera mesa con
+   acta del puesto.
+
+**Qué contiene:** breadcrumb del puesto, navegador de mesas
+`< MESA n/N >` (solo mesas con acta), chip de credencial + hora de
+carga, toggle DELEGADOS/TRANSMISIÓN, conmutador de páginas con badge de
+estado (✓ válida / ⚠ advertencia pulsante / reloj pendiente), documento
+sintético A4 con **zoom (0.5–3.0), rotación (4 posiciones), contraste
+(normal/alto/negativo) y pantalla completa**, y una sidebar con las dos
+acciones del supervisor: **APROBAR Y MARCAR COMO VÁLIDA** y **CONFIRMAR
+RESCANEO** (~2.5 s de spinner, motivo obligatorio), observaciones,
+historial de trazabilidad y nota de auditoría.
+
+**Límites de la demo:** el documento se dibuja como SVG/JSX sintético
+(sin binarios — D18); los datos se derivan de forma determinística por
+seed de la mesa (Roma mesa 1 es exacta al mockup: credencial `#A92-F`).
+Las acciones solo mutan nivel acta + anomalías + notificaciones — los
+contadores de mesa del monitor NO cambian (T5.7). Sin backend y sin
+persistencia (§0-5): recargar la página restablece el estado inicial.
+
+**Flujo de demostración sugerido (visor):** abre Italia → VER ACTA en
+Mesa 001 (credencial `#A92-F`, motivo «SOLICITUD DE RESCANEO», PÁGINA 2
+con sello «FIRMA ILEGIBLE») → escribe una observación → APROBAR (spinner
+→ overlay «ACTA VALIDADA», anomalía revisada) → navega a la Mesa 004 con
+`< MESA n/N >` → CONFIRMAR RESCANEO (caption «VERSIÓN 2 — RECIBIDA…»).
+
+**Flujo de demostración sugerido (dashboard vivo):** abre ☰ → visita las 4 vistas →
 vuelve al Monitor → expande Italia y pulsa REINSPECCIONAR en Mesa 001 →
 espera ~45 s y mira cómo el ticker completa una mesa en vivo → genera y
 descarga un informe.

@@ -233,3 +233,92 @@ Ajuste aplicado (opción ofrecida por el kit):
 - **Estado de lectura/revisión** (marcar leída, marcar todas, marcar
   revisada) es estado de UI del store — sin persistencia (§0-5: el kit
   NO autoriza localStorage).
+
+## D17 — Visor de actas como modal por estado (kit SUP-4 lo lista como D16)
+
+- **Nota de numeración:** el kit SUP-4 («actas-v1») nombra sus decisiones
+  D16–D18, pero **D16 ya estaba usado** por vida-v1 (mergeado en main
+  antes de abrir la rama). Se continúa la numeración: D17/D18/D19
+  corresponde a los D16/D17/D18 del kit. La referencia interna del kit
+  «(D17)» para el documento sintético equivale aquí a **D18**.
+- **Decisión:** el visor de actas es un **modal por estado** (`visorActa`
+  en el store del módulo), NO una ruta (coherente con D11). Cierre por ✕,
+  `Escape` y clic en el scrim; el clic dentro del panel NO cierra. Al
+  cerrar, el componente interno se desmonta: zoom/rotación/contraste/
+  pantalla completa vuelven a su estado inicial en el siguiente uso
+  (T3.1) sin effect de reset. El scroll de fondo se bloquea mientras está
+  abierto (patrón D14). Sin sombras en TODO el modal: jerarquía = borde
+  1px + capas tonales + scrim `bg-black/80 backdrop-blur-sm` — el
+  `shadow-2xl` del mockup Stitch se eliminó.
+- **Puntos de entrada (exactamente 3):** botón VER ACTA (`FileText`) por
+  fila de mesa (deshabilitado en NO_INICIADO, `title="Sin transmisión"`),
+  botón VER ACTA en las tarjetas de anomalías (aterriza en PÁGINA 2
+  cuando la mesa no está COMPLETA — su advertencia es de página 2;
+  deshabilitado sin mesa vinculada) y el 👁 (`Eye`) de la fila de puesto
+  (abre la primera mesa con acta; deshabilitado si el puesto no tiene
+  ninguna). El botón 👁 no existía en vida-v1 (el kit lo da por
+  «ya existente»): se añadió en la celda ESTADO GLOBAL de la fila con
+  `stopPropagation` para no disparar el Collapsible de la fila.
+- **Montaje:** el modal se monta dentro de `datos-provider` (el store del
+  módulo, que sí está en la whitelist); `supervision-shell.tsx` NO se
+  toca.
+
+## D18 — Documento E-14 sintético vectorial (kit lo lista como D17)
+
+- **Decisión:** el documento se DIBUJA con JSX/SVG (`documento-e14.tsx`,
+  papel A4 794×1123 px) — sin assets binarios (§0-8): sin PNG/JPG, sin
+  PDFs, sin `pdf.js`, sin iframes. El zoom (escala 0.5–3.0, pasos 0.25),
+  la rotación (0/90/180/270°) y el contraste (NORMAL/ALTO `contrast(1.5)`/
+  NEGATIVO `invert(1)`) son transform/filtro CSS REALES sobre el papel.
+- **Paleta del papel acotada al documento:** `#f7f6f2` (papel), `#1c1c1c`
+  (tinta), `#c9c5ba` (líneas), `#b3261e` (sello rojo) viven SOLO dentro de
+  `documento-e14.tsx` (excepción acotada del kit §2.1); el resto del
+  visor usa los tokens congelados.
+- **Caja de layout fiel al zoom+rotación:** el wrapper del papel usa una
+  caja de tamaño = bounding box exacta (los giros de 90° intercambian
+  ancho/alto), de modo que el `overflow-auto` del canvas coincide con el
+  tamaño real del documento escalado/rotado.
+- **Determinismo (§0-7):** votos, nombres de delegados, trazos de firma y
+  observaciones se derivan por seed de la mesa (mulberry32 sobre hash
+  FNV-1a — `crearRandomDeterministico` en `domain/acta.ts`). Roma mesa 1
+  es EXACTA al mockup (§0-6): ID `#A92-F`, 14:20 LOCAL, motivo
+  «SOLICITUD DE RESCANEO», P1 VALIDA / P2 ADVERTENCIA, historial
+  14:00/14:18/14:20 con los textos literales.
+- **Export estático intacto:** sin rutas nuevas, sin assets añadidos a
+  `public/` — el build `output: "export"` no cambia (D8).
+
+## D19 — Trazabilidad de acta + acciones con estado (kit lo lista como D18)
+
+- **Patrón vida-v1:** APROBAR Y MARCAR COMO VÁLIDA y CONFIRMAR RESCANEO
+  siguen el patrón de REINSPECCIONAR (D12): spinner ~2.5 s en el botón
+  (ambos deshabilitados) → resolución en el mock → notificación + toast +
+  efectos enlazados. Textos exactos del kit: toast «Acta marcada como
+  válida» / «Rescan confirmado y recibido»; notificaciones «ACTA
+  APROBADA — MESA n (Puesto)» y «RESCANEO COMPLETADO — MESA n (Puesto)».
+- **Motivo obligatorio (T5.2):** textarea OBSERVACIONES vacío → no se
+  ejecuta nada: borde en error + mensaje inline «Ingrese el motivo de la
+  decisión» (sin toast). Tras resolver, la caja queda limpia.
+- **Efectos enlazados:** APROBAR → todas las páginas VALIDA, chip de
+  motivo fuera, evento «APROBADA POR SUPERVISOR» (nivel APROBADA → punto
+  primary en la timeline, color nuevo permitido por el kit T5.5), overlay
+  «ACTA VALIDADA» y la anomalía abierta vinculada (mismo puesto+mesa)
+  pasa a revisada (badge incluido). RESCANEO → versión 1→2, hora de carga
+  +30 min determinísticos, páginas VALIDA, evento «RESCANEO CONFIRMADO»,
+  caption «VERSIÓN 2 — RECIBIDA hh:mm LOCAL». Los CONTADORES de mesa
+  (delegados/transmisión) NO cambian: el visor solo muta nivel acta +
+  anomalías + notificaciones (T5.7).
+- **Contrato:** el acta SIEMPRE llega por `SupervisionRepository`
+  (`getActaDeMesa`, ~400 ms; §0-9). Firma `(puestoId, mesaId)` — los ids
+  de mesa se repiten entre puestos (mismo patrón que
+  `resolverRescaneo(puestoId, mesaId)`); la variante de 1 argumento del
+  kit es imposible de resolver con 20 puestos y se declaró en el REPORTE.
+- **Semántica snapshot:** el acta se genera al primer acceso desde el
+  estado VIGENTE de la mesa y queda en memoria; después solo las acciones
+  del visor la mutan (es un documento histórico, no una vista derivada).
+- **Mapeos derivados documentados** (kit ambiguo, resolución registrada
+  en el REPORTE): el «CRÍTICO» de mesa es INCOMPLETO; el «mesa PENDIENTE»
+  del kit se interpreta como mesas EN_PROCESO de puestos PENDIENTE (P2
+  PENDIENTE, sin motivo); chip de motivo solo con alerta «Rescaneo»
+  vigente; DELEGADOS (página única) VALIDA si ambas partes de delegados
+  están ok; «DELEGADOS ACREDITADOS: n/16» = 2 partes ok → 16, 1 → 8,
+  0 → 0; N del navegador MESA n/N = mesas CON acta del puesto (T3.3).
