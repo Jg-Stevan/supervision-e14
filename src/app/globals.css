@@ -1,159 +1,26 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-
-@custom-variant dark (&:is(.dark *));
-
-/*
- * TEMA — SOLO DARK (kit SUP-1 §2.1, fuente: DESIGN.md)
- * Superficies verdosas oscuras + acento interactivo verde.
- * PROHIBIDO azules/índigos. PROHIBIDAS sombras: la jerarquía es
- * solo bordes 1px + capas tonales; hover = cambio de background.
- */
 
 :root {
-  /* Superficies */
-  --background: #0e1414; /* surface / background */
-  --foreground: #dee4e3; /* on-surface */
-  --card: #171d1d; /* surface-container-low */
-  --card-foreground: #dee4e3;
-  --popover: #1b2121; /* surface-container */
-  --popover-foreground: #dee4e3;
-
-  /* Interacción */
-  --primary: #3fe56c; /* acento interactivo */
-  --primary-foreground: #0e1414;
-  --secondary: #303636; /* surface-container-highest */
-  --secondary-foreground: #dee4e3;
-  --muted: #252b2b; /* surface-container-high */
-  --muted-foreground: #bbcbb8; /* on-surface-variant */
-  --accent: #252b2b;
-  --accent-foreground: #dee4e3;
-
-  /* Estado (semántica del sistema, kit §2.1) */
-  --destructive: #93000a; /* error-container */
-  --success: #00c853; /* COMPLETO / OK */
-  --warning: #ffd600; /* PENDIENTE / EN PROCESO (ámbar puro del spec) */
-  --danger: #ff5252; /* CRÍTICO / INCOMPLETO */
-  --neutral-state: #869583; /* NO INICIADO / neutral (outline) */
-  --error-text: #ff8d87; /* tertiary-container: texto/acentos de error */
-
-  /* Bordes e inputs */
-  --border: #242e2e; /* bordes de tabla/tarjetas (spec de componentes) */
-  --input: #121919; /* fondo del input */
-  --ring: #3fe56c; /* focus 1px */
-
-  /* Superficies adicionales del kit */
-  --surface-lowest: #090f0f; /* superficies hundidas (sub-tabla de mesas) */
-  --surface: #1b2121; /* paneles */
-  --surface-high: #252b2b;
-  --surface-highest: #303636; /* hover de tarjetas */
-  --outline-strong: #869583; /* bordes destacados */
-  --outline-variant: #3c4a3c; /* bordes sutiles */
-  --hover-row: #1a2323; /* hover de filas */
-
-  --radius: 0.25rem;
+  --background: #ffffff;
+  --foreground: #171717;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-danger: var(--danger);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-
-  /* Radio 4px en TODO (cards, botones, inputs, badges) — kit §2.3 */
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: var(--radius);
-  --radius-xl: var(--radius);
-
-  /* Fuentes: estructura = Hanken Grotesk, datos = JetBrains Mono */
-  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  html {
-    color-scheme: dark;
-  }
-  body {
-    @apply bg-background text-foreground;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
   }
 }
 
-/* ============================================================
-   Tipografía del sistema (kit §2.2)
-   Estructura: Hanken Grotesk — Datos: JetBrains Mono.
-   Móvil: headline-lg 20px, stats-number 22px.
-   ============================================================ */
-@layer utilities {
-  .headline-lg {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
-  .headline-md {
-    font-size: 18px;
-    line-height: 24px;
-    font-weight: 600;
-  }
-  .label-caps {
-    font-size: 11px;
-    line-height: 16px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .stats-number {
-    font-family: var(--font-jetbrains), ui-monospace, monospace;
-    font-size: 28px;
-    line-height: 32px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-  .body-lg {
-    font-family: var(--font-jetbrains), ui-monospace, monospace;
-    font-size: 14px;
-    line-height: 20px;
-    font-weight: 500;
-  }
-  .body-md {
-    font-family: var(--font-jetbrains), ui-monospace, monospace;
-    font-size: 12px;
-    line-height: 18px;
-    font-weight: 400;
-  }
-  .font-data {
-    font-family: var(--font-jetbrains), ui-monospace, monospace;
-  }
-  @media (max-width: 1023px) {
-    .headline-lg {
-      font-size: 20px;
-      line-height: 28px;
-    }
-    .stats-number {
-      font-size: 22px;
-      line-height: 28px;
-    }
-  }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
 }
