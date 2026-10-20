@@ -55,3 +55,20 @@ src/modules/supervision/
   “Función de demostración — sin backend”.
 - Las entradas de sidebar distintas de Monitor Global no navegan
   (tooltip “Próximamente”).
+
+## Ver en GitHub Pages
+
+- URL (disponible tras el merge de este PR):
+  **https://jg-stevan.github.io/supervision-e14/**
+- **Cómo funciona el export estático:** `next.config.ts` usa
+  `output: "export"` con `basePath` inyectado por env
+  (`NEXT_PUBLIC_BASE_PATH=/supervision-e14` SOLO en el build de Actions —
+  ver `docs/DECISIONS.md` D8). El workflow
+  `.github/workflows/pages.yml` corre `bun install` → `next typegen` →
+  `next build`, sube `out/` como artefacto y lo despliega con
+  `actions/deploy-pages`. `public/.nojekyll` evita que GitHub Pages
+  ignore `_next/`. Se activa con cada push a `main` (o manualmente con
+  `workflow_dispatch`).
+- **Build estático sin sorpresas:** sin env el build genera rutas de raíz
+  (`/_next/...`, verificado), y el `bun run dev` local sigue funcionando
+  en raíz sin basePath.
