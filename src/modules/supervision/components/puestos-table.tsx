@@ -24,7 +24,9 @@ const ENCABEZADOS = [
   "Zona",
   "Puesto",
   "# Mesas",
-  "Hora cierre Colombia",
+  // D10 — abreviado (kit SUP-2 §2 lo permite): la cabecera completa
+  // «Hora cierre Colombia» (158px) obligaba a scroll horizontal a 1440px.
+  "Cierre COL",
   "Hora actual",
   "Tiempo",
   "E-14 deleg.",
@@ -32,13 +34,16 @@ const ENCABEZADOS = [
   "Estado global",
 ] as const;
 
+// D10 — px-1.5 compacta el padding horizontal (override del px-2 de ui/table
+// vía tailwind-merge): a 1440px con sidebar de 256px las 10 columnas caben
+// sin scroll horizontal (hallazgo de auditoría SUP-2 §2).
 const TH =
-  "label-caps sticky top-0 z-10 h-12 border-b border-border bg-card text-muted-foreground whitespace-nowrap";
+  "label-caps sticky top-0 z-10 h-12 border-b border-border bg-card text-muted-foreground whitespace-nowrap px-1.5";
 
 /** Mini barra de progreso 4px (track #242e2e, relleno del color de estado). */
 function MiniProgreso({ pct, color }: { pct: number; color: string }) {
   return (
-    <div className="flex min-w-28 items-center gap-2">
+    <div className="flex min-w-24 items-center gap-1.5">
       <div
         className="h-1 flex-1 overflow-hidden rounded-full bg-(--border)"
         role="progressbar"
@@ -51,7 +56,7 @@ function MiniProgreso({ pct, color }: { pct: number; color: string }) {
           style={{ width: `${pct}%`, backgroundColor: color }}
         />
       </div>
-      <span className="body-md w-10 text-right">{pct}%</span>
+      <span className="body-md w-9 text-right">{pct}%</span>
     </div>
   );
 }
@@ -147,7 +152,7 @@ function PuestoRow({
             style={{ borderLeft: `4px solid ${acento}` }}
             aria-expanded={abierto}
           >
-            <TableCell className="body-md font-medium whitespace-nowrap">
+            <TableCell className="body-md px-1.5 font-medium whitespace-nowrap">
               <span className="inline-flex items-center gap-1.5">
                 <ChevronDown
                   className={cn(
@@ -159,29 +164,29 @@ function PuestoRow({
                 {puesto.codigoPais} - {puesto.pais}
               </span>
             </TableCell>
-            <TableCell className="body-md">{puesto.zona}</TableCell>
-            <TableCell className="body-md whitespace-nowrap">
+            <TableCell className="body-md px-1.5">{puesto.zona}</TableCell>
+            <TableCell className="body-md px-1.5 whitespace-nowrap">
               {puesto.puesto}
             </TableCell>
-            <TableCell className="body-md text-right">{puesto.numeroMesas}</TableCell>
-            <TableCell className="body-md whitespace-nowrap">
+            <TableCell className="body-md px-1.5 text-right">{puesto.numeroMesas}</TableCell>
+            <TableCell className="body-md px-1.5 whitespace-nowrap">
               {puesto.horaCierreColombia}
             </TableCell>
-            <TableCell className="body-md">
-              <span className="inline-block rounded-[4px] border border-(--success) px-2 py-0.5 whitespace-nowrap">
+            <TableCell className="body-md px-1.5">
+              <span className="inline-block rounded-[4px] border border-(--success) px-1.5 py-0.5 whitespace-nowrap">
                 {puesto.horaActualLocal}
               </span>
             </TableCell>
-            <TableCell className="body-md whitespace-nowrap text-muted-foreground">
+            <TableCell className="body-md px-1.5 whitespace-nowrap text-muted-foreground">
               {puesto.diferenciaTiempo}
             </TableCell>
-            <TableCell className="text-right">
+            <TableCell className="text-right px-1.5">
               <MiniProgreso pct={puesto.pctDelegado} color={acento} />
             </TableCell>
-            <TableCell className="text-right">
+            <TableCell className="text-right px-1.5">
               <MiniProgreso pct={puesto.pctTransmision} color={acento} />
             </TableCell>
-            <TableCell className="text-right">
+            <TableCell className="text-right px-1.5">
               <StatusBadge estado={puesto.estadoGlobal} />
             </TableCell>
           </TableRow>
