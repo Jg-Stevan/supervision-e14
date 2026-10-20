@@ -1,10 +1,11 @@
 "use client";
 
-import { AlertTriangle, Check, Clock, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, Clock, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 import type { AccionMesa, EstadoDelegado, Mesa } from "../domain/types";
 import { StatusBadge } from "./status-badge";
+import { useDatos } from "./datos-provider";
 
 const ETIQUETAS_ACCION: Record<AccionMesa, string> = {
   reinspeccionar: "Reinspeccionar",
@@ -57,6 +58,10 @@ function ChipParte({
  *   recalcula mesa y puesto, agrega notificación + toast (el store lo
  *   hace; aquí solo se desencadena y se muestra el estado de carga).
  * - NOTIFICAR: agrega notificación + toast; la mesa NO cambia.
+ *
+ * KIT SUP-4 T3.4: botón fantasma VER ACTA (FileText) por fila — abre el
+ * visor en TRANSMISIÓN página 1; deshabilitado en mesas sin transmisión
+ * (NO_INICIADO) con title "Sin transmisión".
  */
 export function MesasSubtable({
   mesas,
@@ -72,6 +77,7 @@ export function MesasSubtable({
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
   onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }) {
+  const { abrirVisor } = useDatos();
   if (mesas.length === 0) {
     return (
       <div className="bg-(--surface-lowest) px-4 py-4">
@@ -141,31 +147,49 @@ export function MesasSubtable({
                   {mesa.ultimaCarga ?? "—"}
                 </td>
                 <td className="py-2.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={enAccion || mesaEnAccionId !== null}
-                    className={cn(
-                      "label-caps h-11 w-36 border px-3 shadow-none hover:bg-transparent disabled:opacity-70",
-                      esReinspeccion
-                        ? "border-(--danger) text-(--danger) hover:bg-(--danger)/10"
-                        : "border-(--warning) text-(--warning) hover:bg-(--warning)/10"
-                    )}
-                    onClick={() =>
-                      esReinspeccion
-                        ? void onReinspeccionar(puestoId, mesa.id)
-                        : void onNotificar(puestoId, mesa.id)
-                    }
-                  >
-                    {enAccion ? (
-                      <>
-                        <Loader2 className="size-4 animate-spin" aria-hidden />
-                        Procesando…
-                      </>
-                    ) : (
-                      ETIQUETAS_ACCION[mesa.accionSugerida]
-                    )}
-                  </Button>
+                  <span className="flex items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={enAccion || mesaEnAccionId !== null}
+                      className={cn(
+                        "label-caps h-11 w-36 border px-3 shadow-none hover:bg-transparent disabled:opacity-70",
+                        esReinspeccion
+                          ? "border-(--danger) text-(--danger) hover:bg-(--danger)/10"
+                          : "border-(--warning) text-(--warning) hover:bg-(--warning)/10"
+                      )}
+                      onClick={() =>
+                        esReinspeccion
+                          ? void onReinspeccionar(puestoId, mesa.id)
+                          : void onNotificar(puestoId, mesa.id)
+                      }
+                    >
+                      {enAccion ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" aria-hidden />
+                          Procesando…
+                        </>
+                      ) : (
+                        ETIQUETAS_ACCION[mesa.accionSugerida]
+                      )}
+                    </Button>
+                    {/* KIT SUP-4 — VER ACTA (punto de entrada 1/3). */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-11 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      disabled={mesa.estadoMesa === "NO_INICIADO"}
+                      title={
+                        mesa.estadoMesa === "NO_INICIADO"
+                          ? "Sin transmisión"
+                          : "Ver acta"
+                      }
+                      aria-label={`Ver acta de la mesa ${mesa.id}`}
+                      onClick={() => abrirVisor(puestoId, mesa.id)}
+                    >
+                      <FileText className="size-4" aria-hidden />
+                    </Button>
+                  </span>
                 </td>
               </tr>
             );

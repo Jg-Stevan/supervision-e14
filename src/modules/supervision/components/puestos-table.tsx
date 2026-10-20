@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Eye } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -17,6 +17,7 @@ import { cn } from "cn";
 import type { Mesa, Puesto } from "../domain/types";
 import { colorDeEstado, StatusBadge } from "./status-badge";
 import { MesasSubtable } from "./mesas-subtable";
+import { useDatos } from "./datos-provider";
 
 const ENCABEZADOS = [
   "País",
@@ -164,6 +165,11 @@ function PuestoRow({
   onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }) {
   const acento = colorDeEstado(puesto.estadoGlobal);
+  const { abrirVisorDePuesto } = useDatos();
+  // KIT SUP-4 T3.4 — el 👁 abre el visor en la primera mesa CON acta del
+  // puesto; deshabilitado si el puesto no tiene ninguna (todas
+  // NO_INICIADO).
+  const tieneActa = mesas.some((m) => m.estadoMesa !== "NO_INICIADO");
   return (
     <Collapsible open={abierto} onOpenChange={(v) => v !== abierto && onToggle()} asChild>
       <tbody>
@@ -208,7 +214,25 @@ function PuestoRow({
               <MiniProgreso pct={puesto.pctTransmision} color={acento} />
             </TableCell>
             <TableCell className="text-right px-1.5">
-              <StatusBadge estado={puesto.estadoGlobal} />
+              <span className="flex items-center justify-end gap-1">
+                <StatusBadge estado={puesto.estadoGlobal} />
+                {/* KIT SUP-4 — 👁 abre el visor (punto de entrada 3/3).
+                    stopPropagation: la fila completa es el trigger del
+                    Collapsible y el clic NO debe expandir/colapsar. */}
+                <button
+                  type="button"
+                  disabled={!tieneActa}
+                  title={tieneActa ? "Ver acta del puesto" : "Sin acta"}
+                  aria-label={`Ver acta del puesto ${puesto.puesto}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    abrirVisorDePuesto(puesto.id);
+                  }}
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary) disabled:pointer-events-none disabled:opacity-40"
+                >
+                  <Eye className="size-4" aria-hidden />
+                </button>
+              </span>
             </TableCell>
           </TableRow>
         </CollapsibleTrigger>
