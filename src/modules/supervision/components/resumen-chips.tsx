@@ -1,8 +1,21 @@
+"use client";
+
 import { Check, Clock, Zap } from "lucide-react";
 import type { ResumenGlobal } from "../domain/types";
 
-/** Barra "RESUMEN DE ESTADO" con chips de tint 10% (kit §2.4). */
-export function ResumenChips({ resumen }: { resumen: ResumenGlobal }) {
+/**
+ * Barra "RESUMEN DE ESTADO" con chips de tint 10% (kit SUP-1 §2.4).
+ * KIT SUP-3 T3: añade el ticker "Sincronizado hace Xs" (mono) — la vida
+ * del dashboard corre DESPUÉS de cargar; el estado inicial (D6) intacto.
+ */
+export function ResumenChips({
+  resumen,
+  sincronizadoHace,
+}: {
+  resumen: ResumenGlobal;
+  /** Texto del ticker (p. ej. "Sincronizado hace 15s"). */
+  sincronizadoHace?: string;
+}) {
   const chips = [
     {
       Icono: Zap,
@@ -25,7 +38,18 @@ export function ResumenChips({ resumen }: { resumen: ResumenGlobal }) {
   ];
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-border bg-card px-4 py-3">
-      <p className="label-caps text-muted-foreground">Resumen de estado</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="label-caps text-muted-foreground">Resumen de estado</p>
+        {sincronizadoHace && (
+          <p
+            className="font-data text-[11px] text-muted-foreground"
+            role="status"
+            aria-live="off"
+          >
+            {sincronizadoHace}
+          </p>
+        )}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {chips.map(({ Icono, etiqueta, valor, color }) => (
           <span

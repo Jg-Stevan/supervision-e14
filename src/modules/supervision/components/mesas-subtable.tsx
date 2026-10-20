@@ -1,13 +1,10 @@
 "use client";
 
-import { toast } from "sonner";
-import { AlertTriangle, Check, Clock } from "lucide-react";
+import { AlertTriangle, Check, Clock, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 import type { AccionMesa, EstadoDelegado, Mesa } from "../domain/types";
 import { StatusBadge } from "./status-badge";
-
-const MENSAJE_DEMO = "Función de demostración — sin backend";
 
 const ETIQUETAS_ACCION: Record<AccionMesa, string> = {
   reinspeccionar: "Reinspeccionar",
@@ -52,10 +49,29 @@ function ChipParte({
 }
 
 /**
- * Sub-tabla de mesas de un puesto expandido (kit §2.4).
- * Fondo hundido (surface-lowest). Acciones → toast de demostración.
+ * Sub-tabla de mesas de un puesto expandido (kit SUP-1 §2.4).
+ * Fondo hundido (surface-lowest).
+ *
+ * KIT SUP-3 T4: las acciones ahora tienen ESTADO real (mock):
+ * - REINSPECCIONAR: spinner ~2.5 s → resuelve el alerta "Rescaneo",
+ *   recalcula mesa y puesto, agrega notificación + toast (el store lo
+ *   hace; aquí solo se desencadena y se muestra el estado de carga).
+ * - NOTIFICAR: agrega notificación + toast; la mesa NO cambia.
  */
-export function MesasSubtable({ mesas }: { mesas: Mesa[] }) {
+export function MesasSubtable({
+  mesas,
+  puestoId,
+  mesaEnAccionId,
+  onReinspeccionar,
+  onNotificar,
+}: {
+  mesas: Mesa[];
+  puestoId: string;
+  /** Mesa con acción en curso (spinner en SU botón). */
+  mesaEnAccionId: string | null;
+  onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
+}) {
   if (mesas.length === 0) {
     return (
       <div className="bg-(--surface-lowest) px-4 py-4">
@@ -92,51 +108,68 @@ export function MesasSubtable({ mesas }: { mesas: Mesa[] }) {
           </tr>
         </thead>
         <tbody>
-          {mesas.map((mesa) => (
-            <tr key={mesa.id} className="border-b border-border last:border-b-0">
-              <td className="body-md py-2.5 pr-4">{mesa.id}</td>
-              <td className="py-2.5 pr-4">
-                <span className="flex items-center gap-1.5">
-                  <ChipParte etiqueta="P1" estado={mesa.delegados.p1} />
-                  <ChipParte etiqueta="P2" estado={mesa.delegados.p2} />
-                </span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <span className="flex items-center gap-1.5">
-                  <ChipParte
-                    etiqueta="P1"
-                    estado={mesa.transmision.p1.estado}
-                  />
-                  <ChipParte
-                    etiqueta="P2"
-                    estado={mesa.transmision.p2.estado}
-                    alerta={mesa.transmision.p2.alerta}
-                  />
-                </span>
-              </td>
-              <td className="py-2.5 pr-4">
-                <StatusBadge estado={mesa.estadoMesa} />
-              </td>
-              <td className="body-md py-2.5 pr-4 whitespace-nowrap text-muted-foreground">
-                {mesa.ultimaCarga ?? "—"}
-              </td>
-              <td className="py-2.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    "label-caps h-11 border px-3 shadow-none hover:bg-transparent",
-                    mesa.accionSugerida === "reinspeccionar"
-                      ? "border-(--danger) text-(--danger) hover:bg-(--danger)/10"
-                      : "border-(--warning) text-(--warning) hover:bg-(--warning)/10"
-                  )}
-                  onClick={() => toast(MENSAJE_DEMO)}
-                >
-                  {ETIQUETAS_ACCION[mesa.accionSugerida]}
-                </Button>
-              </td>
-            </tr>
-          ))}
+          {mesas.map((mesa) => {
+            const enAccion = mesaEnAccionId === mesa.id;
+            const esReinspeccion = mesa.accionSugerida === "reinspeccionar";
+            return (
+              <tr key={mesa.id} className="border-b border-border last:border-b-0">
+                <td className="body-md py-2.5 pr-4">{mesa.id}</td>
+                <td className="py-2.5 pr-4">
+                  <span className="flex items-center gap-1.5">
+                    <ChipParte etiqueta="P1" estado={mesa.delegados.p1} />
+                    <ChipParte etiqueta="P2" estado={mesa.delegados.p2} />
+                  </span>
+                </td>
+                <td className="py-2.5 pr-4">
+                  <span className="flex items-center gap-1.5">
+                    <ChipParte
+                      etiqueta="P1"
+                      estado={mesa.transmision.p1.estado}
+                      alerta={mesa.transmision.p1.alerta}
+                    />
+                    <ChipParte
+                      etiqueta="P2"
+                      estado={mesa.transmision.p2.estado}
+                      alerta={mesa.transmision.p2.alerta}
+                    />
+                  </span>
+                </td>
+                <td className="py-2.5 pr-4">
+                  <StatusBadge estado={mesa.estadoMesa} />
+                </td>
+                <td className="body-md py-2.5 pr-4 whitespace-nowrap text-muted-foreground">
+                  {mesa.ultimaCarga ?? "—"}
+                </td>
+                <td className="py-2.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={enAccion || mesaEnAccionId !== null}
+                    className={cn(
+                      "label-caps h-11 w-36 border px-3 shadow-none hover:bg-transparent disabled:opacity-70",
+                      esReinspeccion
+                        ? "border-(--danger) text-(--danger) hover:bg-(--danger)/10"
+                        : "border-(--warning) text-(--warning) hover:bg-(--warning)/10"
+                    )}
+                    onClick={() =>
+                      esReinspeccion
+                        ? void onReinspeccionar(puestoId, mesa.id)
+                        : void onNotificar(puestoId, mesa.id)
+                    }
+                  >
+                    {enAccion ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" aria-hidden />
+                        Procesando…
+                      </>
+                    ) : (
+                      ETIQUETAS_ACCION[mesa.accionSugerida]
+                    )}
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

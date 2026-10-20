@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/table";
 import { cn } from "cn";
 import type { Mesa, Puesto } from "../domain/types";
-import { mockSupervisionRepository } from "../data/mock-repository";
 import { colorDeEstado, StatusBadge } from "./status-badge";
 import { MesasSubtable } from "./mesas-subtable";
 
@@ -63,11 +62,24 @@ function MiniProgreso({ pct, color }: { pct: number; color: string }) {
 
 interface PuestosTableProps {
   puestos: Puesto[];
+  /** Mesas del store del shell (kit SUP-3 T4 — ya no se piden al repo
+   * directamente desde la fila: los datos viven en el store cliente). */
+  mesasPorPuesto: Record<string, Mesa[]>;
   /** Fila expandida por defecto (Italia, primera del mock). */
   expandidoInicialId?: string;
+  mesaEnAccionId: string | null;
+  onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }
 
-export function PuestosTable({ puestos, expandidoInicialId }: PuestosTableProps) {
+export function PuestosTable({
+  puestos,
+  mesasPorPuesto,
+  expandidoInicialId,
+  mesaEnAccionId,
+  onReinspeccionar,
+  onNotificar,
+}: PuestosTableProps) {
   const [expandidos, setExpandidos] = useState<Set<string>>(
     () => new Set(expandidoInicialId ? [expandidoInicialId] : [])
   );
@@ -121,9 +133,12 @@ export function PuestosTable({ puestos, expandidoInicialId }: PuestosTableProps)
           <PuestoRow
             key={puesto.id}
             puesto={puesto}
-            mesas={mockSupervisionRepository.getMesasDePuesto(puesto.id)}
+            mesas={mesasPorPuesto[puesto.id] ?? []}
             abierto={expandidos.has(puesto.id)}
             onToggle={() => toggle(puesto.id)}
+            mesaEnAccionId={mesaEnAccionId}
+            onReinspeccionar={onReinspeccionar}
+            onNotificar={onNotificar}
           />
         ))}
       </table>
@@ -136,11 +151,17 @@ function PuestoRow({
   mesas,
   abierto,
   onToggle,
+  mesaEnAccionId,
+  onReinspeccionar,
+  onNotificar,
 }: {
   puesto: Puesto;
   mesas: Mesa[];
   abierto: boolean;
   onToggle: () => void;
+  mesaEnAccionId: string | null;
+  onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }) {
   const acento = colorDeEstado(puesto.estadoGlobal);
   return (
@@ -195,7 +216,13 @@ function PuestoRow({
         <CollapsibleContent asChild>
           <TableRow className="hover:bg-transparent border-b border-border">
             <TableCell colSpan={ENCABEZADOS.length} className="p-0">
-              <MesasSubtable mesas={mesas} />
+              <MesasSubtable
+                mesas={mesas}
+                puestoId={puesto.id}
+                mesaEnAccionId={mesaEnAccionId}
+                onReinspeccionar={onReinspeccionar}
+                onNotificar={onNotificar}
+              />
             </TableCell>
           </TableRow>
         </CollapsibleContent>
