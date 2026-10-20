@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# supervision-e14
 
-## Getting Started
+**Sistema de Monitoreo Electoral E-14** — módulo de monitoreo y auditoría de
+votaciones en el exterior. Pantalla actual: **Monitor Global** (kit
+`SUP-1` / `fundacion-v1`).
 
-First, run the development server:
+## Stack
+
+- Next.js 16 (App Router) + TypeScript estricto
+- Tailwind CSS 4 + shadcn/ui (estilo New York) + lucide-react
+- Tema **solo dark** (tokens en `src/app/globals.css`)
+- Fuentes vía `next/font`: Hanken Grotesk (estructura) + JetBrains Mono (datos)
+- Estado: `useState`/`useMemo` (sin librerías extra)
+
+## Cómo correr
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
+bun run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Arquitectura
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Frontera de módulo dura:** TODO el código del producto vive en
+`src/modules/supervision/**`. Fuera de esa carpeta solo hay scaffolding y
+config. El módulo se **trasplantará** al monorepo del digitalizador cuando
+madure; ningún archivo externo importa nada del módulo.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**Datos siempre detrás de una interfaz:**
 
-## Learn More
+```
+src/modules/supervision/
+├── domain/types.ts                  # contrato de dominio (sin dependencias)
+├── data/supervision-repository.ts   # interfaz SupervisionRepository
+├── data/mock-repository.ts          # implementación mock (20 puestos demo)
+└── components/                      # shell + Monitor Global
+```
 
-To learn more about Next.js, take a look at the following resources:
+> **Punto de intercambio:** en la integración al digitalizador se reemplaza
+> `mockSupervisionRepository` por la implementación real. Nada más cambia.
+> El resto de la app nunca consume datos directo: solo habla con la interfaz.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Plan de integración futura (al monorepo del digitalizador)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Mover `src/modules/supervision/**` tal cual.
+2. Crear la implementación real de `SupervisionRepository` contra los datos
+   del digitalizador y sustituir el mock en el único punto de consumo.
+3. Ajustar tokens de tema si el monorepo ya define los suyos.
+4. Nada del shell/pantalla cambia: la frontera está diseñada para eso.
 
-## Deploy on Vercel
+## Estado del demo
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Todo dato en pantalla viene del mock (`mock-repository.ts`).
+- Los botones de acción muestran el toast
+  “Función de demostración — sin backend”.
+- Las entradas de sidebar distintas de Monitor Global no navegan
+  (tooltip “Próximamente”).
