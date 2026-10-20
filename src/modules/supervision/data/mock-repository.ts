@@ -23,6 +23,11 @@ import type {
   ResumenGlobal,
 } from "../domain/types";
 import type { SupervisionRepository } from "./supervision-repository";
+import {
+  aprobarActaMock,
+  confirmarRescanActaMock,
+  obtenerActa,
+} from "./actas-mock";
 
 /** Supervisor de la sesión (header del mockup). */
 export const SUPERVISOR = {
@@ -786,5 +791,58 @@ export const mockSupervisionRepository: SupervisionRepository = {
       puestoCompletado:
         estadoAntes !== "COMPLETO" && puesto.estadoGlobal === "COMPLETO",
     };
+  },
+
+  // ── KIT SUP-4 (actas-v1) — el acta llega por el repositorio (§0-9) ──────
+
+  async getActaDeMesa(puestoId: string, mesaId: string) {
+    const puesto = puestoPorId(puestoId);
+    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+    // null = mesa sin transmisión (NO_INICIADO) o inexistente.
+    return conLatencia(puesto && mesa ? obtenerActa(mesa, puesto) : null);
+  },
+
+  async aprobarActa(actaId: string, observacion: string) {
+    await esperar(LATENCIA_REINSPECCION_MS);
+    const acta = aprobarActaMock(actaId, observacion);
+    if (!acta) return null;
+    const puesto = puestoPorId(acta.puestoId);
+    const etiquetaPuesto = puesto ? `${puesto.pais} — ${puesto.puesto}` : acta.puestoId;
+    // T5.3 — notificación nueva (plantilla 1/2 del kit).
+    const notificacion = crearNotificacion(
+      "sistema",
+      `ACTA APROBADA — MESA ${acta.mesaId} (${etiquetaPuesto})`
+    );
+    NOTIFICACIONES.unshift(notificacion);
+    // T5.3 — anomalía vinculada abierta pasa a revisada (badge incluido).
+    const vinculada = ANOMALIAS.find(
+      (a) =>
+        !a.revisada && a.puestoId === acta.puestoId && a.mesaId === acta.mesaId
+    );
+    const anomalia = vinculada
+      ? (() => {
+          vinculada.revisada = true;
+          return { ...vinculada };
+        })()
+      : undefined;
+    return { acta, notificacion: { ...notificacion }, anomalia };
+  },
+
+  async confirmarRescanActa(actaId: string, _observacion: string) {
+    // La observación es OBLIGATORIA (T5.2) pero el kit no la imprime en el
+    // evento/notificación del rescan (textos exactos de T5.4) — queda en la
+    // auditoría del visor.
+    await esperar(LATENCIA_REINSPECCION_MS);
+    const acta = confirmarRescanActaMock(actaId, _observacion);
+    if (!acta) return null;
+    const puesto = puestoPorId(acta.puestoId);
+    const etiquetaPuesto = puesto ? `${puesto.pais} — ${puesto.puesto}` : acta.puestoId;
+    // T5.4 — notificación nueva (plantilla 2/2 del kit).
+    const notificacion = crearNotificacion(
+      "rescaneo",
+      `RESCANEO COMPLETADO — MESA ${acta.mesaId} (${etiquetaPuesto})`
+    );
+    NOTIFICACIONES.unshift(notificacion);
+    return { acta, notificacion: { ...notificacion } };
   },
 };
