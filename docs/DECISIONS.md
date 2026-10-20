@@ -100,3 +100,53 @@ Ajuste aplicado (opción ofrecida por el kit):
     `@tailwindcss/postcss` (ambos archivos están en la whitelist) para que
     el CLI de shadcn valide. `bun.lock` y `next-env.d.ts` se incluyen como
     artefactos estándar del scaffold T0.2.
+
+## D8 — Export estático para GitHub Pages con basePath por env
+
+- **Decisión:** `next.config.ts` pasa a `output: "export"` con
+  `basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? ""`,
+  `images: { unoptimized: true }` y `trailingSlash: true` (kit SUP-2 §3 T3,
+  snippet literal).
+- **Por qué:** Pages sirve el sitio en subpath `/supervision-e14/`; el env
+  inyecta ese basePath SOLO en el build de Actions. Sin el env (dev/build
+  local) la app sigue en raíz — el `bun run dev` local NO cambia (regla
+  §0-6, verificada: GET / 200 tras el cambio).
+- **Nota honesta:** el snippet del kit reemplazó los flags del scaffold
+  (`cacheComponents: true`, `partialPrefetching: true`). Con
+  `output: "export"` el sitio es 100% estático (mock repository, sin API
+  routes — regla §0-7), así que esos flags no tienen efecto visible en este
+  demo; se siguió el snippet del kit VERBATIM por alcance cerrado.
+- **`.nojekyll`:** archivo vacío en `public/` — sin él, GitHub Pages ignora
+  `_next/` (Jekyll). Crítico para el subpath.
+
+## D9 — `LayoutProps<"/">` → `Readonly<{ children: React.ReactNode }>`
+
+- **Hallazgo (auditoría SUP-2 §2):** `LayoutProps` es un tipo global que
+  Next 16 genera en `.next/types` (typegen); en clone fresco
+  `bunx tsc --noEmit` directo fallaba con `TS2304: Cannot find name
+  'LayoutProps'`.
+- **Fix:** firma estándar de Next `Readonly<{ children: React.ReactNode }>`
+  en `src/app/layout.tsx` (kit T1, literal).
+- **Verificación:** `rm -rf .next && bunx tsc --noEmit` → **0 errores sin
+  typegen** en clone fresco (§4.1). El workflow de Pages conserva
+  `bunx next typegen` como cinturón adicional (no es bloqueante).
+
+## D10 — Tabla de puestos completa a 1440px sin scroll horizontal
+
+- **Hallazgo (auditoría SUP-2 §2):** a 1440×900 con sidebar de 256px, la
+  tabla maestra requería scroll horizontal para alcanzar ESTADO GLOBAL
+  (medido antes del fix: `scrollWidth 1245` vs `clientWidth 1134` → exceso
+  de **111px**).
+- **Técnica (todas permitidas por el kit T2, solo en el módulo):**
+  1. Padding horizontal de celdas `px-1.5` (override del `p-2`/`px-2` de
+     ui/table vía tailwind-merge) en los 10 `th` y `td` de la fila.
+  2. Mini-barras de progreso compactadas: `min-w-28→min-w-24`,
+     etiqueta % `w-10→w-9`, `gap-2→gap-1.5`.
+  3. Chip de hora actual `px-2→px-1.5`.
+  4. Encabezado «Hora cierre Colombia» → «Cierre COL» (abreviatura
+     autorizada por el kit: era la columna más ancha, 158px).
+- **Verificación (medido):** 1440×900 → `scrollWidth 1134` =
+  `clientWidth 1134` → **exceso 0** (tabla COMPLETA hasta ESTADO GLOBAL).
+  1280×800 → exceso 123px (scroll horizontal residual aceptable por el
+  kit por debajo de 1440). Legibilidad y tokens intactos (interacciones
+  verificadas en el preview estático).
