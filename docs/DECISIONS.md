@@ -150,3 +150,86 @@ Ajuste aplicado (opción ofrecida por el kit):
   1280×800 → exceso 123px (scroll horizontal residual aceptable por el
   kit por debajo de 1440). Legibilidad y tokens intactos (interacciones
   verificadas en el preview estático).
+
+## D11 — Vistas por estado interno del shell (NO rutas nuevas)
+
+- **Decisión:** Monitor Global / Centro de Notificaciones / Generar
+  Informes / Revisión de Anomalías se cambian con estado interno del
+  `SupervisionShell` (`vista: "monitor" | "notificaciones" | "anomalias" |
+  "informes"`), no con rutas (kit SUP-3 T5/T6/T7).
+- **Por qué:** el export estático sigue siendo trivial (una sola página,
+  `output: "export"` intacto) y la frontera de módulo no se abre.
+- **`page.tsx` (único archivo fuera del módulo):** quedó en su mínimo —
+  solo monta `<SupervisionShell />`. NO necesita Suspense de servidor:
+  la carga async de T2 es client-side (provider) y los skeletons de T3
+  cubren esa latencia.
+
+## D12 — Repositorio async + mutaciones en la interfaz
+
+- **Decisión:** `SupervisionRepository` devuelve `Promise` en sus lecturas
+  y añade las mutaciones del kit: `resolverRescaneo` (T4),
+  `notificarMesa` (T4) y `aplicarTransicionVida` (T3).
+- **Por qué:** el repositorio real del digitalizador será async — el
+  contrato se adelanta hoy sin backend. Latencia simulada: ~400 ms en
+  lecturas y ~2.5 s en REINSPECCIONAR (el spinner del kit).
+- Las mutaciones viven en el mock (el dueño de los datos); el store
+  cliente aplica los resultados y los toasts/reportes de éxito.
+
+## D13 — Simulación de vida (reglas de derivación + ticker; D6 protegido)
+
+- **Reglas de derivación (una sola fuente de verdad):**
+  - `estadoMesa` se deriva de sus 4 partes: alerta presente →
+    INCOMPLETO; 4 partes ok → COMPLETO; 0 ok → NO_INICIADO; resto →
+    EN_PROCESO.
+  - `pctDelegado`/`pctTransmision` del puesto = % de partes ok de sus
+    mesas (kit T2 «derivable de sus mesas»).
+  - `estadoGlobal` del puesto pasa a COMPLETO solo si TODAS sus mesas lo
+    están; en otro caso conserva su estado (el kit solo define la
+    transición → COMPLETO; no se inventan otras).
+- **Ticker (T3):** «Sincronizado hace Xs» avanza de 5 en 5 s; a los 45 s
+  el mock aplica UNA transición (mesa EN_PROCESO → completa sus partes
+  pendientes), con preferencia por la candidata que COMPLETA su puesto
+  (KPIs en vivo); si no hay candidata que complete, la primera
+  EN_PROCESO. El contador de sincronización se reinicia tras cada
+  transición.
+- **D6 protegido:** el estado inicial (20/5/1/4/10) se verifica exacto al
+  cargar; las transiciones solo mutan DESPUÉS de ticks (evidencia en el
+  REPORTE: KPIs 5/4 → 7/2 en vivo tras 2 transiciones).
+- **Mesas de Italia:** 3 EXACTAS del mockup (001-003, intactas) + 004-008
+  generadas coherentes con CRÍTICO (kit T2; `numeroMesas=8` exige 8).
+
+## D14 — Sidebar ocultable como overlay flotante (decisión del dueño)
+
+- **Decisión:** la sidebar DEJA de ser fija en ningún viewport. Por
+  defecto OCULTA; el botón ☰ (siempre visible) la abre como panel
+  flotante anclado a la izquierda, ENCIMA del contenido, con scrim
+  `rgba(0,0,0,0.5)` y borde derecho 1px `outline-variant` (sin sombras).
+- **Por qué (dueño):** maximizar el área de la tabla; el ancho extra
+  beneficia la vista de datos. Móvil y desktop comparten la MISMA
+  implementación (unificada — el drawer Sheet anterior se retiró).
+- Cierre: ✕ del panel, `Escape` y clic en el scrim. El foco va al panel
+  al abrir; el scroll de fondo se bloquea mientras está abierto.
+- Carga Masiva sigue deshabilitada con el tooltip del kit («Se conectará
+  al digitalizador (fase de integración)»).
+
+## D15 — Informes client-side (Blob, sin backend)
+
+- **Decisión:** la vista Generar Informes construye el .md y el .csv en
+  el cliente (`Blob` + `URL.createObjectURL` + `<a download>`) y anuncia
+  con toast el nombre del archivo. Nada de APIs (§0-5/§0-7).
+- La fecha del informe es la REAL del navegador (es un informe, no un
+  dato del mock, kit T7); el nombre de archivo usa la fecha ISO.
+
+## D16 — Ajustes de datos para que las mesas y los pcts cuadren
+
+- **pcts derivados de mesas (kit T2)** — los del mockup eran decorativos
+  y con mesas reales debían ser derivables; ajustes aplicados al
+  inicializar el mock: España 0/0 → **50/50**, Inglaterra 10/100 →
+  **0/100**, México 45/30 → **50/38**, Argentina 70/55 → **75/50**,
+  Italia 59/29 → **56/25** (con sus 8 mesas: 3 exactas + 5 generadas).
+- **Semillas:** notificaciones 7 (4 no leídas → badge inicial 4) y
+  anomalías 7 (5 ABIERTAS = badge dinámico «Anomalía 5» + 2 revisadas de
+  histórico para el filtro).
+- **Estado de lectura/revisión** (marcar leída, marcar todas, marcar
+  revisada) es estado de UI del store — sin persistencia (§0-5: el kit
+  NO autoriza localStorage).
