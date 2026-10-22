@@ -322,3 +322,85 @@ Ajuste aplicado (opción ofrecida por el kit):
   vigente; DELEGADOS (página única) VALIDA si ambas partes de delegados
   están ok; «DELEGADOS ACREDITADOS: n/16» = 2 partes ok → 16, 1 → 8,
   0 → 0; N del navegador MESA n/N = mesas CON acta del puesto (T3.3).
+
+## D20 — Retiro TEMPORAL de módulos por flag (kit SUP-5 §2.5 / T1)
+
+- **Decisión:** "Centro de notificaciones" y "Generar informes" se
+  OCULTAN del sidebar por una constante exportada del shell
+  (`MODULOS_INACTIVOS = ["notificaciones", "informes"]`): el array de
+  ítems se filtra al renderizar. **Retiro, no borrado:** los componentes
+  (`vista-notificaciones.tsx`, `vista-informes.tsx`), su store y las
+  acciones que escriben notificaciones (NOTIFICAR, REINSPECCIONAR,
+  aprobar/rescan de acta) quedan INTACTOS y dormidos — siguen operando
+  en el store interno, invisibles para el usuario.
+- **Reversibilidad:** vaciar/editar la lista devuelve las 2 entradas
+  (verificado en dev — §4.5). La restauración COMPLETA (render de las
+  vistas) requiere además reponer sus 2 imports + 2 casos del switch en
+  `supervision-shell.tsx` — costo declarado en el REPORTE (el kit pedía
+  "1 línea"; la verificación obligatoria §4.4 —0 referencias activas en
+  el shell— exige retirar también los imports, se eligió cumplir el
+  check estricto y documentar el costo real).
+- **Sin rutas (D11 intacto):** las vistas dormidas son inalcanzables (no
+  hay rutas ni entradas); el estado del store correspondiente queda sin
+  uso. El badge de anomalías NO se toca; el de notificaciones desaparece
+  junto con su entrada.
+- **Frontera:** solo cambia `supervision-shell.tsx` (flag + filtro +
+  switch); cero cambios en el store (`datos-provider.tsx` no está en la
+  whitelist del kit).
+
+## D21 — Catálogo DIVIPOLA como fuente del repositorio (kit SUP-5 §3-T2/T3) — SUPERSEDE D6
+
+- **Decisión:** la fuente de puestos deja de ser el array demo de 20 y
+  pasa a ser el catálogo DIVIPOLA exterior REAL (derivado canónico,
+  949 puestos · 67 países · 3.670 mesas — verificado por el adaptador
+  contra los números del kit §2.4, con guardrail de 1.500 registros).
+  El MAESTRO (14.438 puestos) vive en el repo como base del join futuro
+  y JAMÁS se importa en código (`rg "divipola-puestos" src/` → 0).
+- **Adaptador estricto (`data/divipola-adapter.ts` + `domain/divipola.ts`):**
+  validación propia sin librerías — 8 campos exactos, códigos como
+  STRINGS con ancho fijo (2/3/3/2), `idEnlace` único y congruente con
+  sus segmentos, `totalMesas` entero ≥ 1, nombres no vacíos, registros
+  de control presentes (primero/ancla/último) y ancla Roma con 8 mesas.
+  Cualquier desviación → `BLOQUEADA: validación del catálogo (…)`.
+- **Estado simulado determinístico (§0-9):** el estado de cada puesto se
+  siembra por seed del `idEnlace` (mulberry32/FNV-1a compartido del
+  acta — `crearRandomDeterministico`) con la MISMA distribución que el
+  demo: CRÍTICO ~5% · COMPLETO ~25% · PENDIENTE ~20% · NO_INICIADO
+  ~50%. Mismo seed → mismos KPIs siempre (verificado entre sesiones).
+  Mesas por puesto = `totalMesas` del catálogo (1..159, dato real).
+- **D6 SUPERSEDEDO (no borrado):** los KPIs iniciales dejan de ser los
+  literales 20/5/1/4/10 y se DERIVAN del catálogo sembrado. La
+  INVARIANTE de D6 se MANTIENE: `total = completo + crítico + pendiente
+  + no_iniciado` EXACTO en carga (949 = 231+44+199+475 en el seed
+  vigente; la suma sigue exacta tras las transiciones de vida).
+- **Ancla demo intacta (§2.3):** el puesto `88_495_010_02` Roma -
+  Consulado (ITALIA, código real 495 — el catálogo manda sobre el 499
+  del demo) conserva CRÍTICO, 8 mesas, mesas 001-003 EXACTAS del
+  mockup, acta `#A92-F` con historial 14:00/14:18/14:20 y P2 con
+  advertencia. Solo cambió su código/id (re-anclaje al `idEnlace`).
+- **Mapeo UI (§2.1):** `pais` = nombreMunicipio ("ITALIA"), fila muestra
+  `<mun> - <país>` ("495 - ITALIA"), zona UI sin ceros ("010" → "10"),
+  puesto mostrado `<codigoPuesto> - <nombre real>` ("02 - Roma -
+  Consulado", nombre verbatim; el visor lo capitaliza por estilo CSS
+  preexistente — el dato no se reescribe).
+- **Contracto async intacto (D12):** la prep del catálogo es UNA vez
+  (memoizada en el adaptador); las promesas y la latencia ~400 ms siguen
+  igual. Ticker, transición EN_PROCESO→COMPLETO, REINSPECCIONAR,
+  anomalías y visor de actas operan idénticos sobre el catálogo real
+  (reglas de mapeo del kit SUP-4 intactas, actas siempre ancladas por
+  `idEnlace`).
+
+## D22 — `idEnlace` divipola como clave de join (kit SUP-5 §2.2)
+
+- **Convención observada** en los archivos reales del digitalizador: los
+  E-14 traen segmentos separados por `_` — `88_495_010_02` =
+  departamento 88 (CONSULADOS) · país/municipio 495 (Italia) · zona 010
+  · puesto 02 (Roma). El `idEnlace` respeta ese orden y los códigos van
+  como STRINGS sin transformar (solo la zona lleva padding 2→3 dígitos,
+  regla del digitalizador).
+- **Re-anclaje integral del demo:** `Puesto.id`, actas, anomalías,
+  notificaciones y semillas de país (ESPAÑA/MEXICO/PAISES
+  BAJOS/INGLATERRA) quedan anclados a `idEnlace` reales del catálogo
+  (búsqueda determinística de puestos reales por país + estado de mesa
+  útil). Cuando lleguen los datos del digitalizador y la carga masiva,
+  las filas se casan por esta clave — nada más cambia.
