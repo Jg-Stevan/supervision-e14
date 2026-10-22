@@ -24,13 +24,26 @@ import { SUPERVISOR } from "../data/mock-repository";
 import { StatusDot } from "./status-dot";
 import { DatosProvider, useDatos } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
-import { VistaNotificaciones } from "./vista-notificaciones";
 import { VistaAnomalias } from "./vista-anomalias";
-import { VistaInformes } from "./vista-informes";
 
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
- * (el export estático sigue siendo trivial: una sola página). */
+ * (el export estático sigue siendo trivial: una sola página).
+ *
+ * KIT SUP-5 (D20): "notificaciones" e "informes" quedan DORMIDAS — sus
+ * componentes y su lógica en el store permanecen intactos e inalcanzables
+ * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista. */
 type VistaId = "monitor" | "notificaciones" | "anomalias" | "informes";
+
+/**
+ * D20 — Retiro TEMPORAL de módulos (no borrado): las entradas cuyo
+ * `vista` figure aquí se filtran del sidebar. El código de las vistas
+ * dormidas queda intacto en el repo ("llegada la integración con el
+ * digitalizador, reactivar debe costar editar esta lista").
+ */
+export const MODULOS_INACTIVOS: readonly VistaId[] = [
+  "notificaciones",
+  "informes",
+];
 
 interface ItemNav {
   Icono: LucideIcon;
@@ -43,6 +56,9 @@ interface ItemNav {
   badgeDe?: "notificaciones" | "anomalias";
 }
 
+/** Ítems del sidebar. Los DORMIDOS (D20) siguen declarados aquí — se
+ * filtran al renderizar por MODULOS_INACTIVOS; así reactivar es una
+ * edición de la lista, no de la navegación. */
 const ITEMS_NAV: ItemNav[] = [
   { Icono: Activity, etiqueta: "Monitor global", vista: "monitor" },
   {
@@ -145,10 +161,16 @@ function ContenidoNav({
   onVista: (v: VistaId) => void;
   badges: { notificaciones: number; anomalias: number };
 }) {
+  // D20 — filtro del sidebar: fuera las entradas de módulos inactivos
+  // (su badge dinámico desaparece con ellas; el de anomalías queda).
+  const itemsVisibles = ITEMS_NAV.filter(
+    (item) =>
+      item.vista === undefined || !MODULOS_INACTIVOS.includes(item.vista)
+  );
   return (
     <TooltipProvider delayDuration={150}>
       <nav aria-label="Navegación principal" className="flex flex-col gap-1 p-3">
-        {ITEMS_NAV.map((item) => {
+        {itemsVisibles.map((item) => {
           const badge =
             item.badgeDe === "notificaciones"
               ? badges.notificaciones
@@ -195,14 +217,16 @@ function ContenidoNav({
   );
 }
 
+/**
+ * D20 — las vistas de los módulos inactivos son INALCANZABLES (sin
+ * entrada en el sidebar y sin rutas — D11): ninguna referencia activa a
+ * sus componentes (T1.3); sus archivos quedan dormidos en el repo. Si
+ * llegaran por estado (imposible hoy), caen al monitor.
+ */
 function VistaActual({ vista }: { vista: VistaId }) {
   switch (vista) {
-    case "notificaciones":
-      return <VistaNotificaciones />;
     case "anomalias":
       return <VistaAnomalias />;
-    case "informes":
-      return <VistaInformes />;
     default:
       return <VistaMonitor />;
   }

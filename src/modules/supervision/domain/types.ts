@@ -17,18 +17,37 @@ export type EstadoDelegado = "ok" | "pendiente";
 /** Acción sugerida sobre una mesa. */
 export type AccionMesa = "reinspeccionar" | "notificar";
 
-/** Puesto de votación en el exterior (fila de la tabla maestra). */
+/**
+ * Puesto de votación en el exterior (fila de la tabla maestra).
+ *
+ * KIT SUP-5 (D21/D22): la fuente es el catálogo DIVIPOLA exterior — el
+ * `id` ES el `idEnlace` divipola (clave de join con el digitalizador) y
+ * los códigos llegan reales del catálogo, como strings, sin transformar.
+ */
 export interface Puesto {
+  /**
+   * idEnlace DIVIPOLA (p. ej. "88_495_010_02") — clave única de join
+   * `<dept>_<mun>_<zona>_<puesto>` (D22). Re-ancla mesas, actas y
+   * anomalías; el demo viejo usaba ids "puesto-499".
+   */
   id: string;
-  /** Código del país en el sistema E-14 (p. ej. "499"). */
+  /**
+   * Código divipola del municipio; en exterior = código del país
+   * (p. ej. "495" Italia). "88" = CONSULADOS (departamento).
+   */
   codigoPais: string;
+  /** Nombre del país — nombreMunicipio del catálogo (p. ej. "ITALIA"). */
   pais: string;
-  /** Identificador de la zona. */
+  /** Código de zona divipola, 3 dígitos (p. ej. "010"). */
   zonaId: string;
-  /** Valor de zona mostrado en la tabla. */
+  /** Valor de zona mostrado en la tabla (sin ceros — p. ej. "10"). */
   zona: string;
-  /** Puesto (p. ej. "02 - Roma"). */
+  /**
+   * Puesto mostrado: "<codigoPuesto> - <nombre real del catálogo>"
+   * (p. ej. "02 - Roma - Consulado") — nombre tal cual viene (§2.3).
+   */
   puesto: string;
+  /** Mesas reales del puesto (totalMesas del catálogo; 1 a 159). */
   numeroMesas: number;
   /** Hora de cierre en hora de Colombia (p. ej. "9:00 AM"). */
   horaCierreColombia: string;
