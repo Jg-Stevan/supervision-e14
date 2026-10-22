@@ -2,7 +2,8 @@
  * Datos determinísticos de las ACTAS E-14 (kit SUP-4 §3-T1 / D18).
  *
  * TODO dato del visor se deriva por seed de la mesa (§0-7) — nada
- * aleatorio en render. Roma mesa 1 (Italia) es EXACTA al mockup (§0-6):
+ * aleatorio en render. Roma mesa 1 (Italia — ANCLA del kit SUP-5 §2.3,
+ * `88_495_010_02`, código real del catálogo) es EXACTA al mockup (§0-6):
  * ID #A92-F · 14:20 LOCAL · motivo SOLICITUD DE RESCANEO · TRANSMISIÓN
  * P1 VALIDA / P2 ADVERTENCIA · DELEGADOS VALIDA · historial
  * 14:00 / 14:18 / 14:20 con los textos exactos.
@@ -34,6 +35,7 @@ import type {
   PaginaActa,
 } from "../domain/acta";
 import { crearRandomDeterministico as crearRandom } from "../domain/acta";
+import { ID_ENLACE_ROMA } from "./divipola-adapter";
 
 // ─── Utilidades de formato ──────────────────────────────────────────────────
 
@@ -171,7 +173,9 @@ function historialDeMesa(
 const ROMA_MESA_1: ActaMesa = {
   id: "#A92-F",
   mesaId: "001",
-  puestoId: "puesto-499",
+  // SUP-5: re-anclada al idEnlace real del catálogo (§2.3) — el texto
+  // del acta (CREDENCIAL, sesión #A92-F) NO cambia.
+  puestoId: ID_ENLACE_ROMA,
   horaCarga: "14:20 LOCAL",
   motivo: "SOLICITUD DE RESCANEO",
   formularios: {
@@ -205,7 +209,7 @@ const ROMA_MESA_1: ActaMesa = {
 };
 
 function esRomaMesa1(puestoId: string, mesaId: string): boolean {
-  return puestoId === "puesto-499" && mesaId === "001";
+  return puestoId === ID_ENLACE_ROMA && mesaId === "001";
 }
 
 // ─── Generación + caché en memoria ──────────────────────────────────────────

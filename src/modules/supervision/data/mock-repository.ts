@@ -1,27 +1,44 @@
 /**
  * Implementación mock de SupervisionRepository.
  *
- * Datos demo del mockup (SUP-1 §2.4) + relleno creíble autorizado para que
- * los conteos cuadren EXACTAMENTE con los KPIs iniciales (D6): total 20,
- * completo 5, crítico 1, pendiente 4, no iniciado 10.
+ * KIT SUP-5 (T3 / D21): los puestos YA NO son un array demo de 20 — la
+ * fuente es el catálogo DIVIPOLA exterior real (`CARGAR_CATALOGO()`,
+ * 949 puestos / 67 países / 3.670 mesas). El estado (Global/Mesas/
+ * Delegados/Transmisión) se SIEMBRA por hash determinístico del `idEnlace`
+ * divipola (mismo seed → mismos KPIs siempre; nada aleatorio en render,
+ * §0-9) con la MISMA distribución de estados que el mock anterior
+ * (CRÍTICO ~5% · COMPLETO ~25% · PENDIENTE ~20% · NO_INICIADO ~50%).
  *
- * KIT SUP-3 (T2): mesas determinísticas para los 20 puestos (cantidad
- * EXACTA = numeroMesas; Italia conserva sus 3 mesas EXACTAS del mockup
- * original — no se tocan — y se le generan las 5 restantes coherentes con
- * CRÍTICO). Los pctDelegado/pctTransmision se DERIVAN de las mesas
- * (≈ % de partes ok) — kit T2. Interfaz async con latencia simulada
- * ~400 ms (D12). Mutaciones de T4 + transición de vida de T3 (D13).
+ * D6 queda SUPERSEDEDO: los KPIs iniciales dejan de ser los literales
+ * 20/5/1/4/10 y se DERIVAN del catálogo sembrado, con la invariante
+ * intacta: `total = completo + crítico + pendiente + no_iniciado` exacto.
+ *
+ * ANCLA DEMO (§2.3): el puesto `88_495_010_02` Roma - Consulado (ITALIA,
+ * 8 mesas — el catálogo manda sobre el 499 del demo viejo) conserva su
+ * estado demo completo: CRÍTICO, mesas 001-003 EXACTAS del mockup,
+ * acta `#A92-F` con historial 14:00/14:18/14:20 y P2 con advertencia.
+ * Los IDs internos quedan re-anclados al `idEnlace` real.
+ *
+ * Kit SUP-3: mesas determinísticas por puesto (cantidad EXACTA =
+ * totalMesas del catálogo), pcts derivados de las mesas (D16), interfaz
+ * async con latencia simulada ~400 ms (D12), mutaciones de T4 y
+ * transición de vida de T3 (D13). Kit SUP-4: actas por contrato (§0-9).
  * Sin backend, sin persistencia: el estado vive en memoria del módulo.
  */
 
 import type {
   Anomalia,
+  EstadoGlobal,
   FiltrosPuestos,
   Mesa,
   Notificacion,
   Puesto,
   ResumenGlobal,
 } from "../domain/types";
+import type { PuestoDivipola } from "../domain/divipola";
+import { zonaParaUI } from "../domain/divipola";
+import { ID_ENLACE_ROMA, CARGAR_CATALOGO } from "./divipola-adapter";
+import { crearRandomDeterministico } from "../domain/acta";
 import type { SupervisionRepository } from "./supervision-repository";
 import {
   aprobarActaMock,
@@ -54,321 +71,93 @@ async function conLatencia<T>(valor: T, ms = LATENCIA_MS): Promise<T> {
   return valor;
 }
 
+// ─── Catálogo DIVIPOLA → Puesto (kit SUP-5 §3-T3) ───────────────────────────
+
 /**
- * 20 puestos: los 5 visibles del mockup + 15 de relleno creíble
- * (países/zonas variados, autorizado en SUP-1 §2.4 "Decisión de
- * consistencia"). Los pcts se recalculan al inicializar (derivación de
- * mesas, D16) — los valores literales de aquí abajo son el punto de
- * partida del mockup y quedan documentados en docs/DECISIONS.md.
+ * Distribución de estados SEMBRADA (misma proporción que el mock de 20:
+ * 5 COMPLETO / 1 CRÍTICO / 4 PENDIENTE / 10 NO_INICIADO). El ancla Roma
+ * se FUERZA a CRÍTICO aparte (§2.3).
  */
-const PUESTOS: Puesto[] = [
-  // ── Mockup §2.4 (5 visibles) ────────────────────────────────────────────
-  {
-    id: "puesto-499",
-    codigoPais: "499",
-    pais: "Italia",
-    zonaId: "10",
-    zona: "10",
-    puesto: "02 - Roma",
-    numeroMesas: 8,
-    horaCierreColombia: "9:00 AM",
-    horaActualLocal: "7:08 PM",
-    diferenciaTiempo: "> 3 hrs",
-    pctDelegado: 59,
-    pctTransmision: 29,
-    estadoGlobal: "CRITICO",
-  },
-  {
-    id: "puesto-435",
-    codigoPais: "435",
-    pais: "Países Bajos",
-    zonaId: "65",
-    zona: "65",
-    puesto: "04 - La Haya",
-    numeroMesas: 1,
-    horaCierreColombia: "9:00 AM",
-    horaActualLocal: "7:08 PM",
-    diferenciaTiempo: "< 1 hr",
-    pctDelegado: 100,
-    pctTransmision: 100,
-    estadoGlobal: "COMPLETO",
-  },
-  {
-    // Ajuste de consistencia SUP-1: el mockup la muestra CRÍTICO, pero el
-    // KPI oficial es CRÍTICO: 1 → se rebaja a PENDIENTE (D6).
-    id: "puesto-365",
-    codigoPais: "365",
-    pais: "España",
-    zonaId: "83",
-    zona: "83",
-    puesto: "06 - Tarragona",
-    numeroMesas: 1,
-    horaCierreColombia: "9:00 AM",
-    horaActualLocal: "7:08 PM",
-    diferenciaTiempo: "> 2 hrs",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "PENDIENTE",
-  },
-  {
-    id: "puesto-466",
-    codigoPais: "466",
-    pais: "Inglaterra",
-    zonaId: "85",
-    zona: "85",
-    puesto: "03 - Londres",
-    numeroMesas: 1,
-    horaCierreColombia: "10:00 AM",
-    horaActualLocal: "6:08 PM",
-    diferenciaTiempo: "1-2 hrs",
-    pctDelegado: 10,
-    pctTransmision: 100,
-    estadoGlobal: "PENDIENTE",
-  },
-  {
-    id: "puesto-346",
-    codigoPais: "346",
-    pais: "Estados Unidos",
-    zonaId: "55",
-    zona: "55",
-    puesto: "02 - Nueva York",
-    numeroMesas: 1,
-    horaCierreColombia: "1:00 PM",
-    horaActualLocal: "1:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  // ── Relleno creíble (15): 4 COMPLETO + 2 PENDIENTE + 9 NO INICIADO ─────
-  {
-    id: "puesto-208",
-    codigoPais: "208",
-    pais: "Francia",
-    zonaId: "12",
-    zona: "12",
-    puesto: "01 - París",
-    numeroMesas: 2,
-    horaCierreColombia: "9:00 AM",
-    horaActualLocal: "7:08 PM",
-    diferenciaTiempo: "< 1 hr",
-    pctDelegado: 100,
-    pctTransmision: 100,
-    estadoGlobal: "COMPLETO",
-  },
-  {
-    id: "puesto-277",
-    codigoPais: "277",
-    pais: "Alemania",
-    zonaId: "71",
-    zona: "71",
-    puesto: "03 - Berlín",
-    numeroMesas: 1,
-    horaCierreColombia: "9:00 AM",
-    horaActualLocal: "7:08 PM",
-    diferenciaTiempo: "< 1 hr",
-    pctDelegado: 100,
-    pctTransmision: 100,
-    estadoGlobal: "COMPLETO",
-  },
-  {
-    id: "puesto-392",
-    codigoPais: "392",
-    pais: "Brasil",
-    zonaId: "48",
-    zona: "48",
-    puesto: "02 - São Paulo",
-    numeroMesas: 3,
-    horaCierreColombia: "9:00 AM",
-    horaActualLocal: "5:08 PM",
-    diferenciaTiempo: "< 1 hr",
-    pctDelegado: 100,
-    pctTransmision: 100,
-    estadoGlobal: "COMPLETO",
-  },
-  {
-    id: "puesto-124",
-    codigoPais: "124",
-    pais: "Canadá",
-    zonaId: "62",
-    zona: "62",
-    puesto: "01 - Toronto",
-    numeroMesas: 2,
-    horaCierreColombia: "10:00 AM",
-    horaActualLocal: "5:08 PM",
-    diferenciaTiempo: "< 1 hr",
-    pctDelegado: 100,
-    pctTransmision: 100,
-    estadoGlobal: "COMPLETO",
-  },
-  {
-    id: "puesto-555",
-    codigoPais: "555",
-    pais: "México",
-    zonaId: "21",
-    zona: "21",
-    puesto: "01 - Ciudad de México",
-    numeroMesas: 4,
-    horaCierreColombia: "1:00 PM",
-    horaActualLocal: "1:08 PM",
-    diferenciaTiempo: "1-2 hrs",
-    pctDelegado: 45,
-    pctTransmision: 30,
-    estadoGlobal: "PENDIENTE",
-  },
-  {
-    id: "puesto-060",
-    codigoPais: "060",
-    pais: "Argentina",
-    zonaId: "44",
-    zona: "44",
-    puesto: "02 - Buenos Aires",
-    numeroMesas: 2,
-    horaCierreColombia: "10:00 AM",
-    horaActualLocal: "7:08 PM",
-    diferenciaTiempo: "1-2 hrs",
-    pctDelegado: 70,
-    pctTransmision: 55,
-    estadoGlobal: "PENDIENTE",
-  },
-  {
-    id: "puesto-058",
-    codigoPais: "058",
-    pais: "Venezuela",
-    zonaId: "32",
-    zona: "32",
-    puesto: "01 - Caracas",
-    numeroMesas: 2,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-051",
-    codigoPais: "051",
-    pais: "Perú",
-    zonaId: "39",
-    zona: "39",
-    puesto: "01 - Lima",
-    numeroMesas: 3,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-563",
-    codigoPais: "563",
-    pais: "Chile",
-    zonaId: "41",
-    zona: "41",
-    puesto: "01 - Santiago",
-    numeroMesas: 2,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-593",
-    codigoPais: "593",
-    pais: "Ecuador",
-    zonaId: "37",
-    zona: "37",
-    puesto: "01 - Quito",
-    numeroMesas: 2,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-507",
-    codigoPais: "507",
-    pais: "Costa Rica",
-    zonaId: "28",
-    zona: "28",
-    puesto: "01 - San José",
-    numeroMesas: 1,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-180",
-    codigoPais: "180",
-    pais: "República Dominicana",
-    zonaId: "26",
-    zona: "26",
-    puesto: "01 - Santo Domingo",
-    numeroMesas: 2,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-034",
-    codigoPais: "034",
-    pais: "Guatemala",
-    zonaId: "24",
-    zona: "24",
-    puesto: "01 - Ciudad de Guatemala",
-    numeroMesas: 1,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-503",
-    codigoPais: "503",
-    pais: "El Salvador",
-    zonaId: "30",
-    zona: "30",
-    puesto: "01 - San Salvador",
-    numeroMesas: 1,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
-  {
-    id: "puesto-682",
-    codigoPais: "682",
-    pais: "Australia",
-    zonaId: "90",
-    zona: "90",
-    puesto: "01 - Sídney",
-    numeroMesas: 1,
-    horaCierreColombia: "12:00 PM",
-    horaActualLocal: "12:00 PM",
-    diferenciaTiempo: "—",
-    pctDelegado: 0,
-    pctTransmision: 0,
-    estadoGlobal: "NO_INICIADO",
-  },
+function estadoPorSeed(random: number): EstadoGlobal {
+  if (random < 0.05) return "CRITICO"; // ~1 de cada 20 (como hoy)
+  if (random < 0.3) return "COMPLETO"; // ~25%
+  if (random < 0.5) return "PENDIENTE"; // ~20%
+  return "NO_INICIADO"; // ~50%
+}
+
+const CIERRES_COL_MIN = [9 * 60, 10 * 60, 11 * 60, 12 * 60, 13 * 60];
+const DESFASES: { etiqueta: string; minutos: number }[] = [
+  { etiqueta: "—", minutos: 0 },
+  { etiqueta: "< 1 hr", minutos: 45 },
+  { etiqueta: "1-2 hrs", minutos: 90 },
+  { etiqueta: "> 3 hrs", minutos: 200 },
 ];
 
-// ─── Generación determinística de mesas (T2 / D13) ─────────────────────────
+/** "19:08" → "7:08 PM" (formato del mockup). */
+function relojDeMinutos(minutos: number): string {
+  const m = ((minutos % 1440) + 1440) % 1440;
+  const h24 = Math.floor(m / 60);
+  const mm = String(m % 60).padStart(2, "0");
+  const sufijo = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${mm} ${sufijo}`;
+}
+
+/** Horarios creíbles + determinísticos por seed (el demo no conoce
+ * zonas horarias reales; la coherencia EXACTA solo la exige el kit para
+ * el ancla Roma — §4.9). */
+function horarioPorSeed(random: () => number): {
+  cierre: string;
+  local: string;
+  diferencia: string;
+} {
+  const cierre = CIERRES_COL_MIN[Math.floor(random() * CIERRES_COL_MIN.length)];
+  const desfase = DESFASES[Math.floor(random() * DESFASES.length)];
+  const local = cierre + desfase.minutos + Math.floor(random() * 60);
+  return {
+    cierre: relojDeMinutos(cierre),
+    local: relojDeMinutos(local),
+    diferencia: desfase.etiqueta,
+  };
+}
+
+/** Valores EXACTOS del horario del ancla Roma (mockup original). */
+const HORARIO_ROMA = {
+  cierre: "9:00 AM",
+  local: "7:08 PM",
+  diferencia: "> 3 hrs",
+} as const;
+
+/** Registro canónico → fila de la tabla (`Puesto`). El `id` ES el
+ * `idEnlace` divipola (D22): re-ancla mesas, actas, anomalías y el join
+ * futuro con el digitalizador. Códigos reales del catálogo, sin
+ * transformar (§2.3). */
+function puestoDeRegistro(registro: PuestoDivipola): Puesto {
+  const esAncla = registro.idEnlace === ID_ENLACE_ROMA;
+  const random = crearRandomDeterministico(`divipola::puesto::${registro.idEnlace}`);
+  const horario = esAncla ? HORARIO_ROMA : horarioPorSeed(random);
+  return {
+    id: registro.idEnlace,
+    codigoPais: registro.codigoMunicipio,
+    pais: registro.nombreMunicipio,
+    zonaId: registro.codigoZona,
+    zona: zonaParaUI(registro.codigoZona),
+    puesto: `${registro.codigoPuesto} - ${registro.nombre}`,
+    numeroMesas: registro.totalMesas,
+    horaCierreColombia: horario.cierre,
+    horaActualLocal: horario.local,
+    diferenciaTiempo: horario.diferencia,
+    // Los pcts se recalculan al inicializar (derivación de mesas, D16).
+    pctDelegado: 0,
+    pctTransmision: 0,
+    estadoGlobal: esAncla ? "CRITICO" : estadoPorSeed(random()),
+  };
+}
+
+/** Puestos = catálogo DIVIPOLA exterior real (949 — §2.4). */
+const PUESTOS: Puesto[] = CARGAR_CATALOGO().map(puestoDeRegistro);
+
+// ─── Generación determinística de mesas (T2 / D13) ──────────────────────────
 
 function ok(): Mesa["delegados"]["p1"] {
   return "ok";
@@ -377,7 +166,8 @@ function pend(): Mesa["delegados"]["p1"] {
   return "pendiente";
 }
 
-/** Mesas EXACTAS del mockup original (SUP-1 §2.4) — NO SE TOCAN (kit T2). */
+/** Mesas 001-003 EXACTAS del mockup original (SUP-1 §2.4) — NO SE TOCAN:
+ * hoy pertenecen al ANCLA Roma (`88_495_010_02`, kit SUP-5 §2.3). */
 const MESAS_ITALIA_MOCKUP: Mesa[] = [
   {
     id: "001",
@@ -416,11 +206,12 @@ const MESAS_ITALIA_MOCKUP: Mesa[] = [
 
 /**
  * Mesas por puesto, DETERMINÍSTICAS (sin random por render — arrays
- * fijos). Recetas del kit T2:
+ * fijos). Recetas del kit T2 (SUP-3), ahora sobre el catálogo real:
  * - COMPLETO → todas COMPLETO, ok, sin alertas, carga reciente.
  * - PENDIENTE → mezcla EN_PROCESO/NO_INICIADO, pendientes en partes.
  * - CRÍTICO → mayormente NO_INICIADO/INCOMPLETO, alerta "Rescaneo"
- *   presente (Italia: 3 exactas del mockup + 004-008 generadas).
+ *   presente (el ANCLA Roma: 3 exactas del mockup + 004-008 generadas;
+ *   los demás críticos del catálogo: receta propia coherente).
  * - NO_INICIADO → todas NO_INICIADO, sin carga ("—").
  */
 function generarMesasPuesto(puesto: Puesto): Mesa[] {
@@ -450,9 +241,9 @@ function generarMesasPuesto(puesto: Puesto): Mesa[] {
     })) as Mesa[];
   }
 
-  // Italia (CRÍTICO): 3 exactas del mockup + las restantes generadas
+  // ANCLA Roma (CRÍTICO): 3 exactas del mockup + las restantes generadas
   // coherentes con CRÍTICO (mayoría NO_INICIADO, Rescaneo presente).
-  if (puesto.id === "puesto-499") {
+  if (puesto.id === ID_ENLACE_ROMA) {
     const restantes = Math.max(0, n - MESAS_ITALIA_MOCKUP.length);
     const generadas: Mesa[] = Array.from({ length: restantes }, (_, i) => {
       const indice = MESAS_ITALIA_MOCKUP.length + i;
@@ -496,28 +287,56 @@ function generarMesasPuesto(puesto: Puesto): Mesa[] {
     return [...MESAS_ITALIA_MOCKUP.map((m) => ({ ...m })), ...generadas];
   }
 
+  // CRÍTICO (resto del catálogo): la mesa 001 INCOMPLETO con alerta
+  // "Rescaneo" (reinspeccionable, coherente con anomalías del tipo), la
+  // 002 EN_PROCESO si hay más mesas y el resto NO_INICIADO.
+  if (puesto.estadoGlobal === "CRITICO") {
+    const mesas: Mesa[] = [];
+    for (let i = 0; i < n; i++) {
+      if (i === 0) {
+        mesas.push({
+          id: numero(i),
+          delegados: { p1: ok(), p2: ok() },
+          transmision: {
+            p1: { estado: "ok" },
+            p2: { estado: "ok", alerta: "Rescaneo" },
+          },
+          estadoMesa: "INCOMPLETO",
+          ultimaCarga: carga(18),
+          accionSugerida: "reinspeccionar",
+        });
+      } else if (i === 1) {
+        mesas.push({
+          id: numero(i),
+          delegados: { p1: ok(), p2: pend() },
+          transmision: { p1: { estado: "ok" }, p2: { estado: "pendiente" } },
+          estadoMesa: "EN_PROCESO",
+          ultimaCarga: carga(41),
+          accionSugerida: "notificar",
+        });
+      } else {
+        mesas.push({
+          id: numero(i),
+          delegados: { p1: pend(), p2: pend() },
+          transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+          estadoMesa: "NO_INICIADO",
+          ultimaCarga: null,
+          accionSugerida: "notificar",
+        });
+      }
+    }
+    return mesas;
+  }
+
   // PENDIENTE: mezcla EN_PROCESO / NO_INICIADO (receta del kit).
   // - Con varias mesas: la ÚLTIMA es EN_PROCESO (delegados completos,
   //   transmisión a medias → candidato de transición de vida), el resto
   //   NO_INICIADO. Con 1 mesa: la mesa única es EN_PROCESO con partes a
-  //   medias (España 50/50; Inglaterra transmisión completa 0/100).
+  //   medias.
   const mesas: Mesa[] = [];
   for (let i = 0; i < n; i++) {
     const esUltima = i === n - 1;
     const indice = i;
-    if (puesto.id === "puesto-466") {
-      // Inglaterra: transmisión completa, delegados sin iniciar (≈ mockup
-      // 10/100 → 0/100 derivable de 1 mesa).
-      mesas.push({
-        id: numero(indice),
-        delegados: { p1: pend(), p2: pend() },
-        transmision: { p1: { estado: "ok" }, p2: { estado: "ok" } },
-        estadoMesa: "EN_PROCESO",
-        ultimaCarga: carga(33),
-        accionSugerida: "notificar",
-      });
-      continue;
-    }
     if (esUltima) {
       mesas.push({
         id: numero(indice),
@@ -610,28 +429,74 @@ for (const puesto of PUESTOS) {
 const AHORA = Date.now();
 const MIN = 60_000;
 
-/** Semillas T5 (7): coherentes con los datos (Italia rescaneo, España
- * retraso…). 3 no leídas → badge inicial 3. */
+/** Etiqueta de puesto para textos ("ITALIA — 02 - Roma - Consulado"). */
+function etiquetaDePuesto(puesto: Puesto): string {
+  return `${puesto.pais} — ${puesto.puesto}`;
+}
+
+/**
+ * Búsqueda DETERMINÍSTICA de un puesto real de un país con una mesa dada
+ * en un estado útil (re-anclaje de las semillas de notificaciones y
+ * anomalías al catálogo real — kit SUP-5 §3-T3.5). Prioridad de estados
+ * coherentes con la semilla; fallback: cualquier mesa con transmisión;
+ * fallback final: el primer puesto del país.
+ */
+function buscarPuestoDePais(
+  pais: string,
+  mesaIndice: number
+): { puesto: Puesto; mesa: Mesa } | null {
+  const delPais = PUESTOS.filter((p) => p.pais === pais);
+  const candidatos = delPais
+    .map((puesto) => ({ puesto, mesa: MESAS_POR_PUESTO[puesto.id]?.[mesaIndice] }))
+    .filter(({ mesa }) => Boolean(mesa));
+  const prioridad: Mesa["estadoMesa"][] = ["INCOMPLETO", "EN_PROCESO", "COMPLETO"];
+  for (const estado of prioridad) {
+    const hallado = candidatos.find(({ mesa }) => mesa.estadoMesa === estado);
+    if (hallado) return hallado;
+  }
+  const conTransmision = candidatos.find(({ mesa }) => mesa.estadoMesa !== "NO_INICIADO");
+  if (conTransmision) return conTransmision;
+  return candidatos.length > 0 ? candidatos[0] : null;
+}
+
+const anclaRoma = PUESTOS.find((p) => p.id === ID_ENLACE_ROMA) ?? PUESTOS[0];
+
+// España/México/Países Bajos: puestos REALES del catálogo para las
+// semillas (determinístico — §0-9). INGLATERRA existe en el catálogo
+// (Londres); su anomalía es de puesto (sin mesa).
+const semillaEspana = buscarPuestoDePais("ESPAÑA", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+const semillaMexico = buscarPuestoDePais("MEXICO", 1) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+const semillaPaisesBajos = buscarPuestoDePais("PAISES BAJOS", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+const semillaInglaterra =
+  PUESTOS.find((p) => p.pais === "INGLATERRA") ?? anclaRoma;
+const mesaEnCursoMexico =
+  MESAS_POR_PUESTO[semillaMexico.puesto.id]?.find((m) => m.estadoMesa === "EN_PROCESO") ??
+  semillaMexico.mesa;
+
+/** Semillas T5 (7): coherentes con los datos (Roma rescaneo, España
+ * retraso…), ya re-ancladas a los códigos reales del catálogo.
+ * 3 no leídas → badge inicial 3. */
 const NOTIFICACIONES: Notificacion[] = [
-  { id: "notif-1", tipo: "rescaneo", texto: "Rescaneo requerido en Mesa 001 (Italia — 02 - Roma)", fecha: AHORA - 12 * MIN, leida: false },
-  { id: "notif-2", tipo: "retraso", texto: "Retraso en transmisión — España (06 - Tarragona)", fecha: AHORA - 38 * MIN, leida: false },
-  { id: "notif-3", tipo: "transmision", texto: "Transmisión en curso — Mesa 004 (México — 01 - Ciudad de México)", fecha: AHORA - 47 * MIN, leida: false },
-  { id: "notif-4", tipo: "sistema", texto: "Sincronización completada: 20 puestos al día", fecha: AHORA - 65 * MIN, leida: true },
-  { id: "notif-5", tipo: "rescaneo", texto: "Rescaneo requerido en Mesa 004 (Italia — 02 - Roma)", fecha: AHORA - 21 * MIN, leida: false },
+  { id: "notif-1", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 001 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 12 * MIN, leida: false },
+  { id: "notif-2", tipo: "retraso", texto: `Retraso en transmisión — ${etiquetaDePuesto(semillaEspana.puesto)}`, fecha: AHORA - 38 * MIN, leida: false },
+  { id: "notif-3", tipo: "transmision", texto: `Transmisión en curso — Mesa ${mesaEnCursoMexico.id} (${etiquetaDePuesto(semillaMexico.puesto)})`, fecha: AHORA - 47 * MIN, leida: false },
+  { id: "notif-4", tipo: "sistema", texto: `Sincronización completada: ${PUESTOS.length} puestos al día`, fecha: AHORA - 65 * MIN, leida: true },
+  { id: "notif-5", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 004 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 21 * MIN, leida: false },
   { id: "notif-6", tipo: "sistema", texto: "Respaldo de datos del consolidado completado", fecha: AHORA - 5 * 60 * MIN, leida: true },
-  { id: "notif-7", tipo: "transmision", texto: "Transmisión restablecida — Países Bajos (04 - La Haya)", fecha: AHORA - 26 * 60 * MIN, leida: true },
+  { id: "notif-7", tipo: "transmision", texto: `Transmisión restablecida — ${etiquetaDePuesto(semillaPaisesBajos.puesto)}`, fecha: AHORA - 26 * 60 * MIN, leida: true },
 ];
 
 /** Semillas T6: 5 ABIERTAS (badge dinámico real del mockup) + 2 revisadas
- * de histórico (para el filtro por estado). */
+ * de histórico (para el filtro por estado) — re-ancladas al catálogo. */
+
 const ANOMALIAS: Anomalia[] = [
-  { id: "anom-1", tipo: "Rescaneo", puestoId: "puesto-499", puesto: "Italia — 02 - Roma", mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
-  { id: "anom-2", tipo: "Mesa incompleta", puestoId: "puesto-499", puesto: "Italia — 02 - Roma", mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
-  { id: "anom-3", tipo: "Transmisión caída", puestoId: "puesto-365", puesto: "España — 06 - Tarragona", mesaId: "001", severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
-  { id: "anom-4", tipo: "Desfase de hora", puestoId: "puesto-365", puesto: "España — 06 - Tarragona", severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
-  { id: "anom-5", tipo: "Mesa incompleta", puestoId: "puesto-555", puesto: "México — 01 - Ciudad de México", mesaId: "002", severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
-  { id: "anom-6", tipo: "Rescaneo", puestoId: "puesto-435", puesto: "Países Bajos — 04 - La Haya", mesaId: "001", severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
-  { id: "anom-7", tipo: "Desfase de hora", puestoId: "puesto-466", puesto: "Inglaterra — 03 - Londres", severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
+  { id: "anom-1", tipo: "Rescaneo", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
+  { id: "anom-2", tipo: "Mesa incompleta", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
+  { id: "anom-3", tipo: "Transmisión caída", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), mesaId: semillaEspana.mesa.id, severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
+  { id: "anom-4", tipo: "Desfase de hora", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
+  { id: "anom-5", tipo: "Mesa incompleta", puestoId: semillaMexico.puesto.id, puesto: etiquetaDePuesto(semillaMexico.puesto), mesaId: semillaMexico.mesa.id, severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
+  { id: "anom-6", tipo: "Rescaneo", puestoId: semillaPaisesBajos.puesto.id, puesto: etiquetaDePuesto(semillaPaisesBajos.puesto), mesaId: semillaPaisesBajos.mesa.id, severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
+  { id: "anom-7", tipo: "Desfase de hora", puestoId: semillaInglaterra.id, puesto: etiquetaDePuesto(semillaInglaterra), severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
 ];
 
 let contadorNotificaciones = 0;
@@ -730,7 +595,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
     refrescarPuesto(puesto);
     const notificacion = crearNotificacion(
       "rescaneo",
-      `Rescaneo completado en Mesa ${mesa.id} (${puesto.pais} — ${puesto.puesto})`
+      `Rescaneo completado en Mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
     );
     NOTIFICACIONES.unshift(notificacion);
     return { mesa: { ...mesa }, notificacion: { ...notificacion } };
@@ -747,7 +612,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
     // T4: el estado de la mesa NO cambia — solo se registra la notificación.
     const notificacion = crearNotificacion(
       "sistema",
-      `Supervisor notificó a la mesa ${mesa.id} (${puesto.pais} — ${puesto.puesto})`
+      `Supervisor notificó a la mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
     );
     NOTIFICACIONES.unshift(notificacion);
     return { ...notificacion };
@@ -807,7 +672,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
     const acta = aprobarActaMock(actaId, observacion);
     if (!acta) return null;
     const puesto = puestoPorId(acta.puestoId);
-    const etiquetaPuesto = puesto ? `${puesto.pais} — ${puesto.puesto}` : acta.puestoId;
+    const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;
     // T5.3 — notificación nueva (plantilla 1/2 del kit).
     const notificacion = crearNotificacion(
       "sistema",
@@ -836,7 +701,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
     const acta = confirmarRescanActaMock(actaId, _observacion);
     if (!acta) return null;
     const puesto = puestoPorId(acta.puestoId);
-    const etiquetaPuesto = puesto ? `${puesto.pais} — ${puesto.puesto}` : acta.puestoId;
+    const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;
     // T5.4 — notificación nueva (plantilla 2/2 del kit).
     const notificacion = crearNotificacion(
       "rescaneo",
