@@ -35,7 +35,9 @@ import type {
   PaginaActa,
 } from "../domain/acta";
 import { crearRandomDeterministico as crearRandom } from "../domain/acta";
+import type { ActaRealLista } from "./actas-reales/actas-reales";
 import { ID_ENLACE_ROMA } from "./divipola-adapter";
+import { cargarActasReales } from "./actas-reales/actas-reales";
 
 // ─── Utilidades de formato ──────────────────────────────────────────────────
 
@@ -212,6 +214,51 @@ function esRomaMesa1(puestoId: string, mesaId: string): boolean {
   return puestoId === ID_ENLACE_ROMA && mesaId === "001";
 }
 
+// ─── El Cairo mesa 1: acta REAL del digitalizador (SUP-6 / D26) ──────────
+
+/** ANCLA DE PRÁCTICA (SUP-6 §2.3 / D26): El Cairo - Consulado (EGIPTO).
+ * Constante local (evita ciclo con mock-repository). */
+const ID_ENLACE_CAIRO = "88_335_005_02";
+
+function esCairoMesa1(puestoId: string, mesaId: string): boolean {
+  return puestoId === ID_ENLACE_CAIRO && mesaId === "001";
+}
+
+/** Acta REAL del ancla (D26): la realidad impresa trae 2 páginas por
+ * formulario (TRANSMISIÓN P1/P2 y CÓNSUL/EMBAJADOR P1/P2, todas VALIDA —
+ * la mesa está forzada a COMPLETO), `fotos` del loader + `impresion`
+ * verbatim del manifest. id/hora/historial generados por seed como
+ * cualquier acta (mismas reglas, sin textos custom — kit T4.2). */
+function construirActaRealCairo(
+  mesa: Mesa,
+  puesto: Puesto,
+  registroReal: ActaRealLista
+): ActaMesa {
+  const seed = `${puesto.id}::mesa-${mesa.id}`;
+  const random = crearRandom(`${seed}::carga`);
+  // Hora de carga determinística dentro de la ventana 13:00–16:59.
+  const minutosCarga = 13 * 60 + Math.floor(random() * (4 * 60 - 14));
+  const id = generarIdActa(seed);
+  const formularios = paginasDeMesa(mesa, puesto);
+  // Realidad impresa del formulario CÓNSUL/EMBAJADOR (2 páginas — D26).
+  formularios.DELEGADOS = [
+    { numero: 1, estado: "VALIDA" },
+    { numero: 2, estado: "VALIDA" },
+  ];
+  return {
+    id,
+    mesaId: mesa.id,
+    puestoId: puesto.id,
+    horaCarga: `${minutosAHora(minutosCarga)} LOCAL`,
+    motivo: motivoDeMesa(mesa),
+    formularios,
+    historial: historialDeMesa(mesa, puesto, id, minutosCarga),
+    version: 1,
+    fotos: registroReal.fotos,
+    impresion: registroReal.impresion,
+  };
+}
+
 // ─── Generación + caché en memoria ──────────────────────────────────────────
 
 export function tieneActa(mesa: Mesa): boolean {
@@ -251,6 +298,18 @@ export function obtenerActa(mesa: Mesa, puesto: Puesto): ActaMesa | null {
   if (esRomaMesa1(puesto.id, mesa.id)) {
     CACHE_ACTAS[clave] = clonarActa(ROMA_MESA_1);
     return clonarActa(ROMA_MESA_1);
+  }
+
+  // D26: ancla El Cairo mesa 001 → acta real (fotos + impresión). Si el
+  // loader la dejó en cuarentena (D25) cae al sintético como cualquier
+  // otra mesa — nada se improvisa.
+  if (esCairoMesa1(puesto.id, mesa.id)) {
+    const registroReal = cargarActasReales().actas[clave];
+    if (registroReal) {
+      const acta = construirActaRealCairo(mesa, puesto, registroReal);
+      CACHE_ACTAS[clave] = acta;
+      return clonarActa(acta);
+    }
   }
 
   const seed = `${puesto.id}::mesa-${mesa.id}`;
