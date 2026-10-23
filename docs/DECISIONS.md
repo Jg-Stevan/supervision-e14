@@ -483,3 +483,34 @@ Ajuste aplicado (opción ofrecida por el kit):
   quedan intactas; Roma mesa 1 sigue EXACTA al mockup (sintético
   `#A92-F`); el acta real solo altera el estado del ancla (NO_INICIADO →
   COMPLETO en los KPIs derivados — la única transición de estado del kit).
+
+## D27 — SUP-6.1 (post-auditoría SUP-6): máximo de páginas derivado del acta + ancho CSS de la foto real
+
+- **BLOQUEADA-1 → corregida** (autorización del dueño para tocar
+  `datos-provider.tsx`, fuera de la whitelist §1 de SUP-6):
+  `cambiarPagina` ya no usa el supuesto SUP-4 (`TRANSMISION ? 2 : 1`)
+  como máximo: deriva el máximo del largo real de páginas del acta
+  cargada (`acta.formularios[tipo].length`) cuando la respuesta en
+  memoria corresponde a la mesa abierta (mismo criterio `actaAlDia` del
+  provider); si el acta está en carga (ventana ~400 ms) o no trae
+  páginas para el formulario, cae al supuesto SUP-4 (comportamiento
+  anterior). `actaCargada` entra a las deps del `useCallback`. La P2
+  real del formulario CÓNSUL/EMBAJADOR del ancla queda alcanzable (la
+  foto ya estaba servida en `fotos.DELEGADOS[1]` — solo faltaba la
+  navegación). `navegarMesa` conserva el reset a P1 en DELEGADOS
+  (aterrizaje seguro; solo se actualiza su comentario).
+- **FINDING-1 → corregido:** el `<img>` de la foto real lleva ancho CSS
+  explícito `style={{ width: FOTO_ANCHO_BASE, maxWidth: "none" }}`.
+  Nota de ejecución: la prescripción literal de la auditoría (solo
+  `width`) resultó INSUFICIENTE — verificado en navegador que el
+  preflight de Tailwind (`img { max-width: 100% }`) sigue clampeando a
+  ~184 CSS px dentro del wrapper absoluto (shrink-to-fit) aunque se
+  fije `width`; hay que anular también el `max-width` (el papel
+  sintético no sufre esto porque es un `<div>` con ancho por style).
+  Tras el arreglo: layout 460 px / visual 368 px a zoom 0.8 = caja
+  esperada (T5.1).
+- **FINDING-2 → diferido:** duplicado de formulario en el manifest
+  (edge; 0 casos en el manifest actual). Queda documentado; sugerencia
+  futura = cuarentenar la clave completa (hoy el loader borra solo las
+  `fotos` del formulario duplicado y deja el acta publicada, que cae a
+  sintético). El loader NO se toca en SUP-6.1 (frontera mínima).

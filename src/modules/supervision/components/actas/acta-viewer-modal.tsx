@@ -331,6 +331,16 @@ function VisorAbierto() {
                         src={fotoActiva.src}
                         width={FOTO_ANCHO_BASE}
                         height={fotoAltoBase}
+                        /* SUP-6.1 (FINDING-1 de la auditoría): ancho CSS
+                           explícito + maxWidth:none — el preflight de
+                           Tailwind (img { max-width: 100% }) encogía la foto
+                           a ~184 CSS px pese al atributo HTML width: dentro
+                           del wrapper absoluto (shrink-to-fit) el %
+                           sigue clampeando aunque se fije width, por eso
+                           hay que anularlo (mismo patrón del papel
+                           sintético, que fija su ancho por style).
+                           Verificado en navegador: layout 460 px. */
+                        style={{ width: FOTO_ANCHO_BASE, maxWidth: "none" }}
                         alt={`Acta real E-14 ${etiquetaReal ?? visorActa.tipo} — página ${paginaActiva}, escaneo del digitalizador (encabezado impreso ubicado; sin lectura de votos)`}
                         draggable={false}
                         className="block select-none rounded-[4px] border border-(--border) bg-white"

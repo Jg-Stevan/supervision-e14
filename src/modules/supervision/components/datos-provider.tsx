@@ -362,7 +362,9 @@ export function DatosProvider({ children }: { children: ReactNode }) {
         const indice = lista.findIndex((m) => m.id === prev.mesaId);
         const siguiente = lista[indice + delta];
         if (!siguiente) return prev;
-        // El tipo se conserva; DELEGADOS solo tiene 1 página.
+        // El tipo se conserva; DELEGADOS vuelve a P1 (aterrizaje seguro:
+        // SUP-6.1 — puede tener 2 páginas reales, el supuesto SUP-4 de 1
+        // página quedó obsoleto; el clamp de cambiarPagina es quien manda).
         return {
           ...prev,
           mesaId: siguiente.id,
@@ -377,13 +379,34 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     setVisorActa((prev) => (prev ? { ...prev, tipo, pagina: 1 } : prev));
   }, []);
 
-  const cambiarPagina = useCallback((pagina: number) => {
-    setVisorActa((prev) => {
-      if (!prev) return prev;
-      const maxima = prev.tipo === "TRANSMISION" ? 2 : 1;
-      return { ...prev, pagina: Math.min(Math.max(1, pagina), maxima) };
-    });
-  }, []);
+  // SUP-6.1 (BLOQUEADA-1 de la auditoría): el máximo de páginas se DERIVA
+  // del largo real del acta cargada — el formulario CÓNSUL/EMBAJADOR del
+  // ancla tiene 2 páginas (D26) y el supuesto SUP-4 (DELEGADOS = 1) las
+  // dejaba inalcanzables. Si la respuesta en memoria aún no corresponde a
+  // la mesa abierta (ventana de carga ~400 ms) o no trae páginas para el
+  // formulario, cae al supuesto SUP-4 (mismo comportamiento de antes).
+  const cambiarPagina = useCallback(
+    (pagina: number) => {
+      setVisorActa((prev) => {
+        if (!prev) return prev;
+        const alDia =
+          actaCargada !== null &&
+          actaCargada.puestoId === prev.puestoId &&
+          actaCargada.mesaId === prev.mesaId;
+        const paginasActa = alDia
+          ? actaCargada.acta?.formularios[prev.tipo].length
+          : undefined;
+        const maxima =
+          paginasActa && paginasActa > 0
+            ? paginasActa
+            : prev.tipo === "TRANSMISION"
+              ? 2
+              : 1;
+        return { ...prev, pagina: Math.min(Math.max(1, pagina), maxima) };
+      });
+    },
+    [actaCargada]
+  );
 
   // ── KIT SUP-4 — acciones del visor (patrón vida-v1, D19) ─────────────
   const aprobarActaVisor = useCallback(

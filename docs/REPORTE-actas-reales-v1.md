@@ -87,3 +87,41 @@ Ninguna otra desviación. Los archivos prohibidos (`divipola-adapter.ts`,
 `domain/divipola.ts`, `supervision-repository.ts`, `domain/types.ts`,
 `documento-e14.tsx`, vida, anomalías, shell, filtros, KPIs) quedaron intactos;
 sin dependencias nuevas y sin `next/image`.
+
+---
+
+## 7. SUP-6.1 — correcciones post-auditoría (mini-kit; autorización del dueño)
+
+La auditoría SUP-6 (`AUDITORIA-sup-e14-actas-reales-v1.md`) aprobó con
+hallazgos y dejó 2 arreglos pendientes de 1–2 líneas. Con la autorización
+del dueño (opción B del veredicto: primero el mini-kit, luego merge) se
+aplican sobre esta misma rama:
+
+| Hallazgo | Archivo | Arreglo |
+|---|---|---|
+| **BLOQUEADA-1** — DELEGADOS P2 inalcanzable | `datos-provider.tsx` (FUERA de la whitelist §1 de SUP-6 — el dueño autoriza) | `cambiarPagina` deriva el máximo del largo real de páginas del acta cargada (`formularios[tipo].length`, con guard `actaAlDia`); fallback al supuesto SUP-4 si el acta está en carga. `actaCargada` en deps del `useCallback`. Comentario de `navegarMesa` actualizado (reset a P1 se conserva). |
+| **FINDING-1** — ancho base de la foto no honrado | `actas/acta-viewer-modal.tsx` (ya en whitelist) | `<img>` con `style={{ width: FOTO_ANCHO_BASE, maxWidth: "none" }}`. **Nota:** la receta literal de la auditoría (solo `width`) se probó y NO basta — el preflight `max-width: 100%` sigue clampeando dentro del wrapper absoluto (medido: 184 CSS px con solo `width`); anulado el `max-width` → layout 460 px. |
+| **FINDING-2** — formulario duplicado en manifest | — | **Diferido** (edge, 0 casos hoy): D27 deja la sugerencia (cuarentenar la clave completa). Loader intacto en SUP-6.1. |
+
+### Verificación (mismo método de la auditoría: export basePath + serve subpath :8077 + browser E2E)
+
+| # | Chequeo | Resultado |
+|---|---|---|
+| 1 | `tsc --noEmit` | ✅ 0 errores |
+| 2 | `bun run lint` | ✅ 0 problemas |
+| 3 | KPIs tras el arreglo | ✅ 232/44/199/474 — sin cambios (suma 949) |
+| 4 | TRANSMISIÓN P1: `<img>` CSS width | ✅ `usedW: 460px`, `max-width: none` (antes 184 px); visual 368 px a zoom 0.8 = caja esperada (captura `02`) |
+| 5 | **DELEGADOS → chip PÁGINA 2** | ✅ **foto real servida**: src `…CONSUL_EMBAJADOR-2.png`, caption `ACTA REAL · CÓNSUL/EMBAJADOR · PÁG 2/2` + verbatim + barcode (captura `01`; el escaneo imprime su barcode propio 710003992010202 y «Pag: 2 de 2») |
+| 6 | DELEGADOS P2: ancho | ✅ `usedW: 460px` (natural 1327×3982) |
+| 7 | Regresión TRANSMISIÓN P1→P2 (flecha) | ✅ foto real P2, caption PÁG 2/2 |
+| 8 | Roma mesa 1 (sintético D18) | ✅ intacto: `#A92-F`, SOLICITUD DE RESCANEO, 0 fotos (captura `03`) |
+| 9 | 4 PNG bajo `/supervision-e14/_next/static/media/` | ✅ 4/4 HTTP 200, bytes exactos (237,038 / 204,950 / 262,874 / 194,627) |
+| 10 | Consola | ✅ 0 errores de página, 0 avisos de cuarentena |
+| 11 | Móvil 375 px | ✅ `scrollWidth=clientWidth=375` (captura `04`) |
+
+Capturas en `docs/capturas-actas-reales-v1.1/` (4 PNG). Decisión registrada
+como **D27** en `docs/DECISIONS.md`. Sin dependencias nuevas; el loader
+(`actas-reales.ts`) y los archivos prohibidos quedaron intactos.
+
+**La rama queda lista para merge por orden del dueño** (PR deja de ser
+DRAFT → merge → borrado de rama, como en SUP-5).
