@@ -183,6 +183,17 @@ observación → APROBAR (spinner → overlay «ACTA VALIDADA», anomalía
 revisada) → navega a la Mesa 004 con `< MESA n/N >` → CONFIRMAR
 RESCANEO (caption «VERSIÓN 2 — RECIBIDA…»).
 
+**Actas reales (kit `SUP-6` / `actas-reales-v1`):** el visor también
+acepta fotos reales del digitalizador vía manifest
+(`data/actas-reales/actas-reales-manifest.json`, contrato D24) —
+búscalas en EGIPTO (335) → 02 - El Cairo - Consulado → VER ACTA en la
+mesa 001: el papel del canvas es el escaneo real (TRANSMISIÓN y
+CÓNSUL/EMBAJADOR, 2 páginas cada uno) con la misma toolbar de
+zoom/rotación/contraste y un caption de 2 líneas con la impresión
+verbatim del encabezado. Las actas se validan contra el catálogo
+DIVIPOLA al cargar (join por `idEnlace`, cuarentena si falla — D25) y
+**el módulo no lee votos: la foto se ubica y se muestra tal cual** (D23).
+
 **Flujo de demostración sugerido (dashboard vivo):** abre ☰ → visita las
 vistas activas → vuelve al Monitor → busca «roma» y expande 02 - Roma -
 Consulado → pulsa REINSPECCIONAR en Mesa 001 → espera ~45 s y mira cómo
