@@ -404,3 +404,82 @@ Ajuste aplicado (opción ofrecida por el kit):
   (búsqueda determinística de puestos reales por país + estado de mesa
   útil). Cuando lleguen los datos del digitalizador y la carga masiva,
   las filas se casan por esta clave — nada más cambia.
+
+## D23 — Acta real = imagen + información impresa (kit SUP-6 §2 / T2)
+
+- **Decisión:** cada muestra del digitalizador es una foto escaneada del
+  E-14 más los metadatos impresos de su encabezado. El dominio NO
+  interpreta el contenido: `ActaMesa` se extiende con `fotos`
+  (`Partial<Record<FormularioTipo, (FotoActa | null)[]>>` — índice =
+  página − 1; `null`/ausente → esa página cae al sintético) e
+  `impresion?: ImpresionActa` (campos del encabezado verbatim). Tipos
+  nuevos: `FotoActa` (src/ancho/alto/archivo) e `ImpresionActa`
+  (consulado/país/zona/puesto/mesa/lugar + barcode y etiqueta opcional).
+- **Prioridad de render:** si la página tiene foto → foto real; si no →
+  documento sintético D18 (hoy). El papel de la foto mide 460 CSS px de
+  ancho a zoom 1 (alto por aspect ratio intrínseco ~1:3 — scroll
+  vertical); la caja rotada usa las dimensiones de la FOTO (no las del
+  papel A4 794×1123).
+- **Regla de oro intacta (§0-1):** el módulo NO mira votos — prohibido
+  OCR/extracción/deducción; la imagen se muestra tal cual junto a la
+  información impresa. `documento-e14.tsx` NO se toca; toolbar, zoom
+  (0.5–3.0), rotación (0/90/180/270) y contraste (NORMAL/ALTO/NEGATIVO)
+  del visor se reutilizan tal cual (filtros CSS reales sobre la imagen).
+
+## D24 — Contrato de ingesta = manifest + assets (kit SUP-6 §2 / T1/T3)
+
+- **Decisión:** `data/actas-reales/actas-reales-manifest.json` declara
+  las actas: `idEnlace`, `mesa`, `formulario` (clave de dominio
+  `TRANSMISION` | `DELEGADOS`), `etiquetaImpresa` (texto del encabezado
+  impreso, p. ej. «CÓNSUL/EMBAJADOR» → clave de dominio `DELEGADOS`),
+  `barcodeImpreso`, `impresion` (verbatim) y `paginas[]` (`pagina`,
+  `archivo`). Los assets son PNG importados estáticamente desde
+  `data/actas-reales/assets/` (el export estático resuelve la ruta con
+  basePath solo; sin `next/image` — §0-3). Convención de nombre (la del
+  digitalizador): `E14_<idEnlace con _>_<mesa>_<FORMULARIO>-<pagina>.png`.
+- **Loader (`data/actas-reales/actas-reales.ts`):** `cargarActasReales()`
+  memoizado en módulo devuelve `ResultadoIngesta` — `actas: Record<string,
+  ActaRealLista>` con clave `${idEnlace}::${mesa}` (las 2 entradas del
+  ancla comparten mesa y se fusionan: fotos + etiqueta/barcode POR
+  formulario, porque el barcode impreso difiere entre TRANSMISIÓN y
+  CÓNSUL/EMBAJADOR) y `bloqueadas: { clave, motivo }[]` (cuarentena,
+  D25). El `impresion` adjunto al acta es el encabezado verbatim de 6
+  campos; etiqueta/barcode viajan por formulario en el registro del
+  loader y el visor los consulta por clave (resolución de ambigüedad
+  registrada en el REPORTE — el kit los lista dentro de `ImpresionActa`
+  como opcionales).
+- **Peso de assets:** el bundle no expone el peso del asset, así que el
+  guardrail usa un mapa de bytes verificado con sha256sum al copiar
+  (Anexo A); es metadata de ingesta, no dato de dominio.
+
+## D25 — Validación de ubicación (join por `idEnlace`, D22) + cuarentena (kit SUP-6 §2 / T3)
+
+- **Decisión:** al cargar el manifest se valida CADA acta contra el
+  catálogo DIVIPOLA (`CARGAR_CATALOGO()` — import de solo-lectura; el
+  adaptador NO se modifica): (a) `idEnlace` existe en el catálogo;
+  (b) `mesa` ≤ `totalMesas` del puesto; (c) `formulario` es clave
+  conocida del dominio; (d) páginas 1..N completas y continuas;
+  (e) asset importable. La que falle NO se publica y se marca
+  `BLOQUEADA: <motivo>` en consola y en el reporte (cuarentena); el
+  resto sigue. Guardrail: máx 10 assets y 2 MB totales; más →
+  BLOQUEADA del manifest completo.
+- **Caída amable:** si el ancla quedara en cuarentena, `obtenerActa()`
+  sirve el documento sintético como cualquier otra mesa — nada se
+  improvisa y la UI no se rompe.
+
+## D26 — Ancla de práctica El Cairo (kit SUP-6 §2 / T4) — equivalente al ancla Roma de SUP-5
+
+- **Decisión:** el puesto `88_335_005_02` (El Cairo - Consulado,
+  EGIPTO, `totalMesas: 1` — registro real del catálogo) se **FUERZA a
+  `COMPLETO`** en `puestoDeRegistro` (mismo mecanismo del ancla Roma →
+  CRÍTICO; su seed natural cae en NO_INICIADO — el kit lo anota como
+  0.9872; sin fuerza el ancla es inalcanzable). Su mesa `001` sirve el
+  acta real: `formularios` con TRANSMISION P1/P2 y DELEGADOS P1/P2
+  (2 páginas — la realidad impresa del formulario CÓNSUL/EMBAJADOR),
+  todas `VALIDA`, sin motivo, `fotos` + `impresion` del loader/manifest,
+  id/hora/historial generados por seed como cualquier acta (mismas
+  reglas, sin textos custom).
+- **El resto NO cambia:** las otras 948 sedes y su vida/anomalías
+  quedan intactas; Roma mesa 1 sigue EXACTA al mockup (sintético
+  `#A92-F`); el acta real solo altera el estado del ancla (NO_INICIADO →
+  COMPLETO en los KPIs derivados — la única transición de estado del kit).

@@ -5,6 +5,8 @@ import { Check, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { cn } from "cn";
 import { useDatos } from "../datos-provider";
 import { actaAprobada } from "../../domain/acta";
+import type { FotoActa } from "../../domain/acta";
+import { cargarActasReales } from "../../data/actas-reales/actas-reales";
 import { ActaHeader } from "./acta-header";
 import { ActaToolbar } from "./acta-toolbar";
 import { DocumentoE14 } from "./documento-e14";
@@ -27,6 +29,11 @@ import { ActaHistorial } from "./acta-historial";
  *   nota de auditoría. <1024px se apila (T6.1).
  * - Sin sombras en TODO el modal: jerarquía = borde 1px + capas tonales +
  *   scrim (D14/D17).
+ * - SUP-6 (D23): si la página visible tiene FOTO REAL del digitalizador,
+ *   el papel del canvas es la imagen (misma toolbar/zoom/rotación/contraste
+ *   por CSS; la caja usa las dimensiones de la foto) con caption de 2
+ *   líneas (etiqueta impresa + impresión verbatim). Sin foto → sintético
+ *   D18 tal cual. El módulo NO mira votos (§0-1).
  */
 
 type ContrasteModo = "NORMAL" | "ALTO" | "NEGATIVO";
@@ -37,6 +44,10 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 3.0;
 const PAPEL_ANCHO = 794;
 const PAPEL_ALTO = 1123;
+/** SUP-6 (D23): ancho base de la foto real a zoom 1 (ancho completo
+ * visible al abrir; el alto por el aspect ratio intrínseco ~1:3 —
+ * navegación por scroll vertical). */
+const FOTO_ANCHO_BASE = 460;
 
 function filtroDeContraste(modo: ContrasteModo): string | undefined {
   if (modo === "ALTO") return "contrast(1.5)";
@@ -118,11 +129,30 @@ function VisorAbierto() {
   const pagina = paginas.find((p) => p.numero === paginaActiva);
   const aprobada = actaActual ? actaAprobada(actaActual) : false;
 
+  // ── SUP-6 (D23): foto real de la página visible (si la hay) ────────────
+  const fotoActiva: FotoActa | null =
+    actaActual?.fotos?.[visorActa.tipo]?.[paginaActiva - 1] ?? null;
+  const impresion = actaActual?.impresion;
+  const esActaReal = Boolean(fotoActiva && impresion);
+  // Etiqueta/barcode impresos del formulario visible (del manifest, D24 —
+  // el loader es memoizado en módulo: consultar aquí es gratis).
+  const registroReal =
+    cargarActasReales().actas[`${visorActa.puestoId}::${visorActa.mesaId}`];
+  const etiquetaReal = registroReal?.etiquetasImpresas[visorActa.tipo];
+  const barcodeReal = registroReal?.barcodesImpresos[visorActa.tipo];
+
   // Caja de layout = bounding box exacta del papel escalado + rotado
   // (giros de 90° intercambian ancho/alto — el scroll del canvas es fiel).
+  // Con FOTO REAL la caja usa las dimensiones de la FOTO (no las del
+  // papel A4 794×1123 — kit T5.1).
   const rotado = rotacion % 180 !== 0;
   const cajaAncho = Math.round((rotado ? PAPEL_ALTO : PAPEL_ANCHO) * zoom);
   const cajaAlto = Math.round((rotado ? PAPEL_ANCHO : PAPEL_ALTO) * zoom);
+  const fotoAltoBase = fotoActiva
+    ? Math.round((fotoActiva.alto / fotoActiva.ancho) * FOTO_ANCHO_BASE)
+    : 0;
+  const fotoCajaAncho = Math.round((rotado ? fotoAltoBase : FOTO_ANCHO_BASE) * zoom);
+  const fotoCajaAlto = Math.round((rotado ? FOTO_ANCHO_BASE : fotoAltoBase) * zoom);
 
   const puedePaginaAnterior = paginaActiva > 1;
   const puedePaginaSiguiente = paginaActiva < paginas.length;
@@ -277,6 +307,37 @@ function VisorAbierto() {
                     </p>
                   </div>
                 )
+              ) : fotoActiva ? (
+                /* SUP-6 (D23): la foto real es el "papel" del canvas —
+                   misma lógica de transform/filtro CSS que el sintético
+                   (D18); documento-e14.tsx NO se toca. Sin cifras de
+                   votación en la UI (§0-1): la imagen se muestra tal cual. */
+                <div className="flex min-h-full min-w-full items-center justify-center p-6">
+                  <div
+                    className="relative shrink-0"
+                    style={{ width: fotoCajaAncho, height: fotoCajaAlto }}
+                  >
+                    <div
+                      className="absolute top-1/2 left-1/2"
+                      style={{
+                        transform: `translate(-50%, -50%) scale(${zoom}) rotate(${rotacion}deg)`,
+                        filter: filtroDeContraste(contraste),
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element --
+                          asset importado estáticamente del módulo (D24);
+                          next/image está prohibido por el kit §0-3 */}
+                      <img
+                        src={fotoActiva.src}
+                        width={FOTO_ANCHO_BASE}
+                        height={fotoAltoBase}
+                        alt={`Acta real E-14 ${etiquetaReal ?? visorActa.tipo} — página ${paginaActiva}, escaneo del digitalizador (encabezado impreso ubicado; sin lectura de votos)`}
+                        draggable={false}
+                        className="block select-none rounded-[4px] border border-(--border) bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
               ) : (
                 mesa && (
                   <div className="flex min-h-full min-w-full items-center justify-center p-6">
@@ -305,7 +366,10 @@ function VisorAbierto() {
               )}
             </div>
 
-            {/* Caption inferior flotante */}
+            {/* Caption inferior flotante — con FOTO REAL (D23/T5.2):
+                línea 1 = ACTA REAL · etiqueta impresa · PÁG n/total;
+                línea 2 = impresión verbatim + barcode en mono.
+                Sin cifras de votación (§0-1). */}
             {textoCaption && (
               <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-4">
                 <p className="label-caps pointer-events-auto inline-flex max-w-full items-center gap-2 rounded-[4px] border border-(--border) bg-(--input)/90 px-3 py-1.5 backdrop-blur">
@@ -318,9 +382,23 @@ function VisorAbierto() {
                     )}
                     aria-hidden
                   />
-                  <span className="truncate text-(--outline-strong)">
-                    {textoCaption}
-                  </span>
+                  {esActaReal && impresion ? (
+                    <span className="min-w-0">
+                      <span className="block truncate text-(--outline-strong)">
+                        {`ACTA REAL · ${etiquetaReal ?? visorActa.tipo} · PÁG ${paginaActiva}/${totalPaginas}`}
+                      </span>
+                      <span className="block truncate font-normal text-muted-foreground">
+                        {`CONSULADO ${impresion.consulado} · PAÍS ${impresion.pais} · ZONA ${impresion.zona} · PUESTO ${impresion.puesto} · MESA ${impresion.mesa} · LUGAR ${impresion.lugar}`}
+                        {barcodeReal && (
+                          <span className="font-mono"> · {barcodeReal}</span>
+                        )}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="truncate text-(--outline-strong)">
+                      {textoCaption}
+                    </span>
+                  )}
                 </p>
               </div>
             )}

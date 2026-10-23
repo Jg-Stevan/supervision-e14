@@ -18,6 +18,31 @@ export interface PaginaActa {
   estado: PaginaEstado;
 }
 
+// ─── KIT SUP-6 (actas-reales-v1 §3-T2) — foto real + encabezado impreso ────
+
+/** Foto real de una página del acta (kit actas-reales-v1). */
+export interface FotoActa {
+  /** URL del asset (import estático del módulo). */
+  src: string;
+  /** Dimensiones intrínsecas en px (canvas del visor). */
+  ancho: number;
+  alto: number;
+  /** Nombre de archivo (convención digitalizador). */
+  archivo: string;
+}
+
+/** Encabezado IMPRESO del acta — se muestra, no se interpreta. */
+export interface ImpresionActa {
+  consulado: string; // "88"
+  pais: string;      // "335 - EGIPTO"
+  zona: string;      // "05"   (verbatim impreso; el catálogo usa 005)
+  puesto: string;    // "02"
+  mesa: string;      // "001"
+  lugar: string;     // "El Cairo - Consulado"
+  barcode?: string;  // "710003993010102"
+  etiquetaFormulario?: string; // "TRANSMISIÓN" | "CÓNSUL/EMBAJADOR"
+}
+
 /** Nivel de un evento del historial del acta. El kit §3-T1 define
  * CRITICO/ALERTA/NEUTRAL; §3-T5.5 añade APROBADA (punto primary en la
  * timeline — color nuevo permitido por el kit). */
@@ -50,6 +75,12 @@ export interface ActaMesa {
   historial: EventoActa[];
   /** 1; ++ tras rescan confirmado (kit T1). */
   version: number;
+  /** SUP-6 (D23): fotos reales del digitalizador por formulario, indexadas
+   * página − 1 (null/ausente → esa página cae al documento sintético D18). */
+  fotos?: Partial<Record<FormularioTipo, (FotoActa | null)[]>>;
+  /** SUP-6 (D23): encabezado impreso verbatim — se muestra, no se
+   * interpreta (§0-1: el módulo NO mira votos). */
+  impresion?: ImpresionActa;
 }
 
 /** true si el acta fue aprobada por el supervisor (overlay "ACTA VALIDADA",

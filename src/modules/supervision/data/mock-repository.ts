@@ -46,6 +46,10 @@ import {
   obtenerActa,
 } from "./actas-mock";
 
+/** ANCLA DE PRÁCTICA (SUP-6 §2.3 / D26): El Cairo - Consulado (EGIPTO) —
+ * la mesa 001 sirve el acta real del digitalizador (kit actas-reales-v1). */
+export const ID_ENLACE_CAIRO = "88_335_005_02";
+
 /** Supervisor de la sesión (header del mockup). */
 export const SUPERVISOR = {
   nombre: "SUPERVISOR",
@@ -134,6 +138,11 @@ const HORARIO_ROMA = {
  * transformar (§2.3). */
 function puestoDeRegistro(registro: PuestoDivipola): Puesto {
   const esAncla = registro.idEnlace === ID_ENLACE_ROMA;
+  // D26: ancla de práctica El Cairo — se FUERZA a COMPLETO (mismo
+  // mecanismo del ancla Roma → CRÍTICO). Su seed natural cae en
+  // NO_INICIADO (4a llamada del seed > 0.5 — rango NO_INICIADO; el kit
+  // lo anota como 0.9872): sin fuerza el ancla es inalcanzable.
+  const esAnclaCairo = registro.idEnlace === ID_ENLACE_CAIRO;
   const random = crearRandomDeterministico(`divipola::puesto::${registro.idEnlace}`);
   const horario = esAncla ? HORARIO_ROMA : horarioPorSeed(random);
   return {
@@ -150,7 +159,7 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
     // Los pcts se recalculan al inicializar (derivación de mesas, D16).
     pctDelegado: 0,
     pctTransmision: 0,
-    estadoGlobal: esAncla ? "CRITICO" : estadoPorSeed(random()),
+    estadoGlobal: esAncla ? "CRITICO" : esAnclaCairo ? "COMPLETO" : estadoPorSeed(random()),
   };
 }
 
