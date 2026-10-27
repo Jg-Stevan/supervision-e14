@@ -1,0 +1,486 @@
+     1→# Decisiones — supervision-e14
+     2→
+     3→Kit `SUP-1` / `fundacion-v1` (2026-10-20). Formato: D<n> — decisión, razón.
+     4→
+     5→## D1 — Stack exacto del kit
+     6→
+     7→Next.js 16 (App Router) + TypeScript estricto + Tailwind CSS 4 + shadcn/ui
+     8→(estilo New York) + lucide-react. Sin zustand/framer-motion/Material: el
+     9→estado del kit es mínimo y se resuelve con `useState`/`useMemo`.
+    10→
+    11→## D2 — Frontera de módulo dura (trasplante)
+    12→
+    13→Todo el código del producto vive en `src/modules/supervision/**`. Fuera solo
+    14→hay scaffolding/config. Razón: el módulo se trasplantará al monorepo del
+    15→digitalizador; ningún archivo externo importa nada del módulo, así el
+    16→trasplante es mover la carpeta + cambiar la implementación del repositorio.
+    17→
+    18→## D3 — Repo separado temporal
+    19→
+    20→`supervision-e14` es un repo privado nuevo, independiente del digitalizador,
+    21→para fundar el módulo sin tocar repos existentes (kit §0-2). Cuando madure,
+    22→se trasplanta (D2).
+    23→
+    24→## D4 — Tema solo dark
+    25→
+    26→`globals.css` define únicamente el tema dark de §2.1 (sin bloque light).
+    27→Tokens custom añadidos: `--success`, `--warning`, `--danger`,
+    28→`--neutral-state`, `--error-text` y superficies del kit (`--surface-lowest`,
+    29→`--surface-high`, `--surface-highest`, `--outline-strong`,
+    30→`--outline-variant`, `--hover-row`). `--radius: 0.25rem` forzado a TODOS los
+    31→escalones (`--radius-sm/md/lg/xl`) para cumplir “radio 4px en todo”. Sin
+    32→sombras: la jerarquía es bordes 1px + capas tonales; los componentes shadcn
+    33→que traen `shadow-*` se usan con `shadow-none` en los puntos de uso.
+    34→
+    35→### D4.a — Ámbar
+    36→
+    37→El kit ofrece dos ambarles: `#fdd400` (secondary-container → `--warning`) y
+    38→`#ffd600` (“ámbar puro del spec”, alternativo). Se adoptó **`#ffd600`** para
+    39→`--warning` y para el estado PENDIENTE, unificando el color del semáforo con
+    40→el del spec de componentes; `#fdd400` queda sin uso.
+    41→
+    42→## D5 — Repositorio mock detrás de interfaz
+    43→
+    44→`SupervisionRepository` (exactamente los 3 métodos del kit: `getResumen`,
+    45→`getPuestos(filtros)`, `getMesasDePuesto`) es el único punto de consumo de
+    46→datos. `mockSupervisionRepository` es la implementación del demo; en la
+    47→integración se reemplaza por la implementación real y nada más cambia.
+    48→
+    49→**Nota:** el nombre/ID del supervisor del header (`SUPERVISOR`, `ADM-9482`)
+    50→se exporta como constante del mock. Es texto fijo del shell de demostración;
+    51→la interfaz del repositorio se mantiene EXACTA a la firma del kit (3 métodos).
+    52→
+    53→## D6 — Consistencia-KPIs sobre fidelidad literal del mockup
+    54→
+    55→El KPI oficial manda: total 20 · completo 5 · crítico 1 · pendiente 4 ·
+    56→no iniciado 10. El mockup mostraba 2 CRÍTICOS (Italia y España) con KPI de 1.
+    57→Ajuste aplicado (opción ofrecida por el kit):
+    58→
+    59→- **España pasa de CRÍTICO a PENDIENTE** (el CRÍTICO único es Italia).
+    60→- Relleno creíble autorizado por el kit: 15 puestos adicionales
+    61→  (Francia, Alemania, Brasil, Canadá = COMPLETO; México, Argentina =
+    62→  PENDIENTE; Venezuela, Perú, Chile, Ecuador, Costa Rica, República
+    63→  Dominicana, Guatemala, El Salvador, Australia = NO INICIADO).
+    64→- Resultado verificado en runtime: KPIs 20/5/1/4/10 y filtro Estado=COMPLETO
+    65→  devuelve exactamente 5 puestos.
+    66→
+    67→## D7 — Ajustes técnicos de implementación (sin cambios de alcance)
+    68→
+    69→1. **Expansión de filas con Collapsible Radix sin romper `<table>`:** el
+    70→   raíz por defecto de Radix Collapsible es un `<div>`, inválido dentro de
+    71→   una tabla. Solución: un `<tbody>` por puesto usado como raíz del
+    72→   Collapsible (`asChild`), con `CollapsibleTrigger asChild` sobre la fila y
+    73→   `CollapsibleContent asChild` sobre la fila de detalle. HTML válido
+    74→   (múltiples `<tbody>` son legales) y comportamiento idéntico.
+    75→2. **Header sticky de la tabla maestra dentro de su propia región de
+    76→   scroll:** el contenedor con `overflow-x-auto` (scroll horizontal
+    77→   obligatorio de 10 columnas) crea un scrollport que impide el sticky
+    78→   relativo a la página (los `th` se desplazaban y tapaban la primera fila).
+    79→   La tabla vive entonces en un wrapper `max-h + overflow-auto` y el header
+    80→   se pega dentro de esa región (`top-0`). El `<table>` se renderiza directo
+    81→   (sin el wrapper `Table` de shadcn) precisamente porque su contenedor
+    82→   interno con `overflow-x-auto` rompía el sticky; `TableRow/TableHead/
+    83→   TableCell` de shadcn se conservan.
+    84→3. **Select mock de Fecha:** una sola opción, “Domingo, 14 Jun” (kit §2.4).
+    85→4. **Mesas:** solo Italia define mesas (001–003, datos exactos del kit). El
+    86→   resto de puestos muestra el estado vacío “Sin detalle de mesas para este
+    87→   puesto en los datos demo.” al expandir.
+    88→5. **Zona:** el mockup solo da números de zona; `zonaId` y `zona` llevan el
+    89→   mismo valor de la fila (no se inventan nombres).
+    90→6. **Iconos no especificados por el kit:** NO INICIADO → `Minus` (neutral),
+    91→   Carga Masiva → `Upload`. El resto usa las equivalencias dadas.
+    92→7. **Toasts de demostración:** `sonner` con `theme="dark"` montado en el
+    93→   layout; mensaje exacto “Función de demostración — sin backend”.
+    94→8. **Targets táctiles:** opciones de los Select a 44px (`h-11`) y botones de
+    95→   acción de la sub-tabla a 44px, cumpliendo §0-8.
+    96→9. **Fuentes:** `next/font/google` (Hanken Grotesk 600/700, JetBrains Mono
+    97→   400/500/600). Carga verificada en runtime (`document.fonts`).
+    98→10. **Scaffold:** create-next-app@16 no genera `postcss.config.mjs` (usa el
+    99→    loader de Turbopack para Tailwind); se pasó al setup estándar
+   100→    `@tailwindcss/postcss` (ambos archivos están en la whitelist) para que
+   101→    el CLI de shadcn valide. `bun.lock` y `next-env.d.ts` se incluyen como
+   102→    artefactos estándar del scaffold T0.2.
+   103→
+   104→## D8 — Export estático para GitHub Pages con basePath por env
+   105→
+   106→- **Decisión:** `next.config.ts` pasa a `output: "export"` con
+   107→  `basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? ""`,
+   108→  `images: { unoptimized: true }` y `trailingSlash: true` (kit SUP-2 §3 T3,
+   109→  snippet literal).
+   110→- **Por qué:** Pages sirve el sitio en subpath `/supervision-e14/`; el env
+   111→  inyecta ese basePath SOLO en el build de Actions. Sin el env (dev/build
+   112→  local) la app sigue en raíz — el `bun run dev` local NO cambia (regla
+   113→  §0-6, verificada: GET / 200 tras el cambio).
+   114→- **Nota honesta:** el snippet del kit reemplazó los flags del scaffold
+   115→  (`cacheComponents: true`, `partialPrefetching: true`). Con
+   116→  `output: "export"` el sitio es 100% estático (mock repository, sin API
+   117→  routes — regla §0-7), así que esos flags no tienen efecto visible en este
+   118→  demo; se siguió el snippet del kit VERBATIM por alcance cerrado.
+   119→- **`.nojekyll`:** archivo vacío en `public/` — sin él, GitHub Pages ignora
+   120→  `_next/` (Jekyll). Crítico para el subpath.
+   121→
+   122→## D9 — `LayoutProps<"/">` → `Readonly<{ children: React.ReactNode }>`
+   123→
+   124→- **Hallazgo (auditoría SUP-2 §2):** `LayoutProps` es un tipo global que
+   125→  Next 16 genera en `.next/types` (typegen); en clone fresco
+   126→  `bunx tsc --noEmit` directo fallaba con `TS2304: Cannot find name
+   127→  'LayoutProps'`.
+   128→- **Fix:** firma estándar de Next `Readonly<{ children: React.ReactNode }>`
+   129→  en `src/app/layout.tsx` (kit T1, literal).
+   130→- **Verificación:** `rm -rf .next && bunx tsc --noEmit` → **0 errores sin
+   131→  typegen** en clone fresco (§4.1). El workflow de Pages conserva
+   132→  `bunx next typegen` como cinturón adicional (no es bloqueante).
+   133→
+   134→## D10 — Tabla de puestos completa a 1440px sin scroll horizontal
+   135→
+   136→- **Hallazgo (auditoría SUP-2 §2):** a 1440×900 con sidebar de 256px, la
+   137→  tabla maestra requería scroll horizontal para alcanzar ESTADO GLOBAL
+   138→  (medido antes del fix: `scrollWidth 1245` vs `clientWidth 1134` → exceso
+   139→  de **111px**).
+   140→- **Técnica (todas permitidas por el kit T2, solo en el módulo):**
+   141→  1. Padding horizontal de celdas `px-1.5` (override del `p-2`/`px-2` de
+   142→     ui/table vía tailwind-merge) en los 10 `th` y `td` de la fila.
+   143→  2. Mini-barras de progreso compactadas: `min-w-28→min-w-24`,
+   144→     etiqueta % `w-10→w-9`, `gap-2→gap-1.5`.
+   145→  3. Chip de hora actual `px-2→px-1.5`.
+   146→  4. Encabezado «Hora cierre Colombia» → «Cierre COL» (abreviatura
+   147→     autorizada por el kit: era la columna más ancha, 158px).
+   148→- **Verificación (medido):** 1440×900 → `scrollWidth 1134` =
+   149→  `clientWidth 1134` → **exceso 0** (tabla COMPLETA hasta ESTADO GLOBAL).
+   150→  1280×800 → exceso 123px (scroll horizontal residual aceptable por el
+   151→  kit por debajo de 1440). Legibilidad y tokens intactos (interacciones
+   152→  verificadas en el preview estático).
+   153→
+   154→## D11 — Vistas por estado interno del shell (NO rutas nuevas)
+   155→
+   156→- **Decisión:** Monitor Global / Centro de Notificaciones / Generar
+   157→  Informes / Revisión de Anomalías se cambian con estado interno del
+   158→  `SupervisionShell` (`vista: "monitor" | "notificaciones" | "anomalias" |
+   159→  "informes"`), no con rutas (kit SUP-3 T5/T6/T7).
+   160→- **Por qué:** el export estático sigue siendo trivial (una sola página,
+   161→  `output: "export"` intacto) y la frontera de módulo no se abre.
+   162→- **`page.tsx` (único archivo fuera del módulo):** quedó en su mínimo —
+   163→  solo monta `<SupervisionShell />`. NO necesita Suspense de servidor:
+   164→  la carga async de T2 es client-side (provider) y los skeletons de T3
+   165→  cubren esa latencia.
+   166→
+   167→## D12 — Repositorio async + mutaciones en la interfaz
+   168→
+   169→- **Decisión:** `SupervisionRepository` devuelve `Promise` en sus lecturas
+   170→  y añade las mutaciones del kit: `resolverRescaneo` (T4),
+   171→  `notificarMesa` (T4) y `aplicarTransicionVida` (T3).
+   172→- **Por qué:** el repositorio real del digitalizador será async — el
+   173→  contrato se adelanta hoy sin backend. Latencia simulada: ~400 ms en
+   174→  lecturas y ~2.5 s en REINSPECCIONAR (el spinner del kit).
+   175→- Las mutaciones viven en el mock (el dueño de los datos); el store
+   176→  cliente aplica los resultados y los toasts/reportes de éxito.
+   177→
+   178→## D13 — Simulación de vida (reglas de derivación + ticker; D6 protegido)
+   179→
+   180→- **Reglas de derivación (una sola fuente de verdad):**
+   181→  - `estadoMesa` se deriva de sus 4 partes: alerta presente →
+   182→    INCOMPLETO; 4 partes ok → COMPLETO; 0 ok → NO_INICIADO; resto →
+   183→    EN_PROCESO.
+   184→  - `pctDelegado`/`pctTransmision` del puesto = % de partes ok de sus
+   185→    mesas (kit T2 «derivable de sus mesas»).
+   186→  - `estadoGlobal` del puesto pasa a COMPLETO solo si TODAS sus mesas lo
+   187→    están; en otro caso conserva su estado (el kit solo define la
+   188→    transición → COMPLETO; no se inventan otras).
+   189→- **Ticker (T3):** «Sincronizado hace Xs» avanza de 5 en 5 s; a los 45 s
+   190→  el mock aplica UNA transición (mesa EN_PROCESO → completa sus partes
+   191→  pendientes), con preferencia por la candidata que COMPLETA su puesto
+   192→  (KPIs en vivo); si no hay candidata que complete, la primera
+   193→  EN_PROCESO. El contador de sincronización se reinicia tras cada
+   194→  transición.
+   195→- **D6 protegido:** el estado inicial (20/5/1/4/10) se verifica exacto al
+   196→  cargar; las transiciones solo mutan DESPUÉS de ticks (evidencia en el
+   197→  REPORTE: KPIs 5/4 → 7/2 en vivo tras 2 transiciones).
+   198→- **Mesas de Italia:** 3 EXACTAS del mockup (001-003, intactas) + 004-008
+   199→  generadas coherentes con CRÍTICO (kit T2; `numeroMesas=8` exige 8).
+   200→
+   201→## D14 — Sidebar ocultable como overlay flotante (decisión del dueño)
+   202→
+   203→- **Decisión:** la sidebar DEJA de ser fija en ningún viewport. Por
+   204→  defecto OCULTA; el botón ☰ (siempre visible) la abre como panel
+   205→  flotante anclado a la izquierda, ENCIMA del contenido, con scrim
+   206→  `rgba(0,0,0,0.5)` y borde derecho 1px `outline-variant` (sin sombras).
+   207→- **Por qué (dueño):** maximizar el área de la tabla; el ancho extra
+   208→  beneficia la vista de datos. Móvil y desktop comparten la MISMA
+   209→  implementación (unificada — el drawer Sheet anterior se retiró).
+   210→- Cierre: ✕ del panel, `Escape` y clic en el scrim. El foco va al panel
+   211→  al abrir; el scroll de fondo se bloquea mientras está abierto.
+   212→- Carga Masiva sigue deshabilitada con el tooltip del kit («Se conectará
+   213→  al digitalizador (fase de integración)»).
+   214→
+   215→## D15 — Informes client-side (Blob, sin backend)
+   216→
+   217→- **Decisión:** la vista Generar Informes construye el .md y el .csv en
+   218→  el cliente (`Blob` + `URL.createObjectURL` + `<a download>`) y anuncia
+   219→  con toast el nombre del archivo. Nada de APIs (§0-5/§0-7).
+   220→- La fecha del informe es la REAL del navegador (es un informe, no un
+   221→  dato del mock, kit T7); el nombre de archivo usa la fecha ISO.
+   222→
+   223→## D16 — Ajustes de datos para que las mesas y los pcts cuadren
+   224→
+   225→- **pcts derivados de mesas (kit T2)** — los del mockup eran decorativos
+   226→  y con mesas reales debían ser derivables; ajustes aplicados al
+   227→  inicializar el mock: España 0/0 → **50/50**, Inglaterra 10/100 →
+   228→  **0/100**, México 45/30 → **50/38**, Argentina 70/55 → **75/50**,
+   229→  Italia 59/29 → **56/25** (con sus 8 mesas: 3 exactas + 5 generadas).
+   230→- **Semillas:** notificaciones 7 (4 no leídas → badge inicial 4) y
+   231→  anomalías 7 (5 ABIERTAS = badge dinámico «Anomalía 5» + 2 revisadas de
+   232→  histórico para el filtro).
+   233→- **Estado de lectura/revisión** (marcar leída, marcar todas, marcar
+   234→  revisada) es estado de UI del store — sin persistencia (§0-5: el kit
+   235→  NO autoriza localStorage).
+   236→
+   237→## D17 — Visor de actas como modal por estado (kit SUP-4 lo lista como D16)
+   238→
+   239→- **Nota de numeración:** el kit SUP-4 («actas-v1») nombra sus decisiones
+   240→  D16–D18, pero **D16 ya estaba usado** por vida-v1 (mergeado en main
+   241→  antes de abrir la rama). Se continúa la numeración: D17/D18/D19
+   242→  corresponde a los D16/D17/D18 del kit. La referencia interna del kit
+   243→  «(D17)» para el documento sintético equivale aquí a **D18**.
+   244→- **Decisión:** el visor de actas es un **modal por estado** (`visorActa`
+   245→  en el store del módulo), NO una ruta (coherente con D11). Cierre por ✕,
+   246→  `Escape` y clic en el scrim; el clic dentro del panel NO cierra. Al
+   247→  cerrar, el componente interno se desmonta: zoom/rotación/contraste/
+   248→  pantalla completa vuelven a su estado inicial en el siguiente uso
+   249→  (T3.1) sin effect de reset. El scroll de fondo se bloquea mientras está
+   250→  abierto (patrón D14). Sin sombras en TODO el modal: jerarquía = borde
+   251→  1px + capas tonales + scrim `bg-black/80 backdrop-blur-sm` — el
+   252→  `shadow-2xl` del mockup Stitch se eliminó.
+   253→- **Puntos de entrada (exactamente 3):** botón VER ACTA (`FileText`) por
+   254→  fila de mesa (deshabilitado en NO_INICIADO, `title="Sin transmisión"`),
+   255→  botón VER ACTA en las tarjetas de anomalías (aterriza en PÁGINA 2
+   256→  cuando la mesa no está COMPLETA — su advertencia es de página 2;
+   257→  deshabilitado sin mesa vinculada) y el 👁 (`Eye`) de la fila de puesto
+   258→  (abre la primera mesa con acta; deshabilitado si el puesto no tiene
+   259→  ninguna). El botón 👁 no existía en vida-v1 (el kit lo da por
+   260→  «ya existente»): se añadió en la celda ESTADO GLOBAL de la fila con
+   261→  `stopPropagation` para no disparar el Collapsible de la fila.
+   262→- **Montaje:** el modal se monta dentro de `datos-provider` (el store del
+   263→  módulo, que sí está en la whitelist); `supervision-shell.tsx` NO se
+   264→  toca.
+   265→
+   266→## D18 — Documento E-14 sintético vectorial (kit lo lista como D17)
+   267→
+   268→- **Decisión:** el documento se DIBUJA con JSX/SVG (`documento-e14.tsx`,
+   269→  papel A4 794×1123 px) — sin assets binarios (§0-8): sin PNG/JPG, sin
+   270→  PDFs, sin `pdf.js`, sin iframes. El zoom (escala 0.5–3.0, pasos 0.25),
+   271→  la rotación (0/90/180/270°) y el contraste (NORMAL/ALTO `contrast(1.5)`/
+   272→  NEGATIVO `invert(1)`) son transform/filtro CSS REALES sobre el papel.
+   273→- **Paleta del papel acotada al documento:** `#f7f6f2` (papel), `#1c1c1c`
+   274→  (tinta), `#c9c5ba` (líneas), `#b3261e` (sello rojo) viven SOLO dentro de
+   275→  `documento-e14.tsx` (excepción acotada del kit §2.1); el resto del
+   276→  visor usa los tokens congelados.
+   277→- **Caja de layout fiel al zoom+rotación:** el wrapper del papel usa una
+   278→  caja de tamaño = bounding box exacta (los giros de 90° intercambian
+   279→  ancho/alto), de modo que el `overflow-auto` del canvas coincide con el
+   280→  tamaño real del documento escalado/rotado.
+   281→- **Determinismo (§0-7):** votos, nombres de delegados, trazos de firma y
+   282→  observaciones se derivan por seed de la mesa (mulberry32 sobre hash
+   283→  FNV-1a — `crearRandomDeterministico` en `domain/acta.ts`). Roma mesa 1
+   284→  es EXACTA al mockup (§0-6): ID `#A92-F`, 14:20 LOCAL, motivo
+   285→  «SOLICITUD DE RESCANEO», P1 VALIDA / P2 ADVERTENCIA, historial
+   286→  14:00/14:18/14:20 con los textos literales.
+   287→- **Export estático intacto:** sin rutas nuevas, sin assets añadidos a
+   288→  `public/` — el build `output: "export"` no cambia (D8).
+   289→
+   290→## D19 — Trazabilidad de acta + acciones con estado (kit lo lista como D18)
+   291→
+   292→- **Patrón vida-v1:** APROBAR Y MARCAR COMO VÁLIDA y CONFIRMAR RESCANEO
+   293→  siguen el patrón de REINSPECCIONAR (D12): spinner ~2.5 s en el botón
+   294→  (ambos deshabilitados) → resolución en el mock → notificación + toast +
+   295→  efectos enlazados. Textos exactos del kit: toast «Acta marcada como
+   296→  válida» / «Rescan confirmado y recibido»; notificaciones «ACTA
+   297→  APROBADA — MESA n (Puesto)» y «RESCANEO COMPLETADO — MESA n (Puesto)».
+   298→- **Motivo obligatorio (T5.2):** textarea OBSERVACIONES vacío → no se
+   299→  ejecuta nada: borde en error + mensaje inline «Ingrese el motivo de la
+   300→  decisión» (sin toast). Tras resolver, la caja queda limpia.
+   301→- **Efectos enlazados:** APROBAR → todas las páginas VALIDA, chip de
+   302→  motivo fuera, evento «APROBADA POR SUPERVISOR» (nivel APROBADA → punto
+   303→  primary en la timeline, color nuevo permitido por el kit T5.5), overlay
+   304→  «ACTA VALIDADA» y la anomalía abierta vinculada (mismo puesto+mesa)
+   305→  pasa a revisada (badge incluido). RESCANEO → versión 1→2, hora de carga
+   306→  +30 min determinísticos, páginas VALIDA, evento «RESCANEO CONFIRMADO»,
+   307→  caption «VERSIÓN 2 — RECIBIDA hh:mm LOCAL». Los CONTADORES de mesa
+   308→  (delegados/transmisión) NO cambian: el visor solo muta nivel acta +
+   309→  anomalías + notificaciones (T5.7).
+   310→- **Contrato:** el acta SIEMPRE llega por `SupervisionRepository`
+   311→  (`getActaDeMesa`, ~400 ms; §0-9). Firma `(puestoId, mesaId)` — los ids
+   312→  de mesa se repiten entre puestos (mismo patrón que
+   313→  `resolverRescaneo(puestoId, mesaId)`); la variante de 1 argumento del
+   314→  kit es imposible de resolver con 20 puestos y se declaró en el REPORTE.
+   315→- **Semántica snapshot:** el acta se genera al primer acceso desde el
+   316→  estado VIGENTE de la mesa y queda en memoria; después solo las acciones
+   317→  del visor la mutan (es un documento histórico, no una vista derivada).
+   318→- **Mapeos derivados documentados** (kit ambiguo, resolución registrada
+   319→  en el REPORTE): el «CRÍTICO» de mesa es INCOMPLETO; el «mesa PENDIENTE»
+   320→  del kit se interpreta como mesas EN_PROCESO de puestos PENDIENTE (P2
+   321→  PENDIENTE, sin motivo); chip de motivo solo con alerta «Rescaneo»
+   322→  vigente; DELEGADOS (página única) VALIDA si ambas partes de delegados
+   323→  están ok; «DELEGADOS ACREDITADOS: n/16» = 2 partes ok → 16, 1 → 8,
+   324→  0 → 0; N del navegador MESA n/N = mesas CON acta del puesto (T3.3).
+   325→
+   326→## D20 — Retiro TEMPORAL de módulos por flag (kit SUP-5 §2.5 / T1)
+   327→
+   328→- **Decisión:** "Centro de notificaciones" y "Generar informes" se
+   329→  OCULTAN del sidebar por una constante exportada del shell
+   330→  (`MODULOS_INACTIVOS = ["notificaciones", "informes"]`): el array de
+   331→  ítems se filtra al renderizar. **Retiro, no borrado:** los componentes
+   332→  (`vista-notificaciones.tsx`, `vista-informes.tsx`), su store y las
+   333→  acciones que escriben notificaciones (NOTIFICAR, REINSPECCIONAR,
+   334→  aprobar/rescan de acta) quedan INTACTOS y dormidos — siguen operando
+   335→  en el store interno, invisibles para el usuario.
+   336→- **Reversibilidad:** vaciar/editar la lista devuelve las 2 entradas
+   337→  (verificado en dev — §4.5). La restauración COMPLETA (render de las
+   338→  vistas) requiere además reponer sus 2 imports + 2 casos del switch en
+   339→  `supervision-shell.tsx` — costo declarado en el REPORTE (el kit pedía
+   340→  "1 línea"; la verificación obligatoria §4.4 —0 referencias activas en
+   341→  el shell— exige retirar también los imports, se eligió cumplir el
+   342→  check estricto y documentar el costo real).
+   343→- **Sin rutas (D11 intacto):** las vistas dormidas son inalcanzables (no
+   344→  hay rutas ni entradas); el estado del store correspondiente queda sin
+   345→  uso. El badge de anomalías NO se toca; el de notificaciones desaparece
+   346→  junto con su entrada.
+   347→- **Frontera:** solo cambia `supervision-shell.tsx` (flag + filtro +
+   348→  switch); cero cambios en el store (`datos-provider.tsx` no está en la
+   349→  whitelist del kit).
+   350→
+   351→## D21 — Catálogo DIVIPOLA como fuente del repositorio (kit SUP-5 §3-T2/T3) — SUPERSEDE D6
+   352→
+   353→- **Decisión:** la fuente de puestos deja de ser el array demo de 20 y
+   354→  pasa a ser el catálogo DIVIPOLA exterior REAL (derivado canónico,
+   355→  949 puestos · 67 países · 3.670 mesas — verificado por el adaptador
+   356→  contra los números del kit §2.4, con guardrail de 1.500 registros).
+   357→  El MAESTRO (14.438 puestos) vive en el repo como base del join futuro
+   358→  y JAMÁS se importa en código (`rg "divipola-puestos" src/` → 0).
+   359→- **Adaptador estricto (`data/divipola-adapter.ts` + `domain/divipola.ts`):**
+   360→  validación propia sin librerías — 8 campos exactos, códigos como
+   361→  STRINGS con ancho fijo (2/3/3/2), `idEnlace` único y congruente con
+   362→  sus segmentos, `totalMesas` entero ≥ 1, nombres no vacíos, registros
+   363→  de control presentes (primero/ancla/último) y ancla Roma con 8 mesas.
+   364→  Cualquier desviación → `BLOQUEADA: validación del catálogo (…)`.
+   365→- **Estado simulado determinístico (§0-9):** el estado de cada puesto se
+   366→  siembra por seed del `idEnlace` (mulberry32/FNV-1a compartido del
+   367→  acta — `crearRandomDeterministico`) con la MISMA distribución que el
+   368→  demo: CRÍTICO ~5% · COMPLETO ~25% · PENDIENTE ~20% · NO_INICIADO
+   369→  ~50%. Mismo seed → mismos KPIs siempre (verificado entre sesiones).
+   370→  Mesas por puesto = `totalMesas` del catálogo (1..159, dato real).
+   371→- **D6 SUPERSEDEDO (no borrado):** los KPIs iniciales dejan de ser los
+   372→  literales 20/5/1/4/10 y se DERIVAN del catálogo sembrado. La
+   373→  INVARIANTE de D6 se MANTIENE: `total = completo + crítico + pendiente
+   374→  + no_iniciado` EXACTO en carga (949 = 231+44+199+475 en el seed
+   375→  vigente; la suma sigue exacta tras las transiciones de vida).
+   376→- **Ancla demo intacta (§2.3):** el puesto `88_495_010_02` Roma -
+   377→  Consulado (ITALIA, código real 495 — el catálogo manda sobre el 499
+   378→  del demo) conserva CRÍTICO, 8 mesas, mesas 001-003 EXACTAS del
+   379→  mockup, acta `#A92-F` con historial 14:00/14:18/14:20 y P2 con
+   380→  advertencia. Solo cambió su código/id (re-anclaje al `idEnlace`).
+   381→- **Mapeo UI (§2.1):** `pais` = nombreMunicipio ("ITALIA"), fila muestra
+   382→  `<mun> - <país>` ("495 - ITALIA"), zona UI sin ceros ("010" → "10"),
+   383→  puesto mostrado `<codigoPuesto> - <nombre real>` ("02 - Roma -
+   384→  Consulado", nombre verbatim; el visor lo capitaliza por estilo CSS
+   385→  preexistente — el dato no se reescribe).
+   386→- **Contracto async intacto (D12):** la prep del catálogo es UNA vez
+   387→  (memoizada en el adaptador); las promesas y la latencia ~400 ms siguen
+   388→  igual. Ticker, transición EN_PROCESO→COMPLETO, REINSPECCIONAR,
+   389→  anomalías y visor de actas operan idénticos sobre el catálogo real
+   390→  (reglas de mapeo del kit SUP-4 intactas, actas siempre ancladas por
+   391→  `idEnlace`).
+   392→
+   393→## D22 — `idEnlace` divipola como clave de join (kit SUP-5 §2.2)
+   394→
+   395→- **Convención observada** en los archivos reales del digitalizador: los
+   396→  E-14 traen segmentos separados por `_` — `88_495_010_02` =
+   397→  departamento 88 (CONSULADOS) · país/municipio 495 (Italia) · zona 010
+   398→  · puesto 02 (Roma). El `idEnlace` respeta ese orden y los códigos van
+   399→  como STRINGS sin transformar (solo la zona lleva padding 2→3 dígitos,
+   400→  regla del digitalizador).
+   401→- **Re-anclaje integral del demo:** `Puesto.id`, actas, anomalías,
+   402→  notificaciones y semillas de país (ESPAÑA/MEXICO/PAISES
+   403→  BAJOS/INGLATERRA) quedan anclados a `idEnlace` reales del catálogo
+   404→  (búsqueda determinística de puestos reales por país + estado de mesa
+   405→  útil). Cuando lleguen los datos del digitalizador y la carga masiva,
+   406→  las filas se casan por esta clave — nada más cambia.
+   407→
+   408→## D23 — Acta real = imagen + información impresa (kit SUP-6 §2 / T2)
+   409→
+   410→- **Decisión:** cada muestra del digitalizador es una foto escaneada del
+   411→  E-14 más los metadatos impresos de su encabezado. El dominio NO
+   412→  interpreta el contenido: `ActaMesa` se extiende con `fotos`
+   413→  (`Partial<Record<FormularioTipo, (FotoActa | null)[]>>` — índice =
+   414→  página − 1; `null`/ausente → esa página cae al sintético) e
+   415→  `impresion?: ImpresionActa` (campos del encabezado verbatim). Tipos
+   416→  nuevos: `FotoActa` (src/ancho/alto/archivo) e `ImpresionActa`
+   417→  (consulado/país/zona/puesto/mesa/lugar + barcode y etiqueta opcional).
+   418→- **Prioridad de render:** si la página tiene foto → foto real; si no →
+   419→  documento sintético D18 (hoy). El papel de la foto mide 460 CSS px de
+   420→  ancho a zoom 1 (alto por aspect ratio intrínseco ~1:3 — scroll
+   421→  vertical); la caja rotada usa las dimensiones de la FOTO (no las del
+   422→  papel A4 794×1123).
+   423→- **Regla de oro intacta (§0-1):** el módulo NO mira votos — prohibido
+   424→  OCR/extracción/deducción; la imagen se muestra tal cual junto a la
+   425→  información impresa. `documento-e14.tsx` NO se toca; toolbar, zoom
+   426→  (0.5–3.0), rotación (0/90/180/270) y contraste (NORMAL/ALTO/NEGATIVO)
+   427→  del visor se reutilizan tal cual (filtros CSS reales sobre la imagen).
+   428→
+   429→## D24 — Contrato de ingesta = manifest + assets (kit SUP-6 §2 / T1/T3)
+   430→
+   431→- **Decisión:** `data/actas-reales/actas-reales-manifest.json` declara
+   432→  las actas: `idEnlace`, `mesa`, `formulario` (clave de dominio
+   433→  `TRANSMISION` | `DELEGADOS`), `etiquetaImpresa` (texto del encabezado
+   434→  impreso, p. ej. «CÓNSUL/EMBAJADOR» → clave de dominio `DELEGADOS`),
+   435→  `barcodeImpreso`, `impresion` (verbatim) y `paginas[]` (`pagina`,
+   436→  `archivo`). Los assets son PNG importados estáticamente desde
+   437→  `data/actas-reales/assets/` (el export estático resuelve la ruta con
+   438→  basePath solo; sin `next/image` — §0-3). Convención de nombre (la del
+   439→  digitalizador): `E14_<idEnlace con _>_<mesa>_<FORMULARIO>-<pagina>.png`.
+   440→- **Loader (`data/actas-reales/actas-reales.ts`):** `cargarActasReales()`
+   441→  memoizado en módulo devuelve `ResultadoIngesta` — `actas: Record<string,
+   442→  ActaRealLista>` con clave `${idEnlace}::${mesa}` (las 2 entradas del
+   443→  ancla comparten mesa y se fusionan: fotos + etiqueta/barcode POR
+   444→  formulario, porque el barcode impreso difiere entre TRANSMISIÓN y
+   445→  CÓNSUL/EMBAJADOR) y `bloqueadas: { clave, motivo }[]` (cuarentena,
+   446→  D25). El `impresion` adjunto al acta es el encabezado verbatim de 6
+   447→  campos; etiqueta/barcode viajan por formulario en el registro del
+   448→  loader y el visor los consulta por clave (resolución de ambigüedad
+   449→  registrada en el REPORTE — el kit los lista dentro de `ImpresionActa`
+   450→  como opcionales).
+   451→- **Peso de assets:** el bundle no expone el peso del asset, así que el
+   452→  guardrail usa un mapa de bytes verificado con sha256sum al copiar
+   453→  (Anexo A); es metadata de ingesta, no dato de dominio.
+   454→
+   455→## D25 — Validación de ubicación (join por `idEnlace`, D22) + cuarentena (kit SUP-6 §2 / T3)
+   456→
+   457→- **Decisión:** al cargar el manifest se valida CADA acta contra el
+   458→  catálogo DIVIPOLA (`CARGAR_CATALOGO()` — import de solo-lectura; el
+   459→  adaptador NO se modifica): (a) `idEnlace` existe en el catálogo;
+   460→  (b) `mesa` ≤ `totalMesas` del puesto; (c) `formulario` es clave
+   461→  conocida del dominio; (d) páginas 1..N completas y continuas;
+   462→  (e) asset importable. La que falle NO se publica y se marca
+   463→  `BLOQUEADA: <motivo>` en consola y en el reporte (cuarentena); el
+   464→  resto sigue. Guardrail: máx 10 assets y 2 MB totales; más →
+   465→  BLOQUEADA del manifest completo.
+   466→- **Caída amable:** si el ancla quedara en cuarentena, `obtenerActa()`
+   467→  sirve el documento sintético como cualquier otra mesa — nada se
+   468→  improvisa y la UI no se rompe.
+   469→
+   470→## D26 — Ancla de práctica El Cairo (kit SUP-6 §2 / T4) — equivalente al ancla Roma de SUP-5
+   471→
+   472→- **Decisión:** el puesto `88_335_005_02` (El Cairo - Consulado,
+   473→  EGIPTO, `totalMesas: 1` — registro real del catálogo) se **FUERZA a
+   474→  `COMPLETO`** en `puestoDeRegistro` (mismo mecanismo del ancla Roma →
+   475→  CRÍTICO; su seed natural cae en NO_INICIADO — el kit lo anota como
+   476→  0.9872; sin fuerza el ancla es inalcanzable). Su mesa `001` sirve el
+   477→  acta real: `formularios` con TRANSMISION P1/P2 y DELEGADOS P1/P2
+   478→  (2 páginas — la realidad impresa del formulario CÓNSUL/EMBAJADOR),
+   479→  todas `VALIDA`, sin motivo, `fotos` + `impresion` del loader/manifest,
+   480→  id/hora/historial generados por seed como cualquier acta (mismas
+   481→  reglas, sin textos custom).
+   482→- **El resto NO cambia:** las otras 948 sedes y su vida/anomalías
+   483→  quedan intactas; Roma mesa 1 sigue EXACTA al mockup (sintético
+   484→  `#A92-F`); el acta real solo altera el estado del ancla (NO_INICIADO →
+   485→  COMPLETO en los KPIs derivados — la única transición de estado del kit).
+   486→

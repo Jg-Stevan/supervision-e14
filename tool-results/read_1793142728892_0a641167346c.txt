@@ -1,0 +1,1627 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * KIT e14-carga-masiva-v1 (T2): MINI-STORE zustand del módulo MASIVA —
+     5→ * el store del flujo normal (useE14Store) NO sabe que MASIVA existe salvo
+     6→ * por los 3 puntos de integración T3 (kit §0.4). Estado liviano: filas sin
+     7→ * fotos (la RAM real duerme en IndexedDB — lección L7).
+     8→ */
+     9→import { create } from "zustand";
+    10→import { getBridge } from "../get-bridge";
+    11→import { useE14Store } from "@/modules/digitalizador/store/store-e14";
+    12→import {
+    13→  agregarLote,
+    14→  borrar,
+    15→  guardarRegistro,
+    16→  leerRegistro,
+    17→  listarMapeados,
+    18→  recuperarCola,
+    19→  vaciar as vaciarCola,
+    20→} from "./cola";
+    21→// e65b — KIT e65b-historico-enviadas-v1 (T-2): LEDGER PERSISTENTE de
+    22→// enviadas (DB separada — historico.ts, solo llaves/L7). El índice del
+    23→// histórico se FUSIONA con el ledger: sobrevive vaciar() y recargas
+    24→// (REVERSA de D-e65-8 → D-e65b-1).
+    25→import {
+    26→  borrarHistorico,
+    27→  listarHistorico,
+    28→  registrarEntradaHistorico,
+    29→  // KIT e73-sondeo-qr-precoz-v1 (§C) — índice histórico por payload del sondeo
+    30→  actualizarIndicePayload,
+    31→  indiceEnviadasPorPayload,
+    32→  type EntradaHistorica,
+    33→} from "./historico";
+    34→// SPLIT C1 (refactor/runner-logger-v1): hacerThumb vive en runner-thumbs.ts
+    35→import { logger } from "../../logger";
+    36→// WAVE3 §A.3 — ORDEN-WAVE3-remoto-rescate-obs-v1: cliente del ledger remoto
+    37→// (el registro nace TAMBIÉN al drenar las filas «EN COLA» — único hook de
+    38→// store.ts declarado por el kit §A.3/F).
+    39→import { origenActual, registrarEnvioRemoto, sha256HexDeTexto } from "./ledger-remoto";
+    40→// KIT e14-observabilidad-v1 (A1-C7): kill switch de thumbs (flags del dueño).
+    41→import { leerFlags } from "../flags";
+    42→// KIT e73-sondeo-qr-precoz-v1 (§B.2) — cliente del SONDEO QR en ingesta
+    43→// (worker e73: lee la identidad QR ANTES del pool — gemelas jamás pagan
+    44→// slot/probe/OCR; null honesto = la vía de HOY — doctrina del conservador).
+    45→import { sondearQrPrecoz } from "./sondeo-qr.client";
+    46→// KIT flujo-dueno-v1 (K2 — brief Agente B): el warp de INGESTA. store.ts SOLO
+    47→// ENCOLA y marca su cadena de fondo — el módulo de la ingesta JAMÁS importa
+    48→// store.ts (inyección de deps desde el módulo del clic PROCESAR — cero
+    49→// ciclos, doctrina turno-clasificacion).
+    50→import { encolarWarpIngesta, marcarCadenaDedupEnVuelo } from "./warp-ingesta";
+    51→// (responsabilidad de render — movimiento puro del runner).
+    52→import { hacerThumb } from "./runner-thumbs";
+    53→import { iniciarRunner, pausarRunner, rearrancarTrasEncolar } from "./runner";
+    54→// D66 — KIT e14-decode-unico-precalor-v1: cableado del PRECALOR (T3) — la
+    55→// suscripción al mini-store vive aquí (zona del kit: «flag transitorio
+    56→// precalentada + cola de precalor») DESPUÉS de crear el store: precalor.ts
+    57→// también importa useMasivaStore (solo DENTRO de funciones — un call en su
+    58→// evaluación de módulo sería TDZ por el ciclo runner↔precalor↔store).
+    59→import { cablearPrecalor } from "./precalor";
+    60→// KIT e14-masiva-ux-v1 (T2): clasificación/extracción de archivos — las
+    61→// deps pesadas (fflate/node-unrar-js) viven DETRÁS de extraerArchivo con
+    62→// import diferido (D47): el bundle inicial no las carga.
+    63→// D60: parecePdfMasiva/extraerPdf añaden la rama PDF (pdfjs diferido ídem).
+    64→import {
+    65→  extraerArchivo,
+    66→  extraerPdf,
+    67→  pareceImagenMasiva,
+    68→  parecePdfMasiva,
+    69→} from "./archivos";
+    70→import {
+    71→  dhashDeArchivo,
+    72→  DEDUP_HAMMING_MAX,
+    73→  hamming64,
+    74→  hashBytesDeArchivo, // e65-dedup-enviadas-v1 — capa bytes (SHA-256 exacto, D-e65-1)
+    75→} from "./dedup";
+    76→// KIT e14-obs-hang-atribucion-v1 (§A.3) — hook D58 del sitio main-thread
+    77→// pesado de la cadenaDedup (precedente masiva→obs: runner.ts importa
+    78→// ../obs/dispositivo).
+    79→import { marcarOperacion } from "../obs/operacion";
+    80→// KIT e14-gama-adaptativa-v1 (D74): el guard del dhash de INGESTA (BAJO lo
+    81→// omite — ver comentario en la capa dhash de cadenaDedup).
+    82→import { planGamaActual } from "../gama";
+    83→// e63k — KIT e63k-capa2-identidad-v1: la cinta CIERTA del dedup visual (≤ 2).
+    84→// La banda 3..6 NO marca: la decide la capa 2 post-OCR (identidad.ts).
+    85→import { DEDUP_CINTA_CIERTA } from "./identidad";
+    86→import {
+    87→  paginaDeActa,
+    88→  tituloDeActa,
+    89→  type EstadoEntrada,
+    90→  type FilaMasiva,
+    91→  type RegistroMasiva,
+    92→} from "./tipos";
+    93→import type { Acta } from "../types";
+    94→
+    95→export type FiltroMasiva =
+    96→  | "TODAS"
+    97→  | "OPTIMA"
+    98→  | "ADVERTENCIA"
+    99→  | "RECHAZADA"
+   100→  | "EN_REVISION_HUMANA"
+   101→  | "ERROR";
+   102→
+   103→/** D65 — KIT e14-progreso-watchdog-dedup-v1 (T3): vocabulario del kit para
+   104→ *  la señal de vida de la fila ACTIVA. La fracción SOLO existe en OCR y es
+   105→ *  REAL (reconocedor por lotes de rec — §2-C4 del kit ocr-escalonado); las
+   106→ *  demás etapas van SIN número (barra animada — jamás inventar %). */
+   107→export type EtapaVidaKit = "preparando" | "deteccion" | "ocr" | "verificacion";
+   108→
+   109→/** Progreso de la fila ACTIVA (throttled por el runner 250 ms — D65 T3.1).
+   110→ *  Estado TRANSITORIO: NO se persiste en IndexedDB (kit T3.4 — cada tick a
+   111→ *  IDB sería caro); al recargar la página las filas vuelven a PENDIENTE como
+   112→ *  hoy y no queda % fantasma.
+   113→ *
+   114→ *  CAMBIO (pedido del dueño): UN % para TODO el proceso del acta — antes el
+   115→ *  chip de la fila saltaba por tramos fijos por fase y el OCR escalonado
+   116→ *  (2 pasadas) hacía que el número RETROCEDIERA (95→50→95). Ahora el runner
+   117→ *  computa `fracGlobal` (0..1): cada fase del pipeline mapea a un tramo del
+   118→ *  TOTAL, las 2 pasadas del OCR reparten sub-tramos y el valor es MONOTÓNICO
+   119→ *  (jamás baja dentro de la misma acta — Math.max por señal). */
+   120→// knip C3: de-export — uso SOLO interno (estado del mini-store).
+   121→interface ProgresoFila {
+   122→  id: string;
+   123→  etapa: EtapaVidaKit;
+   124→  /** 0..1 SOLO cuando etapa === "ocr" — dato REAL del reconocedor. */
+   125→  ocrFraccion?: number;
+   126→  /** 0..1 del PROCESO COMPLETO del acta (todas las fases sumadas) —
+   127→   *  monotónico: nunca baja dentro de la misma acta. 1 = LISTA. */
+   128→  fracGlobal?: number;
+   129→}
+   130→
+   131→interface MasivaStore {
+   132→  filas: FilaMasiva[];
+   133→  corriendo: boolean;
+   134→  progreso: ProgresoFila | null;
+   135→  filtro: FiltroMasiva;
+   136→  /** Acta abierta en REVISIÓN desde la bandeja (T3.4) — la identidad para
+   137→   *  sincronizar al volver. null = ninguna abierta. */
+   138→  origenAbierto: string | null;
+   139→  /** «GUARDANDO N…» — copia async de files → IDB (zona de carga). */
+   140→  guardando: number;
+   141→  /** false → píldora de fallback (IndexedDB no disponible — kit §3/§6). */
+   142→  colaDisponible: boolean;
+   143→  /** FIX (auditoría 2-c C5): true mientras corre «ENVIAR ADVERTENCIAS» —
+   144→   *  guard de re-entrancia del lote (doble tap = doble envío). */
+   145→  enviandoLote: boolean;
+   146→
+   147→  /** FIX M9 (auditoría 2-c): aviso específico de QUOTA — antes cualquier
+   148→   *  fallo de escritura (casi siempre almacenamiento lleno con actas de
+   149→   *  ~15 MB/registro) degradaba a «TU NAVEGADOR NO SOPORTA LA COLA» (falso)
+   150→   *  y mataba el botón PROCESAR para TODA la bandeja. null = sin aviso. */
+   151→  avisoCola: string | null;
+   152→
+   153→  /** Al montar: lista IDB → filas livianas + recuperarCola() (zombis fuera). */
+   154→  cargarFilas: () => Promise<void>;
+   155→  /** Suelta/selección de fotos: filas PENDIENTES al instante (ids temp) +
+   156→   *  copia async a IDB — al resolver, los ids reales reemplazan a los temp. */
+   157→  agregarFiles: (files: File[]) => Promise<void>;
+   158→  iniciar: () => void;
+   159→  pausar: () => void;
+   160→  /** ABRIR: auto-pausa del runner + REVISIÓN del acta (vía T3.4). */
+   161→  abrirActa: (id: string) => Promise<void>;
+   162→  /** Al volver de REVISIÓN: si la identidad coincide, re-persiste el acta
+   163→   *  ACTUALIZADA (recorte/filtro/envío — F5) y refresca la fila. Si no,
+   164→   *  SOLO limpia origenAbierto (no escribe nada). */
+   165→  sincronizarAlVolver: () => Promise<void>;
+   166→  quitar: (id: string) => Promise<void>;
+   167→  vaciar: () => Promise<void>;
+   168→  /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
+   169→   *  DUPLICADA (→ PENDIENTE, dupOf fuera) para que el runner la reprocese
+   170→   *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
+   171→  procesarIgual: (id: string) => Promise<void>;
+   172→  /** D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» de una fila ERROR —
+   173→   *  la re-encola (PENDIENTE, error fuera, persistente) para que el dueño
+   174→   *  pulse PROCESAR. NO auto-procesa (misma doctrina D45: extraer/re-encolar
+   175→   *  NO procesa). Sin archivo original en IDB → la fila SIGUE en ERROR con
+   176→   *  SIN_ARCHIVO_ORIGINAL (honesto — registros viejos o filas de formato). */
+   177→  reintentar: (id: string) => Promise<void>;
+   178→  /** Envío en lote SECUENCIAL de ADVERTENCIAS (cada una vía registrarEnvio
+   179→   *  real). NO toca RECHAZADAS ni EN_RH (kit §6). */
+   180→  enviarLote: (estado: "ADVERTENCIA") => Promise<void>;
+   181→  /** D65 (T3.1): señal de vida de la fila en curso — action NUEVO del kit;
+   182→   *  el runner emite con throttle 250 ms vía bucketDeVida. Transitorio
+   183→   *  (NUNCA a IDB — kit T3.4). `fracGlobal` = % ÚNICO del proceso completo
+   184→   *  del acta (monotónico — ver ProgresoFila). */
+   185→  marcarProgreso: (
+   186→    id: string,
+   187→    progreso: { etapa: EtapaVidaKit; ocrFraccion?: number; fracGlobal?: number },
+   188→  ) => void;
+   189→  setFiltro: (filtro: FiltroMasiva) => void;
+   190→  /** e64-qr-v1 (T-0.2): estampar campos SOLO-VISUALES sobre UNA fila viva
+   191→   *  (el chip qrEstado de la CAPA 0 QR se pinta a mitad de proceso, cuando
+   192→   *  el runner acaba de decodificar). Patch INMUTABLE — el MISMO patrón del
+   193→   *  patchFila interno (el kit llama a este mutador desde el runner). */
+   194→  actualizarFila: (id: string, patch: Partial<FilaMasiva>) => void;
+   195→}
+   196→
+   197→/** Registro IDB → fila LIVIANA (sin Blob, sin acta — la foto duerme). */
+   198→function filaDeRegistro(r: RegistroMasiva): FilaMasiva {
+   199→  const acta = r.acta;
+   200→  return {
+   201→    id: r.id,
+   202→    nombre: r.nombre,
+   203→    agregadaEn: r.agregadaEn,
+   204→    estado: r.estado,
+   205→    statusActa: acta?.status,
+   206→    score: acta?.score,
+   207→    nivel: acta?.clasificacion?.nivel ?? null,
+   208→    pagina: acta ? paginaDeActa(acta) : null,
+   209→    motivo: acta?.rechazo?.tipo ?? null,
+   210→    thumb: r.thumb,
+   211→    // D72: el título compuesto usa el formato compacto cuando r.acta existe
+   212→    infoTitulo: (r.acta ? tituloDeActa(r.acta) : r.infoTitulo) ?? null,
+   213→    enviadaAuto: r.acta?.status === "ENVIADA" && !!r.acta?.enviadoAutomaticamente,
+   214→    // KIT e14-masiva-ux-v1 (T3.2): el estado de envío se deriva DEL REGISTRO
+   215→    // (kit-literal: hashSha256 === "EN COLA") — sobrevive la recarga.
+   216→    envioEnCola: acta?.hashSha256 === "EN COLA",
+   217→    // KIT e14-masiva-ux-v1 (T2): el motivo corto de las filas ERROR sin
+   218→    // acta (guards de extracción/formato) sobrevive la recarga.
+   219→    error:
+   220→      r.estado === "ERROR"
+   221→        ? (r.error ?? (r.acta ? null : "ERROR DE COLA"))
+   222→        : null,
+   223→    // KIT e14-masiva-tiempos-v1 (PR-1): dedup persistente — sobrevive la
+   224→    // recarga (la fila sigue DUPLICADA y el runner puede copiar igual).
+   225→    hashDedup: r.hashDedup ?? null,
+   226→    dupOf: r.estado === "DUPLICADA" ? (r.dupOf ?? null) : null,
+   227→    // D63-A2 (T1): viaPdf sobrevive la recarga (el override de origen del
+   228→    // runner sigue funcionando a mitad de corrida). Ausente = no-PDF.
+   229→    ...(r.viaPdf ? { viaPdf: true } : {}),
+   230→    // e63k (F1): la serie impresa (mapa de identidad de la capa 2) y el
+   231→    // override del dueño sobreviven la recarga. Aditivos al final del
+   232→    // objeto retornado (contrato D57). Ausentes = registros previos.
+   233→    serie: r.serie ?? null,
+   234→    ...(r.forzarDedupOff ? { forzarDedupOff: true } : {}),
+   235→    // e64-qr-v1 (T-0.2): el estado de la CAPA 0 QR sobrevive la recarga.
+   236→    // Derivación honesta para registros e63m (traen qrPayload pero nacieron
+   237→    // antes de qrEstado): el payload EXISTE ⇒ fue leído. undefined → la fila
+   238→    // pinta sin chip ("n/d" — la capa 0 no corrió o el registro es previo).
+   239→    qrEstado: r.qrEstado ?? (r.qrPayload ? "leido" : undefined),
+   240→    // e65-dedup-enviadas-v1 (T-6): la YA-ENVIADA y sus llaves sobreviven la
+   241→    // recarga — hashBytes SIEMPRE (llave de dedup viva para la cola viva
+   242→    // tras recargar), enviadaDe SOLO cuando el estado lo es (SOLO-VISUAL).
+   243→    hashBytes: r.hashBytes ?? null,
+   244→    ...(r.estado === "YA-ENVIADA" ? { enviadaDe: r.enviadaDe ?? null } : {}),
+   245→    // KIT e73-sondeo-qr-precoz-v1 (§E) — la telemetría del sondeo sobrevive
+   246→    // la recarga (chip «Sondeo QR N/M» + p50/p95 del informe). Aditivos AL
+   247→    // FINAL del objeto retornado (contrato D57). Ausentes = registros previos.
+   248→    ...(r.sondeoQrMs != null ? { sondeoQrMs: r.sondeoQrMs } : {}),
+   249→    ...(r.sondeoQrTier != null ? { sondeoQrTier: r.sondeoQrTier } : {}),
+   250→  };
+   251→}
+   252→
+   253→function patchFila(id: string, patch: Partial<FilaMasiva>): void {
+   254→  const filas = useMasivaStore.getState().filas;
+   255→  useMasivaStore.setState({
+   256→    filas: filas.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+   257→  });
+   258→}
+   259→
+   260→// ─── e63m — KIT e63m-capa0-qr-identidad-v1 (F2): MAPA DE IDENTIDAD QR ───
+   261→// CAPA 0 pre-OCR — payload EXACTO → id de la fila original del lote (el
+   262→// runner lo registra al decodificar, ANTES de despachar OCR). Memoria de la
+   263→// SESIÓN del lote (kit §5 — decisión deliberada: NO se persiste en IDB ni
+   264→// se reconstruye al recargar; el lote es la unidad de dedup hoy). Llave
+   265→// OPACA: la única comparación es la IGUALDAD EXACTA del payload completo
+   266→// (jamás prefijos — RED LINE 10); sin umbrales, sin fuzzy (RED LINE 5).
+   267→const mapaQrPayload = new Map<string, string>();
+   268→
+   269→// ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1): MODO PRUEBAS ───────────
+   270→// MODO PRUEBAS (pre-elección): la cola NO sobrevive recargas — revertir a
+   271→// true para producción.
+   272→// Pedido literal del dueño: «que las actas no se guarden en memoria por el
+   273→// momento, porque estamos haciendo pruebas y la gracia es que en cada lote
+   274→// pueda identificar el acta antes de procesarla».
+   275→// Con FALSE (modo pruebas):
+   276→//  · C-1 — cargarFilas() arranca la cola VACÍA (no restaura filas ni
+   277→//    reconstruye Maps desde persistencia) y borra la persistencia vieja
+   278→//    (cola IDB + ledger del histórico — higiene).
+   279→//  · C-2 — vaciar() resetea TODO el ciclo de vida de la memoria de dedup:
+   280→//    mapaQrPayload + ledger + índice → limpiar y re-subir el MISMO lote
+   281→//    procesa completo de cero.
+   282→//  · C-3 — el LEDGER de enviadas NO alimenta el índice del histórico (los
+   283→//    Maps de dedup no se alimentan de NADA persistido); la dedup DENTRO del
+   284→//    lote/sesión queda INTACTA (la gracia — gemelas atrapadas en vivo).
+   285→// Con TRUE (producción): byte a byte el comportamiento de siempre —
+   286→// restauración tras recarga/crash + dedup inter-lote + ledger e65b que
+   287→// sobrevive vaciar() (D-e65b-1). Cero código borrado — solo ciclo de vida.
+   288→/** e64p (C-1/C-2 — MODO PRUEBAS). Desde cola-persistente-v1: kill switch del
+   289→ *  dueño — el override `colaPersistente: false` (e14-flags-overrides) activa
+   290→ *  el modo pruebas (auto-borrado al cargar). Default TRUE: la masiva SOLO se
+   291→ *  elimina con vaciar() del dueño — petición literal 2026-10-24. */
+   292→const COLA_PERSISTENTE = leerFlags().colaPersistente ?? true;
+   293→
+   294→/** Registra el payload de UNA fila como original del lote. Solo se llama
+   295→ *  cuando el payload es NUEVO en el mapa o su entrada apuntaba a una fila
+   296→ *  ya muerta (re-apuntado honesto — el carrier vivo del payload manda). */
+   297→export function registrarQrPayload(payload: string, id: string): void {
+   298→  mapaQrPayload.set(payload, id);
+   299→}
+   300→
+   301→/** id de la fila ORIGINAL de este payload (null = payload nuevo en el lote). */
+   302→export function originalQrDePayload(payload: string): string | null {
+   303→  return mapaQrPayload.get(payload) ?? null;
+   304→}
+   305→
+   306→// ─── P1 (plan masiva — brief Agente A): HAND-OFF id→payload de la CAPA 0 ────
+   307→// mapaQrPayload es REVERSO (payload→id — la CAPA 0 consulta «¿quién es el
+   308→// original de este payload?» DESPUÉS de decodificar). Falta la dirección que
+   309→// permite AHORRAR el decode: «esta fila YA tiene su payload leído por el
+   310→// sondeo de ingesta (e73)». Mismo ciclo de vida del lote que mapaQrPayload
+   311→// (memoria de la sesión — NO persiste en IDB, kit e63m §5; se limpia en los
+   312→// MISMOS 2 sitios del modo pruebas e64p C-1/C-2). Llave OPACA ídem: la única
+   313→// comparación es la IGUALDAD EXACTA del payload completo (RED LINE 10 — sin
+   314→// prefijos, sin fuzzy) y el consumo es SOLO-LECTURA: el dato NO decide nada
+   315→// por sí — las capas de siempre (pre-scan §D.2 / CAPA 0 e63m) firman los
+   316→// desenlaces. Precedente del patrón: burst P1a (store.ts — omitir el sondeo
+   317→// cuando los bytes ya prueban la identidad — trabajo redundante de menos).
+   318→const qrPayloadPorFila = new Map<string, string>();
+   319→
+   320→/** P1 — estampa el payload que el sondeo de INGESTA ya leyó para esta fila
+   321→ *  (solo se llama con el flag masivaQrHandoff ON). El pre-scan y la CAPA 0
+   322→ *  del runner consultan qrPayloadDeFila ANTES de decodificar — si hay dato,
+   323→ *  saltan su lectura/decode (el payload es de ESTE archivo — dato leído). */
+   324→export function estamparQrPayloadDeFila(id: string, payload: string): void {
+   325→  qrPayloadPorFila.set(id, payload);
+   326→}
+   327→
+   328→/** P1 — payload QR ya leído para ESTA fila (null = el sondeo no corrió / no
+   329→ *  leyó / el flag estaba OFF → el caller decodifica como hoy — conservador). */
+   330→export function qrPayloadDeFila(id: string): string | null {
+   331→  return qrPayloadPorFila.get(id) ?? null;
+   332→}
+   333→
+   334→// ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS (D-e65-3) ────
+   335→// Carga LIVIANA una vez por sesión de encolado: listarMapeados con mapper
+   336→// que NO retiene Blob ni acta (lección L7 / fix C6) — solo las llaves del
+   337→// dedup ({id, hashBytes?, hashDedup?, payloadQr?}). Registros SIN llave
+   338→// quedan FUERA (jamás inventar).
+   339→// e65b (T-2b, D-e65b-1): el índice se FUSIONA con el LEDGER persistente
+   340→// (historico.ts — DB separada): sobrevive vaciar() y recargas. Lo que se
+   341→// ENVÍA después de la carga queda cubierto por (a) las filas VIVAS de la
+   342→// cola (mismas capas, con verificación de registro viva antes de marcar)
+   343→// y (b) registrarEnviadaHistorico — que actualiza el cache EN MEMORIA al
+   344→// instante (mismo gesto de la sesión).
+   345→let indiceEnviadas: EntradaHistorica[] | null = null;
+   346→
+   347→async function indiceEnviadasDe(): Promise<EntradaHistorica[]> {
+   348→  if (indiceEnviadas) return indiceEnviadas;
+   349→  const deCola = await listarMapeados<EntradaHistorica>((r) => {
+   350→    // Solo ENVIADAS (acta propia) o YA-ENVIADA (filas marcadas por el kit).
+   351→    if (r.acta?.status !== "ENVIADA" && r.estado !== "YA-ENVIADA") return null;
+   352→    if (!r.hashBytes && !r.hashDedup && !r.qrPayload) return null; // sin llave → jamás inventar
+   353→    return {
+   354→      id: r.id,
+   355→      ts: r.agregadaEn,
+   356→      hashBytes: r.hashBytes,
+   357→      hashDedup: r.hashDedup,
+   358→      payloadQr: r.qrPayload,
+   359→    };
+   360→  });
+   361→  // e65b (M-e65b-2): el ledger NO es fatal — si cae, el índice se construye
+   362→  // SOLO con la cola viva (exactamente el comportamiento e65; conservador
+   363→  // RL-e65b-3 — jamás tumba la cadena de dedup).
+   364→  // e64p (C-3 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ledger NO
+   365→  // alimenta el índice — cero memoria ENTRE lotes (el histórico de sesiones
+   366→  // anteriores jamás marca YA-ENVIADA); solo la cola viva de ESTA sesión.
+   367→  let deLedger: EntradaHistorica[] = [];
+   368→  if (COLA_PERSISTENTE) {
+   369→    try {
+   370→      deLedger = await listarHistorico(); // llaves chicas — getAll seguro (L7)
+   371→    } catch {
+   372→      deLedger = [];
+   373→    }
+   374→  }
+   375→  const porId = new Map<string, EntradaHistorica>();
+   376→  for (const e of deLedger) porId.set(e.id, e);
+   377→  for (const e of deCola) porId.set(e.id, e); // la cola viva manda (más fresca)
+   378→  indiceEnviadas = [...porId.values()];
+   379→  return indiceEnviadas;
+   380→}
+   381→
+   382→/** e65b (T-2c): el ÚNICO punto donde el ledger crece — alimenta el histórico
+   383→ *  con TODO desenlace ENVIADO (envío propio del runner T-3a, gemela
+   384→ *  reutilizada T-3b, envíos manuales T-3c, marca YA-ENVIADA T-2d) —
+   385→ *  fire-and-forget desde el runner (RL-e65b-2/3). Si el cache del índice ya
+   386→ *  está construido, se actualiza EN MEMORIA al instante (mismo gesto — la
+   387→ *  re-subida de ESTA sesión ya matchea sin recargar). */
+   388→export async function registrarEnviadaHistorico(e: EntradaHistorica): Promise<void> {
+   389→  try {
+   390→    await registrarEntradaHistorico(e);
+   391→  } catch {
+   392→    return; // IDB caída — conservador, jamás tumba el envío (RL-e65b-3)
+   393→  }
+   394→  if (indiceEnviadas) {
+   395→    const entrada: EntradaHistorica = {
+   396→      id: e.id,
+   397→      ts: e.ts,
+   398→      hashBytes: e.hashBytes,
+   399→      hashDedup: e.hashDedup,
+   400→      payloadQr: e.payloadQr,
+   401→    };
+   402→    const i = indiceEnviadas.findIndex((x) => x.id === e.id);
+   403→    if (i >= 0) indiceEnviadas[i] = entrada;
+   404→    else indiceEnviadas.push(entrada);
+   405→  }
+   406→  // KIT e73-sondeo-qr-precoz-v1 (§C) — hook al MISMO punto de invalidación:
+   407→  // el índice por payload del sondeo ve el MISMO gesto de sesión (no-op si
+   408→  // aún no cargó — se construirá con TODO dentro al primer uso).
+   409→  actualizarIndicePayload(e);
+   410→}
+   411→
+   412→/** e65b (T-2e): lookup O(n) sobre el índice cacheado (n = enviadas; miles OK).
+   413→ *  El índice SOLO contiene enviadas por construcción → hit = YA-ENVIADA.
+   414→ *  Igualdad EXACTA del payload (llave opaca — jamás prefijos, RL-e65b-8).
+   415→ *  Fallo del índice → null conservador: la fila sigue su curso (RL-e65b-3). */
+   416→export async function enviadaPorPayload(payload: string): Promise<EntradaHistorica | null> {
+   417→  if (!payload) return null;
+   418→  try {
+   419→    return (await indiceEnviadasDe()).find((h) => h.payloadQr === payload) ?? null;
+   420→  } catch {
+   421→    return null;
+   422→  }
+   423→}
+   424→
+   425→/** e65 (T-4): marca YA-ENVIADA con el MISMO patrón anti-zombi de la marca
+   426→ *  DUPLICADA (fila viva + PENDIENTE + registro leíble + write IDB OK).
+   427→ *  SOLO-VISUAL (D-e65-2): NO copia acta, NO trae statusActa, NO dispara
+   428→ *  envío, NO toca contadores. false = guard falló → la fila sigue su curso
+   429→ *  normal (conservador — RL-e65-3).
+   430→ *  e65b (T-2d): exportada (el runner la llama desde la capa 0 payload —
+   431→ *  T-4) · `via` ampliado con "payload" (valor NUEVO AL FINAL — D57) ·
+   432→ *  parámetro opcional `qrPayload` estampado en el registro YA-ENVIADA
+   433→ *  (aditivo) · al final del éxito ALIMENTA EL LEDGER (registrarEnviada-
+   434→ *  Historico — cierra el gap de marcas contra filas enviadas pre-kit). */
+   435→// knip C3: export CONSERVADO — ancla QA (qa-historico-enviadas.ts grepea
+   436→// esta línea: «payload» fue valor NUEVO AL FINAL, D57; wave3 §A.3 añade
+   437→// "payload-remoto" AL FINAL — F-check actualizado con nota en el PR).
+   438→export type ViaYaEnviada = "bytes" | "dhash" | "payload" | "payload-remoto"; // valores NUEVOS AL FINAL (contrato D57)
+   439→
+   440→export async function marcarYaEnviada(
+   441→  id: string,
+   442→  enviadaDeId: string,
+   443→  via: ViaYaEnviada,
+   444→  hashBytes?: string,
+   445→  hamming?: number,
+   446→  qrPayload?: string,
+   447→  aceptarProcesando?: boolean, // e65b (M-e65b-3): SOLO la capa 0 payload (runner T-4) lo declara
+   448→  // WAVE3 C.2 (obs-informe-wave3-v1): puerta del veto (D57 AL FINAL) —
+   449→  // undefined = "ya-enviada" (callers existentes SIN cambio de contrato:
+   450→  // el write de abajo conserva su literal byte a byte — ancla QA).
+   451→  dedupValor?: RegistroMasiva["dedup"],
+   452→): Promise<boolean> {
+   453→  const filaViva = useMasivaStore.getState().filas.find((f) => f.id === id);
+   454→  // e65b (M-e65b-3): la capa 0 payload llega con la fila YA en PROCESANDO
+   455→  // (marcada al entrar al pipeline — runner) → el caller T-4 declara
+   456→  // aceptarProcesando y este guard la admite. Los callers e65 de la
+   457→  // cadenaDedup (sin flag) siguen exigiendo PENDIENTE byte a byte.
+   458→  if (!(aceptarProcesando === true && filaViva?.estado === "PROCESANDO")) {
+   459→    if (!filaViva || filaViva.estado !== "PENDIENTE") return false;
+   460→  }
+   461→  let registro: RegistroMasiva;
+   462→  try {
+   463→    registro = await leerRegistro(id);
+   464→  } catch {
+   465→    return false; // fuera de la cola (IDB/vaciar) — nada que marcar
+   466→  }
+   467→  // Write e65 byte a byte (la QA previa escanea estas líneas — regresión cero).
+   468→  try {
+   469→    await guardarRegistro({
+   470→      ...registro,
+   471→      estado: "YA-ENVIADA",
+   472→      hashBytes: hashBytes ?? registro.hashBytes,
+   473→      enviadaDe: enviadaDeId,
+   474→      dedup: "ya-enviada",
+   475→      ...(qrPayload ? { qrPayload } : {}), // e65b (T-2d) — aditivo (D57)
+   476→      // WAVE3 C.2 — la puerta del veto SOBREESCRIBE el dedup solo cuando el
+   477→      // caller la declara ("ya-enviada-postocr" = H1 post-OCR): el literal
+   478→      // de arriba queda INTACTO (ancla QA qa-historico-enviadas byte a byte).
+   479→      ...(dedupValor && dedupValor !== "ya-enviada" ? { dedup: dedupValor } : {}),
+   480→    });
+   481→  } catch {
+   482→    return false; // IDB caído → la fila procesa normal (conservador)
+   483→  }
+   484→  patchFila(id, {
+   485→    estado: "YA-ENVIADA",
+   486→    ...(hashBytes ?? registro.hashBytes
+   487→      ? { hashBytes: hashBytes ?? registro.hashBytes }
+   488→      : {}),
+   489→    enviadaDe: enviadaDeId,
+   490→  });
+   491→  logger.info(
+   492→    `[e14] dedup fila=${id} YA-ENVIADA ${via}${hamming != null ? ` hamming=${hamming}` : ""} dupOf=${enviadaDeId}`,
+   493→  );
+   494→  // e65b (T-2d): la marca TAMBIÉN alimenta el histórico (ledger) — la
+   495→  // YA-ENVIADA es un desenlace ENVIADO por construcción (RL-e65b-2).
+   496→  // Fire-and-forget: jamás bloquea ni tumba la marca (RL-e65b-3).
+   497→  void registrarEnviadaHistorico({
+   498→    id,
+   499→    ts: Date.now(),
+   500→    hashBytes: hashBytes ?? registro.hashBytes,
+   501→    hashDedup: registro.hashDedup,
+   502→    payloadQr: qrPayload,
+   503→    serie: registro.serie ?? undefined,
+   504→  });
+   505→  return true;
+   506→}
+   507→
+   508→/** KIT e14-masiva-tiempos-v1 (PR-1): cadena de hashing DEDUP en background —
+   509→ *  por cada archivo del lote EN ORDEN FIFO: e65 CAPA BYTES primero (SHA-256
+   510→ *  EXACTO contra el índice histórico de enviadas + cola viva enviada — sin
+   511→ *  decode, YA-ENVIADA al instante) → dhash (misma vía del pipeline,
+   512→ *  dedup.ts) → persiste hashDedup + hashBytes → compara contra TODAS las
+   513→ *  filas con hash (Hamming ≤ 6) + el ÍNDICE HISTÓRICO (D-e65-6) → marca
+   514→ *  DUPLICADA (persistente) apuntando a la ORIGINAL — o YA-ENVIADA si la
+   515→ *  original ya fue ENVIADA (D-e65-5).
+   516→ *  NUNCA bloquea la UI ni lanza: fallo de decode/hash → hash null → la fila
+   517→ *  procesa normal (conservador). Los guards de existencia hacen el vaciar/
+   518→ *  quitar del dueño MANDAR (0 zombis — mismo patrón del runner).
+   519→ *  D65 (T2): dedup v2 POR CONTENIDO con EXIF normalizada (dedup.ts) — misma
+   520→ *  cadena, y la traza aditiva dedup/dedupDistancia (kit T2.3) persiste en el
+   521→ *  MISMO write del hashDedup (campos nuevos al final del contrato D57). */
+   522→async function cadenaDedup(
+   523→  lote: {
+   524→    id: string;
+   525→    archivo: File;
+   526→    hashBytes?: string | null;
+   527→    // KIT e73 (§B.2) — cinturón: el override del dueño viaja con la entrada
+   528→    // (hoy ninguna fila nace con él en la ingesta — PROCESAR IGUAL lo pone
+   529→    // en la fila viva; el guard queda POR CONSTRUCCIÓN para futuros callers).
+   530→    forzarDedupOff?: boolean;
+   531→  }[],
+   532→): Promise<void> {
+   533→  // KIT e73-sondeo-qr-precoz-v1 (§B.2-a) — mapa payload → filaId construido
+   534→  // EN la cadena (FIFO — el primer ganador gana y la original siempre lleva
+   535→  // delante; filas ≠ PENDIENTE excluidas). Memoria del LOTE (muere con la
+   536→  // cadena — mismo ciclo de vida del mapaQrPayload de la capa 0, kit §5).
+   537→  const mapaSondeoPayload = new Map<string, string>();
+   538→  // KIT flujo-dueno-v1 (K2): cortesía de CPU del warp-de-ingesta — la señal
+   539→  // dice al bombeo serial cuándo ceder (la subida nueva tiene prioridad
+   540→  // sobre el warp de la anterior; tope corto en el bombeo — nunca bloquea
+   541→  // esta cadena). El catch por iteración traga TODO → sin fuga del contador.
+   542→  marcarCadenaDedupEnVuelo(true);
+   543→  for (const entrada of lote) {
+   544→    try {
+   545→      // e65 — CAPA BYTES primero (D-e65-5): barata (~50-200 ms, SIN decode).
+   546→      // Match EXACTO por SHA-256 contra (a) el índice histórico de enviadas
+   547→      // y (b) las filas vivas de la cola cuyo registro ya fue ENVIADO (se
+   548→      // verifica leyendo el registro — la fila sola no basta). null →
+   549→      // conservador: cae a la capa dhash de siempre.
+   550→      // e71 (Opt-1): el hash pudo llegar PRE-CALCULADO por la ingesta
+   551→      // (agregarFiles → agregarLote) — reutilizado, cero re-hash (la SHA de
+   552→      // la ingesta es la MISMA llave: hashBytesDeArchivo determinista).
+   553→      // KIT e14-sondeo-burst-v1 (P1a): SHA-256 idéntica a una fila VIVA ⇒
+   554→      // identidad EXACTA ya probada — señal MÁS fuerte que cualquier QR/dhash
+   555→      // — y el sondeo del duplicado es trabajo de worker REGALADO al burst:
+   556→      // en el run 4 (47 archivos de golpe) el sondeo-qr worker se ahogó de
+   557→      // contención (14 hard-kills en 2 min — worker LENTO por hambruna de
+   558→      // CPU: dhash/decode en main + OCR WASM en 4 hilos, no zombi) y cada
+   559→      // kill costó presupuesto completo + respawn frío. Omitir SOLO el
+   560→      // sondeo: la capa dhash decide igual que hoy (gemela por bytes ⇒
+   561→      // hamming 0 ⇒ DUPLICADA / YA-ENVIADA si la original se envía primero)
+   562→      // y si la gemela muere después, el dhash propio no encuentra candidata
+   563→      // y la fila procesa normal — raza cubierta por los guards de siempre.
+   564→      let saltaSondeoPorBytes = false;
+   565→      const bytes =
+   566→        entrada.hashBytes ?? (await hashBytesDeArchivo(entrada.archivo));
+   567→      if (bytes) {
+   568→        const hitHistorico = (await indiceEnviadasDe()).find(
+   569→          (h) => h.hashBytes === bytes,
+   570→        );
+   571→        if (hitHistorico) {
+   572→          // El índice SOLO contiene enviadas → YA-ENVIADA por construcción.
+   573→          if (await marcarYaEnviada(entrada.id, hitHistorico.id, "bytes", bytes)) continue;
+   574→        } else {
+   575→          const viva = useMasivaStore
+   576→            .getState()
+   577→            .filas.find(
+   578→              (f) => f.id !== entrada.id && f.hashBytes === bytes,
+   579→            );
+   580→          if (viva) {
+   581→            // El match contra cola viva SOLO cuenta como YA-ENVIADA si ESE
+   582→            // registro tiene acta ENVIADA (verificar con leerRegistro antes
+   583→            // de marcar — kit T-4). Lectura que falla → conservador: la capa
+   584→            // dhash decide como hoy.
+   585→            try {
+   586→              const regViva = await leerRegistro(viva.id);
+   587→              if (
+   588→                regViva.acta?.status === "ENVIADA" ||
+   589→                regViva.estado === "YA-ENVIADA"
+   590→              ) {
+   591→                if (await marcarYaEnviada(entrada.id, viva.id, "bytes", bytes)) continue;
+   592→                // guard falló (ya marcada/ilegible) → conserva el sondeo
+   593→                // (sin flag — el conservador manda, RL-e65-3).
+   594→              } else {
+   595→                // KIT e14-sondeo-burst-v1 (P1a): gemela viva NO enviada →
+   596→                // omitir el sondeo (redundante: bytes idénticos). Sin marca
+   597→                // AQUÍ — el desenlace lo firma la capa dhash como hoy.
+   598→                saltaSondeoPorBytes = true;
+   599→                logger.info(
+   600→                  `[e14] dedup fila=${entrada.id} bytes gemela viva=${viva.id} → sondeo QR omitido (dhash decide)`,
+   601→                );
+   602→              }
+   603→            } catch {
+   604→              /* conservador — sigue a la capa dhash (comportamiento de hoy) */
+   605→            }
+   606→          }
+   607→        }
+   608→      }
+   609→      // ─── KIT e73-sondeo-qr-precoz-v1 (§B.2) — NUEVA CAPA: SONDEO QR ──────
+   610→      // Lee la identidad QR en INGESTA (worker e73 — presupuesto 2500 ms,
+   611→      // jamás throw). forzarDedupOff manda SIEMPRE (cinturón — RL-e65b-6:
+   612→      // sin sondeo si está puesto). null/fallo → continuar a dhash COMO HOY
+   613→      // (doctrina del conservador — la capa dhash queda íntegra byte a byte).
+   614→      let sondeo: Awaited<ReturnType<typeof sondearQrPrecoz>> = null;
+   615→      if (!entrada.forzarDedupOff) {
+   616→        // KIT e14-sondeo-burst-v1 (P1a): el skip por bytes vive DENTRO del
+   617→        // guard del override (RL-e65b-6 intacto — el dueño manda SIEMPRE;
+   618→        // test 7 ancla ambos literales byte a byte).
+   619→        // KIT flujo-dueno-v1 (K2 — masivaSondeoCrudo, default TRUE = camino
+   620→        // de hoy): en OFF se OMITE el sondeo crudo (el guard fuerza
+   621→        // sondeo=null) y la fila sigue a dhash COMO HOY — corrida de
+   622→        // control del dueño (el sondeo crudo alimenta el hand-off P1 y el
+   623→        // dedup temprano, por eso default ON).
+   624→        if (!saltaSondeoPorBytes && leerFlags().masivaSondeoCrudo === true) {
+   625→          sondeo = await sondearQrPrecoz(entrada.archivo);
+   626→        }
+   627→        if (sondeo) {
+   628→          logger.info(
+   629→            `[e14] sondeo-qr fila=${entrada.id} tier=${sondeo.tier ?? "null"} ms=${sondeo.ms}`,
+   630→          );
+   631→          // Telemetría EN VIVO sobre la fila (chip «Sondeo QR N/M» — §E);
+   632→          // patchFila no-op si la fila murió durante el sondeo (anti-zombi).
+   633→          patchFila(entrada.id, {
+   634→            sondeoQrMs: sondeo.ms,
+   635→            ...(sondeo.payload != null ? { sondeoQrTier: sondeo.tier ?? undefined } : {}),
+   636→          });
+   637→          // P1 (brief Agente A) — flag masivaQrHandoff: el payload que el
+   638→          // sondeo YA leyó de ESTE archivo queda disponible (id→payload) para
+   639→          // pre-scan y CAPA 0 — heredan sin re-decodificar. El estampado NO
+   640→          // marca nada ni decide desenlaces (conservador — jamás inventar);
+   641→          // flag OFF → no-op byte-idéntico.
+   642→          if (sondeo.payload != null && leerFlags().masivaQrHandoff) {
+   643→            estamparQrPayloadDeFila(entrada.id, sondeo.payload);
+   644→            logger.info(
+   645→              `[e14] qr-handoff sondeo estampa fila=${entrada.id} ms=${sondeo.ms}`,
+   646→            );
+   647→          }
+   648→        }
+   649→      }
+   650→      if (sondeo && sondeo.payload != null) {
+   651→        const payloadSondeo = sondeo.payload;
+   652→        // (a) Cola viva — mapa payload → filaId (primer ganador gana).
+   653→        // Match → DUPLICADA persistente con la MISMA rama del dhash (guard
+   654→        // filaViva PENDIENTe + leerRegistro + write + patchFila) con dedup
+   655→        // "qr-sondeo" (D57 AL FINAL) → NO entra al pool (jamás slot/probe/OCR).
+   656→        const originalSondeo = mapaSondeoPayload.get(payloadSondeo);
+   657→        if (originalSondeo && originalSondeo !== entrada.id) {
+   658→          const filaVivaSondeo = useMasivaStore
+   659→            .getState()
+   660→            .filas.find((f) => f.id === entrada.id);
+   661→          if (!filaVivaSondeo || filaVivaSondeo.estado !== "PENDIENTE") continue; // anti-zombi
+   662→          let regSondeo: RegistroMasiva;
+   663→          try {
+   664→            regSondeo = await leerRegistro(entrada.id);
+   665→          } catch {
+   666→            continue; // fuera de la cola (IDB/vaciar) — nada que marcar
+   667→          }
+   668→          // Write ÚNICO con la telemetría del sondeo plegada (patrón D65
+   669→          // T2.3 — campos AL FINAL del contrato D57).
+   670→          await guardarRegistro({
+   671→            ...regSondeo,
+   672→            estado: "DUPLICADA",
+   673→            dupOf: originalSondeo,
+   674→            dedup: "qr-sondeo",
+   675→            sondeoQrMs: sondeo.ms,
+   676→            sondeoQrTier: sondeo.tier ?? undefined,
+   677→          });
+   678→          patchFila(entrada.id, { estado: "DUPLICADA", dupOf: originalSondeo });
+   679→          logger.info(
+   680→            `[e14] sondeo-qr fila=${entrada.id} → DUPLICADA qr-sondeo dupOf=${originalSondeo}`,
+   681→          );
+   682→          continue;
+   683→        }
+   684→        // (b) Histórico — índice por payload (§C) → YA-ENVIADA via "payload"
+   685→        // EXISTENTE (cero churn D57), dedup default "ya-enviada" (el guard
+   686→        // wave3 C.2 de escritores YA-ENVIADA queda satisfecho).
+   687→        // COLA_PERSISTENTE=false (modo pruebas e64p C-3): el ledger NO
+   688→        // alimenta los Maps de dedup — el índice por payload tampoco.
+   689→        if (COLA_PERSISTENTE) {
+   690→          try {
+   691→            const hitSondeo = (await indiceEnviadasPorPayload(true)).get(payloadSondeo);
+   692→            if (hitSondeo) {
+   693→              // Telemetría del sondeo sobre el registro ANTES de la marca —
+   694→              // marcarYaEnviada la ARRASTRA con su spread ...registro (el
+   695→              // write ancla de marcarYaEnviada queda byte a byte). Write
+   696→              // extra SOLO en hits (desviación M-e73-3 del REPORTE).
+   697→              try {
+   698→                const regPre = await leerRegistro(entrada.id);
+   699→                await guardarRegistro({
+   700→                  ...regPre,
+   701→                  sondeoQrMs: sondeo.ms,
+   702→                  sondeoQrTier: sondeo.tier ?? undefined,
+   703→                });
+   704→              } catch {
+   705→                /* conservador — la marca sigue sin telemetría (jamás inventar) */
+   706→              }
+   707→              if (
+   708→                await marcarYaEnviada(
+   709→                  entrada.id,
+   710→                  hitSondeo.id,
+   711→                  "payload",
+   712→                  undefined,
+   713→                  undefined,
+   714→                  payloadSondeo,
+   715→                )
+   716→              ) {
+   717→                logger.info(`[e14] sondeo-qr fila=${entrada.id} → YA-ENVIADA payload`);
+   718→                continue;
+   719→              }
+   720→              // guard falló (ya no es PENDIENTE / registro ilegible) → cae
+   721→              // al comportamiento de siempre (el conservador manda — RL-e65-3).
+   722→            }
+   723→          } catch {
+   724→            /* índice caído → conservador: sigue a dhash (RL-e65b-3) */
+   725→          }
+   726→        }
+   727→        // (c) Sin match → registrar como original futura (primer ganador
+   728→        // gana; filas ≠ PENDIENTE excluidas) + seguir a dhash (capa íntegra).
+   729→        if (!mapaSondeoPayload.has(payloadSondeo)) {
+   730→          const vivaParaMapa = useMasivaStore
+   731→            .getState()
+   732→            .filas.find((f) => f.id === entrada.id);
+   733→          if (vivaParaMapa && vivaParaMapa.estado === "PENDIENTE") {
+   734→            mapaSondeoPayload.set(payloadSondeo, entrada.id);
+   735→          }
+   736→        }
+   737→      }
+   738→      // KIT e14-obs-hang-atribucion-v1 (§A.3) — el cómputo del dhash es
+   739→      // trabajo main-thread REAL del pipeline: marcar la operación activa
+   740→      // ANTES (sin clear después — la edad delata la obsolescencia).
+   741→      // KIT e14-gama-adaptativa-v1 (D74) — gama BAJO adaptativa: el dhash
+   742→      // visual de INGESTA se OMITE — su decode FULL 12 MP (≈48 MB) en main
+   743→      // thread compite con el sondeo worker y el hilo UI (evidencia run 4:
+   744→      // 14 hard-kills/2 min — store.ts cabecera e73) justo en los
+   745→      // dispositivos que menos lo aguantan. El dedup NO muere: bytes
+   746→      // (SHA-256 — nace en agregarLote), payload QR (capa 0 e63m) e
+   747→      // identidad impresa 13 dígitos (capa 2 e63k post-OCR) siguen
+   748→      // íntegros; SOLO el match VISUAL pre-OCR se aplaza (la fila procesa
+   749→      // normal). Tradeoff documentado en D74: sin hashDedup la fila tampoco
+   750→      // es candidata visual para filas futuras y el pliegue de sondeoQrMs
+   751→      // de este write no viaja (observabilidad, no comportamiento).
+   752→      // Flag OFF / MEDIO / ALTO ⇒ camino de hoy byte-idéntico.
+   753→      if (!planGamaActual().dhashIngesta) {
+   754→        logger.info(
+   755→          `[e14] dedup fila=${entrada.id} dhash OMITIDO (gama adaptativa — identidad post-OCR decide)`,
+   756→        );
+   757→        continue;
+   758→      }
+   759→      marcarOperacion("dhash");
+   760→      const hash = await dhashDeArchivo(entrada.archivo);
+   761→      if (!hash) continue; // decode/hash falló → sin dedup para esta fila
+   762→      // Guard anti-zombi: la fila pudo ser quitada/vaciada mientras el decode corría.
+   763→      if (!useMasivaStore.getState().filas.some((f) => f.id === entrada.id)) continue;
+   764→      let registro: RegistroMasiva;
+   765→      try {
+   766→        registro = await leerRegistro(entrada.id);
+   767→      } catch {
+   768→        continue; // fuera de la cola (IDB/vaciar) — nada que marcar
+   769→      }
+   770→      // KIT e73 (§E) — telemetría del sondeo plegada al snapshot del registro
+   771→      // (patrón D65 T2.3 — viaja EN el MISMO write del hash): ms SIEMPRE que
+   772→      // el sondeo corrió; tier SOLO con lectura (jamás inventar). El pliegue
+   773→      // va sobre el snapshot para que los write LITERALES anclados de wave3
+   774→      // C.2 (guard de contrato) queden byte a byte — los campos nuevos viajan
+   775→      // DENTRO del spread ...registro (AL FINAL del contrato D57).
+   776→      if (sondeo) {
+   777→        registro = {
+   778→          ...registro,
+   779→          sondeoQrMs: sondeo.ms,
+   780→          ...(sondeo.payload != null ? { sondeoQrTier: sondeo.tier ?? undefined } : {}),
+   781→        };
+   782→      }
+   783→      // ¿Gemela de una fila existente? (filas ANTERIORES con hash — la
+   784→      // cadena es FIFO, la original siempre lleva delante). D65: la búsqueda
+   785→      // corre ANTES del write para plegar la traza dedup (T2.3) en el MISMO
+   786→      // guardarRegistro del hash — mismo nº de writes que v1 (1 por fila, 2
+   787→      // para gemelas). Los candidatos salen del STORE (otras filas — esta no
+   788→      // es candidata de sí misma): mismo resultado que el orden de v1.
+   789→      const filas = useMasivaStore.getState().filas;
+   790→      const candidatas = filas.filter(
+   791→        (f) => f.id !== entrada.id && f.hashDedup && f.estado !== "ERROR",
+   792→      );
+   793→      let original: Pick<FilaMasiva, "id" | "agregadaEn"> | null = null;
+   794→      let hamming = DEDUP_HAMMING_MAX + 1;
+   795→      for (const c of candidatas) {
+   796→        const d = hamming64(hash, c.hashDedup as string);
+   797→        if (d <= DEDUP_HAMMING_MAX && (original === null || d < hamming || c.agregadaEn < original.agregadaEn)) {
+   798→          original = c;
+   799→          hamming = d;
+   800→        }
+   801→      }
+   802→      // e65 (D-e65-6): ampliar candidatas con el ÍNDICE HISTÓRICO de enviadas
+   803→      // (hashDedup, misma cinta — RL-e65-4). El histórico SOLO contiene
+   804→      // enviadas → si GANA (estrictamente más cerca), el desenlace es
+   805→      // YA-ENVIADA. Empate → la viva manda (FIFO — comportamiento de hoy).
+   806→      let originalDelIndice = false;
+   807→      for (const h of await indiceEnviadasDe()) {
+   808→        if (!h.hashDedup || h.id === entrada.id) continue;
+   809→        const d = hamming64(hash, h.hashDedup);
+   810→        if (d <= DEDUP_HAMMING_MAX && (original === null || d < hamming)) {
+   811→          original = { id: h.id, agregadaEn: 0 };
+   812→          hamming = d;
+   813→          originalDelIndice = true;
+   814→        }
+   815→      }
+   816→      // D65 (T2.3): traza del dedup v2 — "v2" = match CIERTO en la cinta baja
+   817→      // (con la distancia REAL del match); "sin-match" = hasheada sin gemela.
+   818→      // e63k (F1.3): el match en la BANDA 3..6 NO marca — traza
+   819→      // "visual-aplazada" + dedupVisualDe (oro para el post-mortem); la
+   820→      // identidad post-OCR decide (runner — punto único del kit). Sin hash
+   821→      // (decode falló) la fila NO trae traza (ausente = instrumento no corrió).
+   822→      const trazaDedup: Pick<
+   823→        RegistroMasiva,
+   824→        "dedup" | "dedupDistancia" | "dedupVisualDe"
+   825→      > =
+   826→        original && hamming <= DEDUP_CINTA_CIERTA
+   827→          ? { dedup: "v2", dedupDistancia: hamming }
+   828→          : original
+   829→            ? {
+   830→                dedup: "visual-aplazada",
+   831→                dedupDistancia: hamming,
+   832→                dedupVisualDe: original.id,
+   833→              }
+   834→            : { dedup: "sin-match" };
+   835→      const writeHashYTraza = { ...registro, hashDedup: hash, hashBytes: bytes ?? registro.hashBytes, ...trazaDedup };
+   836→      // WAVE3 C.2 (obs-informe-wave3-v1) — el veto ya-enviada JAMÁS es
+   837→      // destruido por la traza visual: si el registro YA es YA-ENVIADA (el
+   838→      // veto capa-0/bytes aterrizó antes que el dhash de esta cadena), la
+   839→      // traza NO puede estampar "sin-match"/"v2"/"visual-aplazada" sobre la
+   840→      // evidencia del veto — gap REAL del lote 10 (3 filas YA-ENVIADA ∧
+   841→      // dedup:"sin-match", informes 104609+): la ventana entre el snapshot
+   842→      // leerRegistro (L arriba) y ESTE write dejaba al veto sin su marca.
+   843→      // La puerta queda evidenciada: "ya-enviada-copia" (D57 AL FINAL).
+   844→      await guardarRegistro(
+   845→        registro.estado === "YA-ENVIADA"
+   846→          ? { ...writeHashYTraza, dedup: "ya-enviada-copia" as const }
+   847→          : writeHashYTraza,
+   848→      );
+   849→      patchFila(entrada.id, { hashDedup: hash, ...(bytes ? { hashBytes: bytes } : {}) });
+   850→      // e63k (F1.3): SOLO la cinta CIERTA (hamming ≤ DEDUP_CINTA_CIERTA)
+   851→      // marca DUPLICADA pre-OCR — comportamiento de HOY byte a byte. La
+   852→      // banda 3..6 NO marca y NO escribe DUPLICADA: la fila sigue PENDIENTE
+   853→      // → corre el pipeline completo y la capa 2 (runner) decide con la
+   854→      // serie impresa (kit §1.3 — corrección por la CINTA, no por el umbral).
+   855→      if (!original) continue;
+   856→      if (hamming > DEDUP_CINTA_CIERTA) {
+   857→        logger.info(
+   858→          `[e14] dedup fila=${entrada.id} visual hamming=${hamming} dupOf=${original.id} APLAZADA cinta=3-6 — identidad post-OCR decide (e63k)`,
+   859→        );
+   860→        continue;
+   861→      }
+   862→      // e65 (D-e65-5): cinta cierta — ¿la original matcheada ya fue ENVIADA?
+   863→      //  · Original del ÍNDICE histórico → es ENVIADA/YA-ENVIADA por
+   864→      //    construcción del índice (D-e65-3).
+   865→      //  · Original viva → verificar con leerRegistro (acta ENVIADA o estado
+   866→      //    YA-ENVIADA). Lectura que falla → DUPLICADA (conservador, hoy).
+   867→      let enviadaDeId: string | null = null;
+   868→      if (originalDelIndice) {
+   869→        enviadaDeId = original.id;
+   870→      } else {
+   871→        try {
+   872→          const regOriginal = await leerRegistro(original.id);
+   873→          if (
+   874→            regOriginal.acta?.status === "ENVIADA" ||
+   875→            regOriginal.estado === "YA-ENVIADA"
+   876→          ) {
+   877→            enviadaDeId = original.id;
+   878→          }
+   879→        } catch {
+   880→          enviadaDeId = null; // conservador → DUPLICADA como hoy
+   881→        }
+   882→      }
+   883→      if (enviadaDeId) {
+   884→        if (
+   885→          await marcarYaEnviada(
+   886→            entrada.id,
+   887→            enviadaDeId,
+   888→            "dhash",
+   889→            bytes ?? undefined,
+   890→            hamming,
+   891→          )
+   892→        ) {
+   893→          continue;
+   894→        }
+   895→        // guard falló (ya no es PENDIENTE / registro ilegible) → cae al
+   896→        // comportamiento de siempre (el conservador manda — RL-e65-3).
+   897→      }
+   898→      // Solo marca filas aún PENDIENTES (el dueño pudo procesar/quitar mientras el hash corría).
+   899→      const filaViva = useMasivaStore.getState().filas.find((f) => f.id === entrada.id);
+   900→      if (!filaViva || filaViva.estado !== "PENDIENTE") continue;
+   901→      const reg = await leerRegistro(entrada.id);
+   902→      await guardarRegistro({ ...reg, estado: "DUPLICADA", dupOf: original.id });
+   903→      patchFila(entrada.id, { estado: "DUPLICADA", dupOf: original.id });
+   904→      logger.info(
+   905→        `[e14] dedup fila=${entrada.id} marcada hamming=${hamming} dupOf=${original.id} hash=${hash}`,
+   906→      );
+   907→    } catch {
+   908→      /* un fallo de la cadena JAMÁS tumba el encolado — la fila queda normal */
+   909→    }
+   910→  }
+   911→  // KIT flujo-dueno-v1 (K2): fin de la cadena — la cortesía del warp de
+   912→  // ingesta se levanta (sin finally: el catch por iteración ya garantiza
+   913→  // que ningún throw escapa del bucle).
+   914→  marcarCadenaDedupEnVuelo(false);
+   915→}
+   916→
+   917→/** e71 (Opt-1) — DEDUP EXACTO INSTANTÁNEO en la ingesta (kit e71-
+   918→ *  consolidación, benchmark aprobado): corre DESPUÉS del swap temp→id y
+   919→ *  ANTES de rearrancarTrasEncolar — el runner JAMÁS ve un duplicado exacto
+   920→ *  como PENDIENTE: no paga precalor, ni qr-capa0, ni OCR (~20 s de ahorro
+   921→ *  por duplicado exacto, kit literal). El SHA-256 ya nació calculado en la
+   922→ *  ingesta (hashBytes en el PRIMER write) → el pase cuesta un lookup en
+   923→ *  memoria + (solo con match) 1-2 lecturas de registro (~ms).
+   924→ *  · Match contra el ÍNDICE de enviadas (ledger + cola viva enviada —
+   925→ *    D-e65-3; respeta COLA_PERSISTENTE: en modo pruebas el ledger NO
+   926→ *    marca — C-3 intacto) → YA-ENVIADA vía marcarYaEnviada (maquinaria
+   927→ *    e65 EXACTA, via "bytes").
+   928→ *  · Match contra la cola viva (filas previas + anteriores del MISMO
+   929→ *    lote) → DUPLICADA instantánea con dupOf (kit Opt-1 literal); el
+   930→ *    desenlace lo resuelve reutilizarResultado en el runner (con P2.1:
+   931→ *    original rechazada → la copia nace RECHAZADA).
+   932→ *  Conservador: hash null → la fila procesa normal; guard anti-zombi
+   933→ *  (fila viva + PENDIENTE) igual que cadenaDedup; un fallo JAMÁS tumba
+   934→ *  el encolado (kit carga-masiva §3). */
+   935→async function dedupExactoIngesta(
+   936→  entradas: { id: string; hashBytes: string | null }[],
+   937→): Promise<void> {
+   938→  if (!entradas.length) return;
+   939→  try {
+   940→    // (a) seed: filas VIVAS PREVIAS a este lote que traen hashBytes — la
+   941→    // primera FIFO gana (mismo criterio de original que cadenaDedup).
+   942→    // Los registros pre-e71 sin hashBytes no matchean (conservador — igual
+   943→    // que hoy: la capa dhash de cadenaDedup los cubre).
+   944→    const idsLote = new Set(entradas.map((e) => e.id));
+   945→    const originales = new Map<string, string>(); // hashBytes → id original
+   946→    for (const f of useMasivaStore.getState().filas) {
+   947→      if (idsLote.has(f.id) || !f.hashBytes || f.estado === "ERROR") continue;
+   948→      if (!originales.has(f.hashBytes)) originales.set(f.hashBytes, f.id);
+   949→    }
+   950→    // (b) índice de enviadas (ledger + cola — D-e65-3) — una sola carga
+   951→    // (cacheado por indiceEnviadasDe; ledger caído → conservador).
+   952→    let indice: EntradaHistorica[] = [];
+   953→    let indiceListo = false;
+   954→    for (const e of entradas) {
+   955→      if (!e.hashBytes) continue;
+   956→      // La fila viva ya trae su llave (el informe/seed de futuros lotes la
+   957→      // ven SIN esperar a cadenaDedup — mismo gesto del patch L549).
+   958→      patchFila(e.id, { hashBytes: e.hashBytes });
+   959→      if (!indiceListo) {
+   960→        try {
+   961→          indice = await indiceEnviadasDe();
+   962→        } catch {
+   963→          indice = []; // ledger caído → solo cola viva (RL-e65b-3)
+   964→        }
+   965→        indiceListo = true;
+   966→      }
+   967→      const hitHistorico = indice.find((h) => h.hashBytes === e.hashBytes);
+   968→      if (hitHistorico) {
+   969→        // El índice SOLO contiene enviadas → YA-ENVIADA por construcción.
+   970→        if (await marcarYaEnviada(e.id, hitHistorico.id, "bytes", e.hashBytes)) {
+   971→          logger.info(
+   972→            `[e14] dedup fila=${e.id} instantanea ya-enviada-historico dupOf=${hitHistorico.id}`,
+   973→          );
+   974→          continue;
+   975→        }
+   976→      }
+   977→      const dupOf = originales.get(e.hashBytes);
+   978→      if (dupOf && dupOf !== e.id) {
+   979→        // ¿La original matcheada ya fue ENVIADA? (mismo criterio D-e65-5:
+   980→        // verificar con leerRegistro antes de marcar YA-ENVIADA; lectura
+   981→        // que falla → DUPLICADA conservadora como hoy).
+   982→        let enviadaDeId: string | null = null;
+   983→        try {
+   984→          const regOriginal = await leerRegistro(dupOf);
+   985→          if (
+   986→            regOriginal.acta?.status === "ENVIADA" ||
+   987→            regOriginal.estado === "YA-ENVIADA"
+   988→          ) {
+   989→            enviadaDeId = dupOf;
+   990→          }
+   991→        } catch {
+   992→          enviadaDeId = null; // conservador → DUPLICADA
+   993→        }
+   994→        if (enviadaDeId) {
+   995→          if (await marcarYaEnviada(e.id, enviadaDeId, "bytes", e.hashBytes)) {
+   996→            logger.info(
+   997→              `[e14] dedup fila=${e.id} instantanea ya-enviada dupOf=${enviadaDeId}`,
+   998→            );
+   999→            continue;
+  1000→          }
+  1001→        }
+  1002→        // DUPLICADA instantánea (kit Opt-1) — guard anti-zombi + write IDB
+  1003→        // + patch de la fila viva, MISMO patrón de cadenaDedup.
+  1004→        const filaViva = useMasivaStore
+  1005→          .getState()
+  1006→          .filas.find((f) => f.id === e.id);
+  1007→        if (filaViva && filaViva.estado === "PENDIENTE") {
+  1008→          try {
+  1009→            const reg = await leerRegistro(e.id);
+  1010→            await guardarRegistro({ ...reg, estado: "DUPLICADA", dupOf });
+  1011→            patchFila(e.id, { estado: "DUPLICADA", dupOf });
+  1012→            logger.info(
+  1013→              `[e14] dedup fila=${e.id} instantanea sha256 dupOf=${dupOf}`,
+  1014→            );
+  1015→          } catch {
+  1016→            /* IDB caída — la fila procesa normal (conservador) */
+  1017→          }
+  1018→        }
+  1019→      }
+  1020→      // (c) esta fila pasa a candidata para las SIGUIENTES del lote (el
+  1021→      // MISMO archivo 2× en UNA carga — la segunda nace DUPLICADA aquí).
+  1022→      if (!originales.has(e.hashBytes)) originales.set(e.hashBytes, e.id);
+  1023→    }
+  1024→  } catch {
+  1025→    /* un fallo del pase JAMÁS tumba el encolado — la fila procesa normal */
+  1026→  }
+  1027→}
+  1028→
+  1029→/** KIT e14-masiva-ux-v1 (T3.2): al reactivar la conexión la cola offline del
+  1030→ *  flujo se drena (alternarConexion del store principal — INTACTO, fuera de
+  1031→ *  la whitelist §1). Aquí se refrescan las filas MASIVA que quedaron «EN
+  1032→ *  COLA»: el acta en IDB pasa de hashSha256 "EN COLA" a un hash demo (mismo
+  1033→ *  formato que el drenaje del flujo normal) y la fila pinta «ENVIADA».
+  1034→ *  La llama MasivaView al detectar el toggle offline→online. */
+  1035→export async function refrescarEnviosTrasDrenaje(): Promise<void> {
+  1036→  const enCola = useMasivaStore
+  1037→    .getState()
+  1038→    .filas.filter((f) => f.estado === "LISTA" && f.envioEnCola);
+  1039→  for (const fila of enCola) {
+  1040→    try {
+  1041→      const registro = await leerRegistro(fila.id);
+  1042→      if (registro.acta?.hashSha256 !== "EN COLA") continue;
+  1043→      await guardarRegistro({
+  1044→        ...registro,
+  1045→        acta: { ...registro.acta, hashSha256: hashDrenaje() },
+  1046→      });
+  1047→      patchFila(fila.id, { envioEnCola: false });
+  1048→      // WAVE3 §A.3 — el registro remoto nace TAMBIÉN al drenar (kit §A.3:
+  1049→      // «el registro remoto nace en refrescarEnviosTrasDrenaje() cuando la
+  1050→      // fila drena — un void …catch()»): la fila ENVIADA offline viaja al
+  1051→      // ledger D1 al reconectar — fire-and-forget, jamás bloquea el drenaje
+  1052→      // (RL-e65b-3). SOLO el SHA-256 del payload (privacidad dura).
+  1053→      if (registro.qrPayload) {
+  1054→        const payloadDrenado = registro.qrPayload;
+  1055→        void (async () => {
+  1056→          const payloadHash = await sha256HexDeTexto(payloadDrenado);
+  1057→          if (!payloadHash) return; // sin crypto — sin registro (conservador)
+  1058→          await registrarEnvioRemoto({
+  1059→            payloadHash,
+  1060→            serie: registro.serie ?? undefined,
+  1061→            filaId: fila.id,
+  1062→            origenUrl: origenActual() ?? undefined,
+  1063→          });
+  1064→        })().catch(() => {});
+  1065→      }
+  1066→    } catch {
+  1067→      /* IDB caído → la fila queda «EN COLA» (honesto; reintento al recargar) */
+  1068→    }
+  1069→  }
+  1070→}
+  1071→
+  1072→/** Espejo del hashMock del store principal (3 líneas — hash demo de 12 hex,
+  1073→ *  mismo formato visible en REVISIÓN/RESUMEN tras el drenaje). Sin import:
+  1074→ *  store.ts NO está en la whitelist §1 de este kit. */
+  1075→function hashDrenaje(): string {
+  1076→  const hex = Array.from({ length: 12 }, () =>
+  1077→    "0123456789abcdef"[Math.floor(Math.random() * 16)],
+  1078→  ).join("");
+  1079→  return `${hex}…`;
+  1080→}
+  1081→
+  1082→export const useMasivaStore = create<MasivaStore>((set, get) => ({
+  1083→  filas: [],
+  1084→  corriendo: false,
+  1085→  progreso: null,
+  1086→  enviandoLote: false,
+  1087→  filtro: "TODAS",
+  1088→  origenAbierto: null,
+  1089→  guardando: 0,
+  1090→  colaDisponible: true,
+  1091→  avisoCola: null,
+  1092→
+  1093→  cargarFilas: async () => {
+  1094→    try {
+  1095→      // e64p (C-1 — MODO PRUEBAS): la cola arranca VACÍA — cero restauración
+  1096→      // (sin filas fantasma ni Maps reconstruidos). Higiene: la persistencia
+  1097→      // vieja muere AQUÍ (cola IDB + ledger del histórico) para que la pasada
+  1098→      // siguiente sea de cero (QA doble pasada del kit). Con
+  1099→      // COLA_PERSISTENTE=true este bloque entero no existe y el comportamiento
+  1100→      // es el de siempre (restauración completa — reversibilidad).
+  1101→      if (!COLA_PERSISTENTE) {
+  1102→        try {
+  1103→          await vaciarCola();
+  1104→        } catch {
+  1105→          /* la cola muere igual en la bandeja (IDB caída — kit §3) */
+  1106→        }
+  1107→        try {
+  1108→          await borrarHistorico();
+  1109→        } catch {
+  1110→          /* conservador — el ledger se re-borra en el próximo vaciar/carga */
+  1111→        }
+  1112→        mapaQrPayload.clear();
+  1113→        qrPayloadPorFila.clear(); // P1 — mismo ciclo de vida del lote (e64p C-1)
+  1114→        indiceEnviadas = null;
+  1115→        set({ filas: [], colaDisponible: true, avisoCola: null });
+  1116→        return;
+  1117→      }
+  1118→      await recuperarCola(); // PROCESANDO zombi → PENDIENTE (caída a mitad de OCR)
+  1119→      // FIX C6: mapper DENTRO del cursor — los registros completos (acta con
+  1120→      // dataURLs) viven un instante; la bandeja solo retiene filas livianas.
+  1121→      const filas = await listarMapeados(filaDeRegistro);
+  1122→      set({
+  1123→        filas: filas.sort((a, b) => a.agregadaEn - b.agregadaEn),
+  1124→        colaDisponible: true,
+  1125→      });
+  1126→    } catch {
+  1127→      // IndexedDB no disponible → píldora de fallback (kit §6). La UI vive.
+  1128→      set({ colaDisponible: false, filas: [] });
+  1129→    }
+  1130→  },
+  1131→
+  1132→  agregarFiles: async (files) => {
+  1133→    // KIT e14-masiva-ux-v1 (T2.3): clasificación — imágenes (MIME o
+  1134→    // extensión, HEIC incluido) pasan directo; .zip/.rar se EXTRAEN
+  1135→    // client-side (import diferido D47 — extraer NO procesa nada, solo
+  1136→    // encola: D45 intacto); D60: PDF → páginas JPEG por extraerPdf (pdfjs
+  1137→    // diferido ídem — cada página hereda TODO); lo demás → fila ERROR
+  1138→    // FORMATO_NO_SOPORTADO (ya no se descarta en silencio).
+  1139→    const lista = Array.from(files);
+  1140→    if (!lista.length) return;
+  1141→    const imagenes: File[] = [];
+  1142→    // D63-A2 (T1): páginas nacidas de un PDF — nacen CON viaPdf (calibración
+  1143→    // por CONSTRUCCIÓN: el pipeline SABE qué filas vienen de PDF sin adivinar
+  1144→    // por píxeles). Solo la rama PDF llena este Set (fotos/WhatsApp/ZIP
+  1145→    // jamás lo tocan — prueba de lectura en el REPORTE del kit).
+  1146→    const paginasPdf = new Set<File>();
+  1147→    const errores: { nombre: string; motivo: string }[] = [];
+  1148→    for (const f of lista) {
+  1149→      if (pareceImagenMasiva(f)) {
+  1150→        imagenes.push(f);
+  1151→      } else if (/\.(zip|rar)$/i.test(f.name)) {
+  1152→        try {
+  1153→          const resultado = await extraerArchivo(f);
+  1154→          imagenes.push(...resultado.archivos);
+  1155→          errores.push(...resultado.errores);
+  1156→        } catch (err) {
+  1157→          errores.push({
+  1158→            nombre: f.name,
+  1159→            motivo: (
+  1160→              err instanceof Error ? err.message : "PROTEGIDO_O_CORRUPTO"
+  1161→            ).slice(0, 48),
+  1162→          });
+  1163→        }
+  1164→      } else if (parecePdfMasiva(f)) {
+  1165→        // D60 — PDF: render página a página → CADA página cae en `imagenes`
+  1166→        // (mismo manejo exacto que zip/rar: hereda pipeline/gate/dedup/IDB).
+  1167→        // D63-A2 (T1): las páginas resultantes entran al Set `paginasPdf` —
+  1168→        // sus filas nacen con viaPdf=true (memoria + IDB) y el runner las
+  1169→        // clasifica ESCANEO por construcción (las señales de píxel del
+  1170→        // detector D63-A quedan PRESERVADAS como prefijo `pdf-render+…`).
+  1171→        try {
+  1172→          const resultado = await extraerPdf(f);
+  1173→          resultado.archivos.forEach((a) => paginasPdf.add(a));
+  1174→          imagenes.push(...resultado.archivos);
+  1175→          errores.push(...resultado.errores);
+  1176→        } catch (err) {
+  1177→          errores.push({
+  1178→            nombre: f.name,
+  1179→            motivo: (
+  1180→              err instanceof Error ? err.message : "PROTEGIDO_O_CORRUPTO"
+  1181→            ).slice(0, 48),
+  1182→          });
+  1183→        }
+  1184→      } else {
+  1185→        errores.push({ nombre: f.name || "ARCHIVO", motivo: "FORMATO_NO_SOPORTADO" });
+  1186→      }
+  1187→    }
+  1188→    if (!imagenes.length && !errores.length) return;
+  1189→    const base = Date.now();
+  1190→    // Filas PENDIENTES AL INSTANTE (kit carga-masiva §6) con ids temporales
+  1191→    // — el runner las salta mientras la copia a IDB está en vuelo.
+  1192→    const temps = imagenes.map((file, i) => ({
+  1193→      id: `masiva-temp-${base}-${i}`,
+  1194→      nombre: file.name || `FOTO_${i + 1}`,
+  1195→      agregadaEn: base + i,
+  1196→      estado: "PENDIENTE" as EstadoEntrada,
+  1197→      // D63-A2 (T1): solo páginas-PDF traen el flag (ausente = no-PDF).
+  1198→      ...(paginasPdf.has(file) ? { viaPdf: true } : {}),
+  1199→    }));
+  1200→    // Filas ERROR (T2): motivo corto ≤48 — persisten en IDB (la bandeja
+  1201→    // sobrevive la recarga; no hay datos que procesar).
+  1202→    const filasError = errores.map((e, i) => ({
+  1203→      id: `masiva-err-${base}-${i}`,
+  1204→      nombre: e.nombre,
+  1205→      agregadaEn: base + imagenes.length + i,
+  1206→      estado: "ERROR" as EstadoEntrada,
+  1207→      error: e.motivo,
+  1208→    }));
+  1209→    set({
+  1210→      filas: [...get().filas, ...temps, ...filasError],
+  1211→      guardando: get().guardando + imagenes.length,
+  1212→    });
+  1213→    // e71 (Opt-1) — SHA-256 PRE-SCAN en la ingesta (kit e71-consolidación,
+  1214→    // benchmark aprobado ~68 ms por archivo): SECUENCIAL (RAM — un
+  1215→    // arrayBuffer de 12 MP a la vez) y ANTES de abrir la transacción de IDB
+  1216→    // (una tx de IndexedDB auto-commitea si el control vuelve al event loop
+  1217→    // con awaits ajenos — el hash JAMÁS corre dentro de la tx). Las filas
+  1218→    // ya están visibles (temps «GUARDANDO N…» — cero regresión UX); el
+  1219→    // coste del hash vive en esa misma fase y a cambio TODO duplicado
+  1220→    // exacto nace resuelto: nunca paga precalor, ni qr-capa0, ni OCR.
+  1221→    const hashesBytes: (string | null)[] = [];
+  1222→    for (const file of imagenes) {
+  1223→      const tSha = Date.now();
+  1224→      const hash = await hashBytesDeArchivo(file);
+  1225→      hashesBytes.push(hash);
+  1226→      if (hash) {
+  1227→        logger.info(
+  1228→          `[e14] ingesta sha256 nombre=${(file.name || "FOTO").slice(0, 24)} ms=${Date.now() - tSha} hash=${hash.slice(0, 8)}…`,
+  1229→        );
+  1230→      }
+  1231→    }
+  1232→    try {
+  1233→      if (imagenes.length) {
+  1234→        const ids = await agregarLote(imagenes, paginasPdf, hashesBytes); // D63-A2 (T1): viaPdf nace en el PRIMER write · e71 (Opt-1): hashBytes ídem
+  1235→        // FIX M13 (auditoría 2-c): el swap respeta la decisión del dueño TOMADA
+  1236→        // DURANTE la copia (QUITAR de una fila temp, VACIAR, o recarga de la
+  1237→        // vista que re-monta cargarFilas): las temps que YA NO están en filas
+  1238→        // NO reviven con id real — sus registros recién creados se BORRAN de
+  1239→        // IDB (antes quedaban huérfanos y resucitaban como PENDIENTE al
+  1240→        // recargar, contra la voluntad del usuario).
+  1241→        const actuales = get().filas;
+  1242→        const vivas = new Set(actuales.map((f) => f.id));
+  1243→        const huerfanos = ids.filter((_, idx) => !vivas.has(temps[idx]!.id));
+  1244→        set({
+  1245→          filas: actuales.map((f) => {
+  1246→            const idx = temps.findIndex((t) => t.id === f.id);
+  1247→            return idx === -1 ? f : { ...f, id: ids[idx] };
+  1248→          }),
+  1249→          guardando: Math.max(0, get().guardando - imagenes.length),
+  1250→          colaDisponible: true,
+  1251→          avisoCola: null, // un lote que SÍ entró despeja el aviso de quota
+  1252→        });
+  1253→        // e71 (Opt-1) — DEDUP EXACTO INSTANTÁNEO: con los hashes ya en el
+  1254→        // primer write, el pase marca DUPLICADA/YA-ENVIADA al instante y
+  1255→        // ANTES de rearrancar el runner (el duplicado jamás llega al
+  1256→        // pipeline). Fuera los huérfanos (M13 — jamás marcar muertos).
+  1257→        await dedupExactoIngesta(
+  1258→          imagenes
+  1259→            .map((file, i) => ({ id: ids[i], hashBytes: hashesBytes[i] ?? null }))
+  1260→            .filter((e) => e.id !== undefined && !huerfanos.includes(e.id)),
+  1261→        );
+  1262→        // e63g — PLAN e63g-e63h-ruta-unica (E1/FASE 1): el swap acaba de
+  1263→        // crear filas PENDIENTE con id real — si el bucle murió mientras la
+  1264→        // copia a IDB estaba en vuelo (siguientePendiente solo veía temps y
+  1265→        // rompió), las nuevas quedaban PENDIENTE para siempre. Re-arranque
+  1266→        // con guard IDEMPOTENTE en el runner: no-op si la cola corre, está
+  1267→        // pausada o jamás se inició (D45 intacto — sesión fría no procesa).
+  1268→        rearrancarTrasEncolar();
+  1269→        // FIX M13 (auditoría 2-a): los huérfanos salen de IDB antes de
+  1270→        // arrancar nada — jamás resucitan.
+  1271→        for (const id of huerfanos) {
+  1272→          try {
+  1273→            await borrar(id);
+  1274→          } catch {
+  1275→            /* IDB caída — el orphan muere con el próximo VACIAR */
+  1276→          }
+  1277→        }
+  1278→        // KIT e14-masiva-tiempos-v1 (PR-1): cadena de hashing DEDUP en
+  1279→        // background (fire-and-forget — NUNCA bloquea el encolado ni la
+  1280→        // UI; marca DUPLICADAS al aterrizar cada hash, FIFO). Los guards
+  1281→        // anti-zombi de cadenaDedup ya excluyen filas muertas; aquí el
+  1282→        // lote deja fuera a los huérfanos borrados (no hashear en balde).
+  1283→        void cadenaDedup(
+  1284→          imagenes
+  1285→            .map((file, i) => ({
+  1286→              id: ids[i],
+  1287→              archivo: file,
+  1288→              // e71 (Opt-1): el hash de la INGESTA viaja pre-computado —
+  1289→              // la cadena de fondo no re-hashea (68 ms/file ahorrados).
+  1290→              hashBytes: hashesBytes[i] ?? undefined,
+  1291→            }))
+  1292→            .filter((e) => e.id !== undefined && !huerfanos.includes(e.id)),
+  1293→        );
+  1294→        // KIT flujo-dueno-v1 (K2 — brief Agente B, sub-commit 1): WARP DE
+  1295→        // INGESTA — la detección+warp+sondeo-QR del clic PROCESAR (e107)
+  1296→        // sube a la INGESTA (flag masivaWarpIngesta, default OFF =
+  1297→        // byte-idéntico a acf181f). Encola filas PENDIENTE vivas (no
+  1298→        // DUPLICADA/YA-ENVIADA — el dedup exacto de arriba ya decidió;
+  1299→        // forzarDedupOff JAMÁS — RL-e65b-6, el escape del dueño es sagrado).
+  1300→        // El bombeo es SERIAL (1 a la vez) con cortesía de CPU hacia
+  1301→        // cadenaDedup y re-chequeo anti-zombi por fila (warp-ingesta.ts).
+  1302→        // PROCESAR IGUAL queda intacto y el botón PROCESAR como ASEGURADOR
+  1303→        // idempotente (punto 7 del brief — el objetivo del asegurador salta
+  1304→        // filas con dueño).
+  1305→        if (leerFlags().masivaWarpIngesta === true) {
+  1306→          const vivasAhora = get().filas;
+  1307→          for (const id of ids) {
+  1308→            if (id === undefined || huerfanos.includes(id)) continue;
+  1309→            const filaViva = vivasAhora.find((f) => f.id === id);
+  1310→            if (filaViva && filaViva.estado === "PENDIENTE" && !filaViva.forzarDedupOff) {
+  1311→              encolarWarpIngesta(id);
+  1312→            }
+  1313→          }
+  1314→        }
+  1315→      } else {
+  1316→        set({ guardando: Math.max(0, get().guardando - imagenes.length) });
+  1317→      }
+  1318→      for (const fila of filasError) {
+  1319→        try {
+  1320→          await guardarRegistro({
+  1321→            id: fila.id,
+  1322→            nombre: fila.nombre,
+  1323→            agregadaEn: fila.agregadaEn,
+  1324→            estado: "ERROR",
+  1325→            error: fila.error,
+  1326→          });
+  1327→        } catch {
+  1328→          /* IDB caído: la fila vive SOLO en memoria (honesto) */
+  1329→        }
+  1330→      }
+  1331→    } catch (err) {
+  1332→      // El lote NO entró a IDB: filas temporales fuera + píldora honesta
+  1333→      // (errores de IDB NUNCA tumban la UI — kit carga-masiva §3). Las filas
+  1334→      // ERROR quedan en memoria — su motivo ES la información.
+  1335→      // FIX M9 (auditoría 2-c): QUOTA ≠ «navegador sin soporte» — la cola
+  1336→      // SIGUE disponible (hay filas pre-existentes sanas y PROCESAR vale);
+  1337→      // el aviso explica cómo liberar espacio. Solo un fallo REAL de IDB
+  1338→      // (abrir/versión) degrada a colaDisponible false.
+  1339→      const esQuota =
+  1340→        err instanceof Error &&
+  1341→        (/quotaexceeded/i.test(err.name) ||
+  1342→          /quota/i.test(err.message) ||
+  1343→          /llen|full/i.test(err.message));
+  1344→      const tempIds = new Set(temps.map((t) => t.id));
+  1345→      set({
+  1346→        filas: get().filas.filter((f) => !tempIds.has(f.id)),
+  1347→        guardando: Math.max(0, get().guardando - imagenes.length),
+  1348→        ...(esQuota
+  1349→          ? {
+  1350→              avisoCola:
+  1351→                "ALMACENAMIENTO LLENO — vacía la bandeja o importa lotes más pequeños",
+  1352→            }
+  1353→          : { colaDisponible: false }),
+  1354→      });
+  1355→    }
+  1356→  },
+  1357→
+  1358→  iniciar: () => {
+  1359→    if (!get().colaDisponible) return;
+  1360→    iniciarRunner();
+  1361→  },
+  1362→
+  1363→  pausar: () => pausarRunner(),
+  1364→
+  1365→  // KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — la fila vuelve a
+  1366→  // PENDIENTE (dupOf fuera, persistente) y el runner la reprocesa COMPLETA
+  1367→  // como cualquier otra (kit §2 — el dueño fuerza el reproceso de una
+  1368→  // gemela sospechosa). Si el runner está corriendo la toma en su siguiente
+  1369→  // pasada (siguientePendiente ya incluye PENDIENTE).
+  1370→  procesarIgual: async (id) => {
+  1371→    // e63k (F1.3): el dueño mandó — se estampa forzarDedupOff (persistente)
+  1372→    // para que las capas 1 (visual) y 2 (identidad) lo respeten SIEMPRE:
+  1373→    // el runner ya no pasa por reutilizarResultado (dupOf null) y la capa 2
+  1374→    // tampoco la marcará (kit §1.3 — el reproceso completo es irrevertible
+  1375→    // hasta que el dueño decida otra cosa). e65 (T-6): extendido a
+  1376→    // YA-ENVIADA — el MISMO escape del dueño: la fila nace PENDIENTE con
+  1377→    // forzarDedupOff y enviadaDe FUERA (reproceso completo, RL-e65-7).
+  1378→    patchFila(id, {
+  1379→      estado: "PENDIENTE",
+  1380→      dupOf: null,
+  1381→      enviadaDe: null,
+  1382→      forzarDedupOff: true,
+  1383→    });
+  1384→    logger.info(`[e14] dedup fila=${id} procesar-igual`);
+  1385→    try {
+  1386→      const registro = await leerRegistro(id);
+  1387→      await guardarRegistro({
+  1388→        ...registro,
+  1389→        estado: "PENDIENTE",
+  1390→        dupOf: undefined,
+  1391→        enviadaDe: undefined,
+  1392→        forzarDedupOff: true,
+  1393→      });
+  1394→    } catch {
+  1395→      /* IDB caído — la fila ya está PENDIENTE en memoria (honesto) */
+  1396→    }
+  1397→  },
+  1398→
+  1399→  // D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» — la fila ERROR
+  1400→  // vuelve a PENDIENTE (error fuera, persistente) y el runner la toma en su
+  1401→  // siguiente pasada (o cuando el dueño pulse PROCESAR). Guard honesto: sin
+  1402→  // archivo original en IDB (registros viejos o filas de formato) la fila
+  1403→  // SIGUE en ERROR con SIN_ARCHIVO_ORIGINAL — jamás encolar humo.
+  1404→  reintentar: async (id) => {
+  1405→    const fila = get().filas.find((f) => f.id === id);
+  1406→    if (!fila || fila.estado !== "ERROR") return;
+  1407→    if (get().progreso?.id === id) return; // no corriendo en ese id (defensivo)
+  1408→    let registro: RegistroMasiva;
+  1409→    try {
+  1410→      registro = await leerRegistro(id);
+  1411→    } catch {
+  1412→      return; // sin registro en IDB — nada que reintentar (honesto)
+  1413→    }
+  1414→    if (!(registro.archivo instanceof File)) {
+  1415→      patchFila(id, { error: "SIN_ARCHIVO_ORIGINAL" });
+  1416→      return;
+  1417→    }
+  1418→    patchFila(id, { estado: "PENDIENTE", error: null });
+  1419→    try {
+  1420→      await guardarRegistro({ ...registro, estado: "PENDIENTE", error: undefined });
+  1421→    } catch {
+  1422→      /* IDB caído — la fila ya está PENDIENTE en memoria (honesto) */
+  1423→    }
+  1424→  },
+  1425→
+  1426→  abrirActa: async (id) => {
+  1427→    // AUTO-PAUSA (kit §4 regla 2): el flujo de revisión usa el main thread
+  1428→    // y actaActual — no pelear. Reanudar es MANUAL (botón PROCESAR).
+  1429→    pausarRunner();
+  1430→    set({ origenAbierto: id });
+  1431→    await useE14Store.getState().abrirActaMasiva(id);
+  1432→  },
+  1433→
+  1434→  sincronizarAlVolver: async () => {
+  1435→    const { origenAbierto } = get();
+  1436→    if (!origenAbierto) return;
+  1437→    const acta = useE14Store.getState().actaActual;
+  1438→    // FIX (auditoría 2-c C4): la identidad se resuelve contra el acta GUARDADA
+  1439→    // en el registro (registro.acta.id === actaActual.id) — NO contra el id de
+  1440→    // la FILA ("masiva-*" vs "acta-*": prefijos distintos, la comparación
+  1441→    // directa era SIEMPRE falsa y este bloque entero era código muerto: las
+  1442→    // ediciones de REVISIÓN jamás volvían a la bandeja/IDB y el usuario,
+  1443→    // viendo la fila desactualizada, re-abría y re-enviaba la misma acta).
+  1444→    // El recorte/filtro/rotación conservan acta.id (spread ...acta) → la
+  1445→    // identidad sobrevive a TODAS las ediciones del editor.
+  1446→    if (!acta) {
+  1447→      set({ origenAbierto: null });
+  1448→      return;
+  1449→    }
+  1450→    try {
+  1451→      const registro = await leerRegistro(origenAbierto);
+  1452→      if (!registro || registro.acta?.id !== acta.id) {
+  1453→        // Identidad NO coincide (arrancó una captura normal mientras tanto):
+  1454→        // SOLO limpiar — no escribir nada (kit §4).
+  1455→        set({ origenAbierto: null });
+  1456→        return;
+  1457→      }
+  1458→      const actaNueva = acta;
+  1459→      // Thumb FRESCO si la foto cambió (recorte/filtro/rotación hornean
+  1460→      // fotoProcesada) — la bandeja no debe mentir.
+  1461→      // KIT e14-observabilidad-v1 (A1-C7): kill switch MANUAL del dueño
+  1462→      // (flags.thumbsOn, default true → idéntico sin overrides; D6: la app
+  1463→      // nunca se auto-configura). OFF → conserva el thumb del registro.
+  1464→      const thumb = leerFlags().thumbsOn
+  1465→        ? ((await hacerThumb(actaNueva.fotoProcesada ?? actaNueva.fotoOriginal)) ??
+  1466→          registro.thumb)
+  1467→        : registro.thumb;
+  1468→      await guardarRegistro({ ...registro, acta: actaNueva, thumb });
+  1469→      // e65b (T-3c): envío MANUAL desde REVISIÓN — si el dueño envió a mano
+  1470→      // el acta de esta fila masiva, el desenlace ENVIADO también alimenta
+  1471→      // el ledger (RL-e65b-2 — micro-decisión: la vía existe y vive aquí,
+  1472→      // con la identidad registro.acta?.id === acta.id ya verificada arriba;
+  1473→      // el envío genérico del flujo normal queda INTACTO fuera de la
+  1474→      // whitelist). Fire-and-forget — jamás tumba la sincronización (RL-e65b-3).
+  1475→      if (actaNueva.status === "ENVIADA") {
+  1476→        void registrarEnviadaHistorico({
+  1477→          id: origenAbierto,
+  1478→          ts: Date.now(),
+  1479→          hashBytes: registro.hashBytes,
+  1480→          hashDedup: registro.hashDedup,
+  1481→          payloadQr: registro.qrPayload,
+  1482→          serie: registro.serie ?? undefined,
+  1483→        }).catch(() => {});
+  1484→      }
+  1485→      patchFila(origenAbierto, {
+  1486→        estado: "LISTA",
+  1487→        statusActa: actaNueva.status,
+  1488→        score: actaNueva.score,
+  1489→        nivel: actaNueva.clasificacion?.nivel ?? null,
+  1490→        pagina: paginaDeActa(actaNueva),
+  1491→        motivo: actaNueva.rechazo?.tipo ?? null,
+  1492→        thumb,
+  1493→        enviadaAuto:
+  1494→          actaNueva.status === "ENVIADA" && !!actaNueva.enviadoAutomaticamente,
+  1495→        // KIT e14-masiva-ux-v1 (T3.2): el envío manual desde REVISIÓN ya
+  1496→        // hornea hashSha256 (registrarEnvio — actaFuente === actaActual);
+  1497→        // la fila lo proyecta.
+  1498→        envioEnCola: actaNueva.hashSha256 === "EN COLA",
+  1499→        error: null,
+  1500→      });
+  1501→    } catch {
+  1502→      /* sin registro en IDB → nada que sincronizar; la fila queda como está */
+  1503→    }
+  1504→    set({ origenAbierto: null });
+  1505→  },
+  1506→
+  1507→  quitar: async (id) => {
+  1508→    try {
+  1509→      await borrar(id);
+  1510→    } catch {
+  1511→      /* la fila muere igual en la bandeja (IDB falla — kit §3) */
+  1512→    }
+  1513→    set({ filas: get().filas.filter((f) => f.id !== id) });
+  1514→    if (get().origenAbierto === id) set({ origenAbierto: null });
+  1515→  },
+  1516→
+  1517→  vaciar: async () => {
+  1518→    if (get().corriendo) return; // el botón está deshabilitado — doble guard
+  1519→    try {
+  1520→      await vaciarCola();
+  1521→    } catch {
+  1522→      /* las filas mueren igual en la bandeja */
+  1523→    }
+  1524→    // e65b (T-5, REVERSA de D-e65-8 → D-e65b-1): lo que muere aquí es el
+  1525→    // CACHE de sesión — NO el histórico. El ledger persistente (historico.ts,
+  1526→    // DB separada) sobrevive: la próxima consulta reconstruye el índice
+  1527→    // fusionando cola + ledger (T-2b) → tras VACIAR, re-subir lo ya enviado
+  1528→    // nace YA-ENVIADA igualmente (la prueba exacta del dueño: vaciar +
+  1529→    // re-subir los 46). `borrarHistorico()` existe pero JAMÁS se cablea aquí
+  1530→    // (RL-e65b-5). La cola es el taller; el envío es el hecho.
+  1531→    // e64p (C-2 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ciclo de vida
+  1532→    // COMPLETO muere aquí (reversa declarada del RL-e65b-5 SOLO en modo
+  1533→    // pruebas): mapaQrPayload (capa 0 QR — hoy sobrevivía a vaciar en la
+  1534→    // misma sesión) + ledger del histórico + índice → limpiar y re-subir el
+  1535→    // MISMO lote procesa completo de cero (QA del kit). En producción
+  1536→    // (true) este bloque no existe y D-e65b-1 queda byte a byte.
+  1537→    if (!COLA_PERSISTENTE) {
+  1538→      mapaQrPayload.clear();
+  1539→      qrPayloadPorFila.clear(); // P1 — mismo ciclo de vida del lote (e64p C-2)
+  1540→      try {
+  1541→        await borrarHistorico();
+  1542→      } catch {
+  1543→        /* conservador — el índice ya no lo verá en esta sesión */
+  1544→      }
+  1545→    }
+  1546→    indiceEnviadas = null;
+  1547→    set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
+  1548→  },
+  1549→
+  1550→  enviarLote: async (estado) => {
+  1551→    if (estado !== "ADVERTENCIA") return; // v1: SOLO advertencias (kit §9)
+  1552→    // FIX (auditoría 2-c C5): guard de re-entrancia — un doble clic (o doble
+  1553→    // tap móvil) disparaba DOS lotes que tomaban el MISMO snapshot de filas
+  1554→    // ADVERTENCIA (el patchFila llegaba tarde) → cada acta pasaba 2× por
+  1555→    // registrarEnvioMasiva: historial duplicado y completadas inflada.
+  1556→    if (get().enviandoLote) return;
+  1557→    const pendientes = get().filas.filter(
+  1558→      (f) => f.estado === "LISTA" && f.statusActa === "ADVERTENCIA",
+  1559→    );
+  1560→    if (pendientes.length === 0) return;
+  1561→    set({ enviandoLote: true });
+  1562→    try {
+  1563→    for (const fila of pendientes) {
+  1564→      try {
+  1565→        const registro = await leerRegistro(fila.id);
+  1566→        const acta = registro.acta;
+  1567→        if (!acta || acta.status !== "ADVERTENCIA") continue;
+  1568→        // La MISMA vía que el envío manual del flujo normal (T3.3) —
+  1569→        // historial + completadas + hueco archivado + cola offline.
+  1570→        // KIT e14-masiva-ux-v1 (T3.2): si la conexión estaba OFFLINE el
+  1571→        // envío va a la cola → hashSha256 "EN COLA" (la fila pinta «EN
+  1572→        // COLA» y refrescarEnviosTrasDrenaje la drena al reconectar).
+  1573→        const onlineAlEnviar = useE14Store.getState().online;
+  1574→        useE14Store.getState().registrarEnvioMasiva(acta);
+  1575→        const actaEnviada: Acta = {
+  1576→          ...acta,
+  1577→          status: "ENVIADA",
+  1578→          enviadoAutomaticamente: getBridge().horaEnvio(),
+  1579→          ...(onlineAlEnviar ? {} : { hashSha256: "EN COLA" }),
+  1580→        };
+  1581→        await guardarRegistro({ ...registro, acta: actaEnviada });
+  1582→        // e65b (T-3c): envío MANUAL del LOTE (ADVERTENCIA → ENVIADA) — el
+  1583→        // desenlace ENVIADO también alimenta el ledger (RL-e65b-2 —
+  1584→        // micro-decisión: misma vía del helper único). Si quedó «EN COLA»
+  1585→        // (offline) el status YA es ENVIADA — el MISMO criterio del índice
+  1586→        // (acta?.status === "ENVIADA"). Fire-and-forget (RL-e65b-3).
+  1587→        void registrarEnviadaHistorico({
+  1588→          id: fila.id,
+  1589→          ts: Date.now(),
+  1590→          hashBytes: registro.hashBytes,
+  1591→          hashDedup: registro.hashDedup,
+  1592→          payloadQr: registro.qrPayload,
+  1593→          serie: registro.serie ?? undefined,
+  1594→        }).catch(() => {});
+  1595→        patchFila(fila.id, {
+  1596→          statusActa: "ENVIADA",
+  1597→          score: actaEnviada.score,
+  1598→          motivo: null,
+  1599→          envioEnCola: actaEnviada.hashSha256 === "EN COLA",
+  1600→        });
+  1601→      } catch {
+  1602→        /* una fila que falla NO detiene el lote (sigue con la siguiente) */
+  1603→      }
+  1604→    }
+  1605→    } finally {
+  1606→      set({ enviandoLote: false });
+  1607→    }
+  1608→  },
+  1609→
+  1610→  // D65 (T3.1): señal de vida — estado transitorio (NUNCA a IDB, kit T3.4);
+  1611→  // el % fantasma no existe: al recargar, progreso vuelve a null.
+  1612→  marcarProgreso: (id, progreso) => set({ progreso: { id, ...progreso } }),
+  1613→
+  1614→  setFiltro: (filtro) => set({ filtro }),
+  1615→
+  1616→  // e64-qr-v1 (T-0.2): patch INMUTABLE de UNA fila viva — el MISMO patrón
+  1617→  // del patchFila interno; expuesto como action para el runner (chip QR).
+  1618→  actualizarFila: (id, patch) => patchFila(id, patch),
+  1619→}));
+  1620→
+  1621→// D66 — KIT e14-decode-unico-precalor-v1 (T3): el precalor queda cableado
+  1622→// al mini-store DESDE AHORA (store ya creado) — respira con la cola aunque
+  1623→// el dueño nunca pulse PROCESAR (ese es su propósito: trabajar en la
+  1624→// espera). En SSR el store no emite eventos y las señales de ociosidad lo
+  1625→// mantienen apagado.
+  1626→cablearPrecalor();
+  1627→

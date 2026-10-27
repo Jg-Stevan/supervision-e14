@@ -1,0 +1,723 @@
+     1→/**
+     2→ * Implementación mock de SupervisionRepository.
+     3→ *
+     4→ * KIT SUP-5 (T3 / D21): los puestos YA NO son un array demo de 20 — la
+     5→ * fuente es el catálogo DIVIPOLA exterior real (`CARGAR_CATALOGO()`,
+     6→ * 949 puestos / 67 países / 3.670 mesas). El estado (Global/Mesas/
+     7→ * Delegados/Transmisión) se SIEMBRA por hash determinístico del `idEnlace`
+     8→ * divipola (mismo seed → mismos KPIs siempre; nada aleatorio en render,
+     9→ * §0-9) con la MISMA distribución de estados que el mock anterior
+    10→ * (CRÍTICO ~5% · COMPLETO ~25% · PENDIENTE ~20% · NO_INICIADO ~50%).
+    11→ *
+    12→ * D6 queda SUPERSEDEDO: los KPIs iniciales dejan de ser los literales
+    13→ * 20/5/1/4/10 y se DERIVAN del catálogo sembrado, con la invariante
+    14→ * intacta: `total = completo + crítico + pendiente + no_iniciado` exacto.
+    15→ *
+    16→ * ANCLA DEMO (§2.3): el puesto `88_495_010_02` Roma - Consulado (ITALIA,
+    17→ * 8 mesas — el catálogo manda sobre el 499 del demo viejo) conserva su
+    18→ * estado demo completo: CRÍTICO, mesas 001-003 EXACTAS del mockup,
+    19→ * acta `#A92-F` con historial 14:00/14:18/14:20 y P2 con advertencia.
+    20→ * Los IDs internos quedan re-anclados al `idEnlace` real.
+    21→ *
+    22→ * Kit SUP-3: mesas determinísticas por puesto (cantidad EXACTA =
+    23→ * totalMesas del catálogo), pcts derivados de las mesas (D16), interfaz
+    24→ * async con latencia simulada ~400 ms (D12), mutaciones de T4 y
+    25→ * transición de vida de T3 (D13). Kit SUP-4: actas por contrato (§0-9).
+    26→ * Sin backend, sin persistencia: el estado vive en memoria del módulo.
+    27→ */
+    28→
+    29→import type {
+    30→  Anomalia,
+    31→  EstadoGlobal,
+    32→  FiltrosPuestos,
+    33→  Mesa,
+    34→  Notificacion,
+    35→  Puesto,
+    36→  ResumenGlobal,
+    37→} from "../domain/types";
+    38→import type { PuestoDivipola } from "../domain/divipola";
+    39→import { zonaParaUI } from "../domain/divipola";
+    40→import { ID_ENLACE_ROMA, CARGAR_CATALOGO } from "./divipola-adapter";
+    41→import { crearRandomDeterministico } from "../domain/acta";
+    42→import type { SupervisionRepository } from "./supervision-repository";
+    43→import {
+    44→  aprobarActaMock,
+    45→  confirmarRescanActaMock,
+    46→  obtenerActa,
+    47→} from "./actas-mock";
+    48→
+    49→/** ANCLA DE PRÁCTICA (SUP-6 §2.3 / D26): El Cairo - Consulado (EGIPTO) —
+    50→ * la mesa 001 sirve el acta real del digitalizador (kit actas-reales-v1). */
+    51→export const ID_ENLACE_CAIRO = "88_335_005_02";
+    52→
+    53→/** Supervisor de la sesión (header del mockup). */
+    54→export const SUPERVISOR = {
+    55→  nombre: "SUPERVISOR",
+    56→  id: "ADM-9482",
+    57→} as const;
+    58→
+    59→/** Latencia simulada del mock (D12): el contrato es async desde hoy. */
+    60→const LATENCIA_MS = 400;
+    61→/** Latencia simulada de REINSPECCIONAR (T4): ~2.5 s de spinner. */
+    62→const LATENCIA_REINSPECCION_MS = 2500;
+    63→/** Intervalo del ticker de sincronización (T3). */
+    64→export const TICKER_SEGUNDOS = 5;
+    65→/** Cada cuántos segundos del ticker aplica UNA transición de vida (T3). */
+    66→export const TRANSICION_CADA_SEGUNDOS = 45;
+    67→
+    68→function esperar(ms: number): Promise<void> {
+    69→  return new Promise((resolve) => setTimeout(resolve, ms));
+    70→}
+    71→
+    72→/** Con latencia simulada (sin romper el determinismo de los datos). */
+    73→async function conLatencia<T>(valor: T, ms = LATENCIA_MS): Promise<T> {
+    74→  await esperar(ms);
+    75→  return valor;
+    76→}
+    77→
+    78→// ─── Catálogo DIVIPOLA → Puesto (kit SUP-5 §3-T3) ───────────────────────────
+    79→
+    80→/**
+    81→ * Distribución de estados SEMBRADA (misma proporción que el mock de 20:
+    82→ * 5 COMPLETO / 1 CRÍTICO / 4 PENDIENTE / 10 NO_INICIADO). El ancla Roma
+    83→ * se FUERZA a CRÍTICO aparte (§2.3).
+    84→ */
+    85→function estadoPorSeed(random: number): EstadoGlobal {
+    86→  if (random < 0.05) return "CRITICO"; // ~1 de cada 20 (como hoy)
+    87→  if (random < 0.3) return "COMPLETO"; // ~25%
+    88→  if (random < 0.5) return "PENDIENTE"; // ~20%
+    89→  return "NO_INICIADO"; // ~50%
+    90→}
+    91→
+    92→const CIERRES_COL_MIN = [9 * 60, 10 * 60, 11 * 60, 12 * 60, 13 * 60];
+    93→const DESFASES: { etiqueta: string; minutos: number }[] = [
+    94→  { etiqueta: "—", minutos: 0 },
+    95→  { etiqueta: "< 1 hr", minutos: 45 },
+    96→  { etiqueta: "1-2 hrs", minutos: 90 },
+    97→  { etiqueta: "> 3 hrs", minutos: 200 },
+    98→];
+    99→
+   100→/** "19:08" → "7:08 PM" (formato del mockup). */
+   101→function relojDeMinutos(minutos: number): string {
+   102→  const m = ((minutos % 1440) + 1440) % 1440;
+   103→  const h24 = Math.floor(m / 60);
+   104→  const mm = String(m % 60).padStart(2, "0");
+   105→  const sufijo = h24 >= 12 ? "PM" : "AM";
+   106→  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+   107→  return `${h12}:${mm} ${sufijo}`;
+   108→}
+   109→
+   110→/** Horarios creíbles + determinísticos por seed (el demo no conoce
+   111→ * zonas horarias reales; la coherencia EXACTA solo la exige el kit para
+   112→ * el ancla Roma — §4.9). */
+   113→function horarioPorSeed(random: () => number): {
+   114→  cierre: string;
+   115→  local: string;
+   116→  diferencia: string;
+   117→} {
+   118→  const cierre = CIERRES_COL_MIN[Math.floor(random() * CIERRES_COL_MIN.length)];
+   119→  const desfase = DESFASES[Math.floor(random() * DESFASES.length)];
+   120→  const local = cierre + desfase.minutos + Math.floor(random() * 60);
+   121→  return {
+   122→    cierre: relojDeMinutos(cierre),
+   123→    local: relojDeMinutos(local),
+   124→    diferencia: desfase.etiqueta,
+   125→  };
+   126→}
+   127→
+   128→/** Valores EXACTOS del horario del ancla Roma (mockup original). */
+   129→const HORARIO_ROMA = {
+   130→  cierre: "9:00 AM",
+   131→  local: "7:08 PM",
+   132→  diferencia: "> 3 hrs",
+   133→} as const;
+   134→
+   135→/** Registro canónico → fila de la tabla (`Puesto`). El `id` ES el
+   136→ * `idEnlace` divipola (D22): re-ancla mesas, actas, anomalías y el join
+   137→ * futuro con el digitalizador. Códigos reales del catálogo, sin
+   138→ * transformar (§2.3). */
+   139→function puestoDeRegistro(registro: PuestoDivipola): Puesto {
+   140→  const esAncla = registro.idEnlace === ID_ENLACE_ROMA;
+   141→  // D26: ancla de práctica El Cairo — se FUERZA a COMPLETO (mismo
+   142→  // mecanismo del ancla Roma → CRÍTICO). Su seed natural cae en
+   143→  // NO_INICIADO (4a llamada del seed > 0.5 — rango NO_INICIADO; el kit
+   144→  // lo anota como 0.9872): sin fuerza el ancla es inalcanzable.
+   145→  const esAnclaCairo = registro.idEnlace === ID_ENLACE_CAIRO;
+   146→  const random = crearRandomDeterministico(`divipola::puesto::${registro.idEnlace}`);
+   147→  const horario = esAncla ? HORARIO_ROMA : horarioPorSeed(random);
+   148→  return {
+   149→    id: registro.idEnlace,
+   150→    codigoPais: registro.codigoMunicipio,
+   151→    pais: registro.nombreMunicipio,
+   152→    zonaId: registro.codigoZona,
+   153→    zona: zonaParaUI(registro.codigoZona),
+   154→    puesto: `${registro.codigoPuesto} - ${registro.nombre}`,
+   155→    numeroMesas: registro.totalMesas,
+   156→    horaCierreColombia: horario.cierre,
+   157→    horaActualLocal: horario.local,
+   158→    diferenciaTiempo: horario.diferencia,
+   159→    // Los pcts se recalculan al inicializar (derivación de mesas, D16).
+   160→    pctDelegado: 0,
+   161→    pctTransmision: 0,
+   162→    estadoGlobal: esAncla ? "CRITICO" : esAnclaCairo ? "COMPLETO" : estadoPorSeed(random()),
+   163→  };
+   164→}
+   165→
+   166→/** Puestos = catálogo DIVIPOLA exterior real (949 — §2.4). */
+   167→const PUESTOS: Puesto[] = CARGAR_CATALOGO().map(puestoDeRegistro);
+   168→
+   169→// ─── Generación determinística de mesas (T2 / D13) ──────────────────────────
+   170→
+   171→function ok(): Mesa["delegados"]["p1"] {
+   172→  return "ok";
+   173→}
+   174→function pend(): Mesa["delegados"]["p1"] {
+   175→  return "pendiente";
+   176→}
+   177→
+   178→/** Mesas 001-003 EXACTAS del mockup original (SUP-1 §2.4) — NO SE TOCAN:
+   179→ * hoy pertenecen al ANCLA Roma (`88_495_010_02`, kit SUP-5 §2.3). */
+   180→const MESAS_ITALIA_MOCKUP: Mesa[] = [
+   181→  {
+   182→    id: "001",
+   183→    delegados: { p1: "ok", p2: "ok" },
+   184→    transmision: {
+   185→      p1: { estado: "ok" },
+   186→      p2: { estado: "ok", alerta: "Rescaneo" },
+   187→    },
+   188→    estadoMesa: "INCOMPLETO",
+   189→    ultimaCarga: "Hace 12 min",
+   190→    accionSugerida: "reinspeccionar",
+   191→  },
+   192→  {
+   193→    id: "002",
+   194→    delegados: { p1: "ok", p2: "ok" },
+   195→    transmision: {
+   196→      p1: { estado: "pendiente" },
+   197→      p2: { estado: "pendiente" },
+   198→    },
+   199→    estadoMesa: "EN_PROCESO",
+   200→    ultimaCarga: "Hace 45 min",
+   201→    accionSugerida: "notificar",
+   202→  },
+   203→  {
+   204→    id: "003",
+   205→    delegados: { p1: "pendiente", p2: "pendiente" },
+   206→    transmision: {
+   207→      p1: { estado: "pendiente" },
+   208→      p2: { estado: "pendiente" },
+   209→    },
+   210→    estadoMesa: "NO_INICIADO",
+   211→    ultimaCarga: null,
+   212→    accionSugerida: "notificar",
+   213→  },
+   214→];
+   215→
+   216→/**
+   217→ * Mesas por puesto, DETERMINÍSTICAS (sin random por render — arrays
+   218→ * fijos). Recetas del kit T2 (SUP-3), ahora sobre el catálogo real:
+   219→ * - COMPLETO → todas COMPLETO, ok, sin alertas, carga reciente.
+   220→ * - PENDIENTE → mezcla EN_PROCESO/NO_INICIADO, pendientes en partes.
+   221→ * - CRÍTICO → mayormente NO_INICIADO/INCOMPLETO, alerta "Rescaneo"
+   222→ *   presente (el ANCLA Roma: 3 exactas del mockup + 004-008 generadas;
+   223→ *   los demás críticos del catálogo: receta propia coherente).
+   224→ * - NO_INICIADO → todas NO_INICIADO, sin carga ("—").
+   225→ */
+   226→function generarMesasPuesto(puesto: Puesto): Mesa[] {
+   227→  const n = puesto.numeroMesas;
+   228→  const numero = (i: number) => String(i + 1).padStart(3, "0");
+   229→  const carga = (min: number) => `Hace ${min} min`;
+   230→
+   231→  if (puesto.estadoGlobal === "COMPLETO") {
+   232→    return Array.from({ length: n }, (_, i) => ({
+   233→      id: numero(i),
+   234→      delegados: { p1: ok(), p2: ok() },
+   235→      transmision: { p1: { estado: "ok" }, p2: { estado: "ok" } },
+   236→      estadoMesa: "COMPLETO",
+   237→      ultimaCarga: carga(5 + i * 3),
+   238→      accionSugerida: "notificar",
+   239→    })) as Mesa[];
+   240→  }
+   241→
+   242→  if (puesto.estadoGlobal === "NO_INICIADO") {
+   243→    return Array.from({ length: n }, (_, i) => ({
+   244→      id: numero(i),
+   245→      delegados: { p1: pend(), p2: pend() },
+   246→      transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   247→      estadoMesa: "NO_INICIADO",
+   248→      ultimaCarga: null,
+   249→      accionSugerida: "notificar",
+   250→    })) as Mesa[];
+   251→  }
+   252→
+   253→  // ANCLA Roma (CRÍTICO): 3 exactas del mockup + las restantes generadas
+   254→  // coherentes con CRÍTICO (mayoría NO_INICIADO, Rescaneo presente).
+   255→  if (puesto.id === ID_ENLACE_ROMA) {
+   256→    const restantes = Math.max(0, n - MESAS_ITALIA_MOCKUP.length);
+   257→    const generadas: Mesa[] = Array.from({ length: restantes }, (_, i) => {
+   258→      const indice = MESAS_ITALIA_MOCKUP.length + i;
+   259→      // 004 → INCOMPLETO con Rescaneo (coherente con CRÍTICO y con la
+   260→      // anomalía sembrada); 005 → EN_PROCESO; 006+ → NO_INICIADO.
+   261→      if (i === 0) {
+   262→        return {
+   263→          id: numero(indice),
+   264→          delegados: { p1: ok(), p2: ok() },
+   265→          transmision: {
+   266→            p1: { estado: "ok" },
+   267→            p2: { estado: "ok", alerta: "Rescaneo" },
+   268→          },
+   269→          estadoMesa: "INCOMPLETO",
+   270→          ultimaCarga: carga(21),
+   271→          accionSugerida: "reinspeccionar",
+   272→        } as Mesa;
+   273→      }
+   274→      if (i === 1) {
+   275→        return {
+   276→          id: numero(indice),
+   277→          delegados: { p1: ok(), p2: pend() },
+   278→          transmision: {
+   279→            p1: { estado: "ok" },
+   280→            p2: { estado: "pendiente" },
+   281→          },
+   282→          estadoMesa: "EN_PROCESO",
+   283→          ultimaCarga: carga(52),
+   284→          accionSugerida: "notificar",
+   285→        } as Mesa;
+   286→      }
+   287→      return {
+   288→        id: numero(indice),
+   289→        delegados: { p1: pend(), p2: pend() },
+   290→        transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   291→        estadoMesa: "NO_INICIADO",
+   292→        ultimaCarga: null,
+   293→        accionSugerida: "notificar",
+   294→      } as Mesa;
+   295→    });
+   296→    return [...MESAS_ITALIA_MOCKUP.map((m) => ({ ...m })), ...generadas];
+   297→  }
+   298→
+   299→  // CRÍTICO (resto del catálogo): la mesa 001 INCOMPLETO con alerta
+   300→  // "Rescaneo" (reinspeccionable, coherente con anomalías del tipo), la
+   301→  // 002 EN_PROCESO si hay más mesas y el resto NO_INICIADO.
+   302→  if (puesto.estadoGlobal === "CRITICO") {
+   303→    const mesas: Mesa[] = [];
+   304→    for (let i = 0; i < n; i++) {
+   305→      if (i === 0) {
+   306→        mesas.push({
+   307→          id: numero(i),
+   308→          delegados: { p1: ok(), p2: ok() },
+   309→          transmision: {
+   310→            p1: { estado: "ok" },
+   311→            p2: { estado: "ok", alerta: "Rescaneo" },
+   312→          },
+   313→          estadoMesa: "INCOMPLETO",
+   314→          ultimaCarga: carga(18),
+   315→          accionSugerida: "reinspeccionar",
+   316→        });
+   317→      } else if (i === 1) {
+   318→        mesas.push({
+   319→          id: numero(i),
+   320→          delegados: { p1: ok(), p2: pend() },
+   321→          transmision: { p1: { estado: "ok" }, p2: { estado: "pendiente" } },
+   322→          estadoMesa: "EN_PROCESO",
+   323→          ultimaCarga: carga(41),
+   324→          accionSugerida: "notificar",
+   325→        });
+   326→      } else {
+   327→        mesas.push({
+   328→          id: numero(i),
+   329→          delegados: { p1: pend(), p2: pend() },
+   330→          transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   331→          estadoMesa: "NO_INICIADO",
+   332→          ultimaCarga: null,
+   333→          accionSugerida: "notificar",
+   334→        });
+   335→      }
+   336→    }
+   337→    return mesas;
+   338→  }
+   339→
+   340→  // PENDIENTE: mezcla EN_PROCESO / NO_INICIADO (receta del kit).
+   341→  // - Con varias mesas: la ÚLTIMA es EN_PROCESO (delegados completos,
+   342→  //   transmisión a medias → candidato de transición de vida), el resto
+   343→  //   NO_INICIADO. Con 1 mesa: la mesa única es EN_PROCESO con partes a
+   344→  //   medias.
+   345→  const mesas: Mesa[] = [];
+   346→  for (let i = 0; i < n; i++) {
+   347→    const esUltima = i === n - 1;
+   348→    const indice = i;
+   349→    if (esUltima) {
+   350→      mesas.push({
+   351→        id: numero(indice),
+   352→        delegados: { p1: ok(), p2: ok() },
+   353→        transmision: { p1: { estado: "ok" }, p2: { estado: "pendiente" } },
+   354→        estadoMesa: "EN_PROCESO",
+   355→        ultimaCarga: carga(47),
+   356→        accionSugerida: "notificar",
+   357→      });
+   358→    } else {
+   359→      mesas.push({
+   360→        id: numero(indice),
+   361→        delegados: { p1: pend(), p2: pend() },
+   362→        transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   363→        estadoMesa: "NO_INICIADO",
+   364→        ultimaCarga: null,
+   365→        accionSugerida: "notificar",
+   366→      });
+   367→    }
+   368→  }
+   369→  return mesas;
+   370→}
+   371→
+   372→/** Estado de mesa derivado de sus partes (regla única, D13). */
+   373→function estadoMesaDePartes(mesa: Mesa): Mesa["estadoMesa"] {
+   374→  if (
+   375→    mesa.transmision.p1.alerta ||
+   376→    mesa.transmision.p2.alerta
+   377→  ) {
+   378→    return "INCOMPLETO";
+   379→  }
+   380→  const partesOk =
+   381→    (mesa.delegados.p1 === "ok" ? 1 : 0) +
+   382→    (mesa.delegados.p2 === "ok" ? 1 : 0) +
+   383→    (mesa.transmision.p1.estado === "ok" ? 1 : 0) +
+   384→    (mesa.transmision.p2.estado === "ok" ? 1 : 0);
+   385→  if (partesOk === 4) return "COMPLETO";
+   386→  if (partesOk === 0) return "NO_INICIADO";
+   387→  return "EN_PROCESO";
+   388→}
+   389→
+   390→/** Recalcula estadoMesa + accionSugerida de una mesa (in place). */
+   391→function refrescarMesa(mesa: Mesa): void {
+   392→  mesa.estadoMesa = estadoMesaDePartes(mesa);
+   393→  mesa.accionSugerida = mesa.estadoMesa === "INCOMPLETO" ? "reinspeccionar" : "notificar";
+   394→}
+   395→
+   396→/** pcts derivables de las mesas (≈ % de partes ok, kit T2). */
+   397→function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
+   398→  const total = mesas.length * 2;
+   399→  if (total === 0) return { delegado: 0, transmision: 0 };
+   400→  const delegOk = mesas.reduce(
+   401→    (s, m) =>
+   402→      s + (m.delegados.p1 === "ok" ? 1 : 0) + (m.delegados.p2 === "ok" ? 1 : 0),
+   403→    0
+   404→  );
+   405→  const transOk = mesas.reduce(
+   406→    (s, m) =>
+   407→      s +
+   408→      (m.transmision.p1.estado === "ok" ? 1 : 0) +
+   409→      (m.transmision.p2.estado === "ok" ? 1 : 0),
+   410→    0
+   411→  );
+   412→  return {
+   413→    delegado: Math.round((delegOk / total) * 100),
+   414→    transmision: Math.round((transOk / total) * 100),
+   415→  };
+   416→}
+   417→
+   418→/** Estado global derivado: COMPLETO si TODAS las mesas lo están; si no, se
+   419→ * conserva el estado actual (el kit solo define transición → COMPLETO). */
+   420→function estadoGlobalTrasMesas(actual: Puesto["estadoGlobal"], mesas: Mesa[]): Puesto["estadoGlobal"] {
+   421→  const todasCompletas = mesas.length > 0 && mesas.every((m) => m.estadoMesa === "COMPLETO");
+   422→  return todasCompletas ? "COMPLETO" : actual;
+   423→}
+   424→
+   425→// ─── Estado mutable del mock (en memoria — sin persistencia, §0-5) ─────────
+   426→
+   427→const MESAS_POR_PUESTO: Record<string, Mesa[]> = {};
+   428→for (const puesto of PUESTOS) {
+   429→  const mesas = generarMesasPuesto(puesto);
+   430→  MESAS_POR_PUESTO[puesto.id] = mesas;
+   431→  // T2: los pcts del puesto deben ser DERIVABLES de sus mesas — se
+   432→  // corrigen al inicializar (D16 documenta los valores que cambian).
+   433→  const pcts = pctsDeMesas(mesas);
+   434→  puesto.pctDelegado = pcts.delegado;
+   435→  puesto.pctTransmision = pcts.transmision;
+   436→}
+   437→
+   438→const AHORA = Date.now();
+   439→const MIN = 60_000;
+   440→
+   441→/** Etiqueta de puesto para textos ("ITALIA — 02 - Roma - Consulado"). */
+   442→function etiquetaDePuesto(puesto: Puesto): string {
+   443→  return `${puesto.pais} — ${puesto.puesto}`;
+   444→}
+   445→
+   446→/**
+   447→ * Búsqueda DETERMINÍSTICA de un puesto real de un país con una mesa dada
+   448→ * en un estado útil (re-anclaje de las semillas de notificaciones y
+   449→ * anomalías al catálogo real — kit SUP-5 §3-T3.5). Prioridad de estados
+   450→ * coherentes con la semilla; fallback: cualquier mesa con transmisión;
+   451→ * fallback final: el primer puesto del país.
+   452→ */
+   453→function buscarPuestoDePais(
+   454→  pais: string,
+   455→  mesaIndice: number
+   456→): { puesto: Puesto; mesa: Mesa } | null {
+   457→  const delPais = PUESTOS.filter((p) => p.pais === pais);
+   458→  const candidatos = delPais
+   459→    .map((puesto) => ({ puesto, mesa: MESAS_POR_PUESTO[puesto.id]?.[mesaIndice] }))
+   460→    .filter(({ mesa }) => Boolean(mesa));
+   461→  const prioridad: Mesa["estadoMesa"][] = ["INCOMPLETO", "EN_PROCESO", "COMPLETO"];
+   462→  for (const estado of prioridad) {
+   463→    const hallado = candidatos.find(({ mesa }) => mesa.estadoMesa === estado);
+   464→    if (hallado) return hallado;
+   465→  }
+   466→  const conTransmision = candidatos.find(({ mesa }) => mesa.estadoMesa !== "NO_INICIADO");
+   467→  if (conTransmision) return conTransmision;
+   468→  return candidatos.length > 0 ? candidatos[0] : null;
+   469→}
+   470→
+   471→const anclaRoma = PUESTOS.find((p) => p.id === ID_ENLACE_ROMA) ?? PUESTOS[0];
+   472→
+   473→// España/México/Países Bajos: puestos REALES del catálogo para las
+   474→// semillas (determinístico — §0-9). INGLATERRA existe en el catálogo
+   475→// (Londres); su anomalía es de puesto (sin mesa).
+   476→const semillaEspana = buscarPuestoDePais("ESPAÑA", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+   477→const semillaMexico = buscarPuestoDePais("MEXICO", 1) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+   478→const semillaPaisesBajos = buscarPuestoDePais("PAISES BAJOS", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+   479→const semillaInglaterra =
+   480→  PUESTOS.find((p) => p.pais === "INGLATERRA") ?? anclaRoma;
+   481→const mesaEnCursoMexico =
+   482→  MESAS_POR_PUESTO[semillaMexico.puesto.id]?.find((m) => m.estadoMesa === "EN_PROCESO") ??
+   483→  semillaMexico.mesa;
+   484→
+   485→/** Semillas T5 (7): coherentes con los datos (Roma rescaneo, España
+   486→ * retraso…), ya re-ancladas a los códigos reales del catálogo.
+   487→ * 3 no leídas → badge inicial 3. */
+   488→const NOTIFICACIONES: Notificacion[] = [
+   489→  { id: "notif-1", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 001 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 12 * MIN, leida: false },
+   490→  { id: "notif-2", tipo: "retraso", texto: `Retraso en transmisión — ${etiquetaDePuesto(semillaEspana.puesto)}`, fecha: AHORA - 38 * MIN, leida: false },
+   491→  { id: "notif-3", tipo: "transmision", texto: `Transmisión en curso — Mesa ${mesaEnCursoMexico.id} (${etiquetaDePuesto(semillaMexico.puesto)})`, fecha: AHORA - 47 * MIN, leida: false },
+   492→  { id: "notif-4", tipo: "sistema", texto: `Sincronización completada: ${PUESTOS.length} puestos al día`, fecha: AHORA - 65 * MIN, leida: true },
+   493→  { id: "notif-5", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 004 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 21 * MIN, leida: false },
+   494→  { id: "notif-6", tipo: "sistema", texto: "Respaldo de datos del consolidado completado", fecha: AHORA - 5 * 60 * MIN, leida: true },
+   495→  { id: "notif-7", tipo: "transmision", texto: `Transmisión restablecida — ${etiquetaDePuesto(semillaPaisesBajos.puesto)}`, fecha: AHORA - 26 * 60 * MIN, leida: true },
+   496→];
+   497→
+   498→/** Semillas T6: 5 ABIERTAS (badge dinámico real del mockup) + 2 revisadas
+   499→ * de histórico (para el filtro por estado) — re-ancladas al catálogo. */
+   500→
+   501→const ANOMALIAS: Anomalia[] = [
+   502→  { id: "anom-1", tipo: "Rescaneo", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
+   503→  { id: "anom-2", tipo: "Mesa incompleta", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
+   504→  { id: "anom-3", tipo: "Transmisión caída", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), mesaId: semillaEspana.mesa.id, severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
+   505→  { id: "anom-4", tipo: "Desfase de hora", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
+   506→  { id: "anom-5", tipo: "Mesa incompleta", puestoId: semillaMexico.puesto.id, puesto: etiquetaDePuesto(semillaMexico.puesto), mesaId: semillaMexico.mesa.id, severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
+   507→  { id: "anom-6", tipo: "Rescaneo", puestoId: semillaPaisesBajos.puesto.id, puesto: etiquetaDePuesto(semillaPaisesBajos.puesto), mesaId: semillaPaisesBajos.mesa.id, severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
+   508→  { id: "anom-7", tipo: "Desfase de hora", puestoId: semillaInglaterra.id, puesto: etiquetaDePuesto(semillaInglaterra), severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
+   509→];
+   510→
+   511→let contadorNotificaciones = 0;
+   512→
+   513→function crearNotificacion(tipo: Notificacion["tipo"], texto: string): Notificacion {
+   514→  contadorNotificaciones += 1;
+   515→  return {
+   516→    id: `notif-nueva-${contadorNotificaciones}`,
+   517→    tipo,
+   518→    texto,
+   519→    fecha: Date.now(),
+   520→    leida: false,
+   521→  };
+   522→}
+   523→
+   524→function puestoPorId(puestoId: string): Puesto | undefined {
+   525→  return PUESTOS.find((p) => p.id === puestoId);
+   526→}
+   527→
+   528→function refrescarPuesto(puesto: Puesto): void {
+   529→  const mesas = MESAS_POR_PUESTO[puesto.id] ?? [];
+   530→  const pcts = pctsDeMesas(mesas);
+   531→  puesto.pctDelegado = pcts.delegado;
+   532→  puesto.pctTransmision = pcts.transmision;
+   533→  puesto.estadoGlobal = estadoGlobalTrasMesas(puesto.estadoGlobal, mesas);
+   534→}
+   535→
+   536→function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
+   537→  if (!f) return true;
+   538→  if (f.pais && puesto.codigoPais !== f.pais) return false;
+   539→  if (f.zona && puesto.zonaId !== f.zona) return false;
+   540→  if (f.puesto && puesto.puesto !== f.puesto) return false;
+   541→  if (f.estado && puesto.estadoGlobal !== f.estado) return false;
+   542→  const q = f.busqueda?.trim().toLowerCase();
+   543→  if (q) {
+   544→    const texto = [
+   545→      puesto.id,
+   546→      puesto.codigoPais,
+   547→      puesto.pais,
+   548→      puesto.zona,
+   549→      puesto.puesto,
+   550→    ]
+   551→      .join(" ")
+   552→      .toLowerCase();
+   553→    if (!texto.includes(q)) return false;
+   554→  }
+   555→  return true;
+   556→}
+   557→
+   558→export const mockSupervisionRepository: SupervisionRepository = {
+   559→  async getResumen(): Promise<ResumenGlobal> {
+   560→    const resumen: ResumenGlobal = {
+   561→      total: PUESTOS.length,
+   562→      completo: 0,
+   563→      critico: 0,
+   564→      pendiente: 0,
+   565→      noIniciado: 0,
+   566→    };
+   567→    for (const puesto of PUESTOS) {
+   568→      if (puesto.estadoGlobal === "COMPLETO") resumen.completo += 1;
+   569→      if (puesto.estadoGlobal === "CRITICO") resumen.critico += 1;
+   570→      if (puesto.estadoGlobal === "PENDIENTE") resumen.pendiente += 1;
+   571→      if (puesto.estadoGlobal === "NO_INICIADO") resumen.noIniciado += 1;
+   572→    }
+   573→    return conLatencia(resumen);
+   574→  },
+   575→
+   576→  async getPuestos(filtros?: FiltrosPuestos): Promise<Puesto[]> {
+   577→    return conLatencia(PUESTOS.filter((puesto) => coincide(puesto, filtros)).map((p) => ({ ...p })));
+   578→  },
+   579→
+   580→  async getMesasDePuesto(puestoId: string): Promise<Mesa[]> {
+   581→    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map((m) => ({ ...m })));
+   582→  },
+   583→
+   584→  async getNotificaciones(): Promise<Notificacion[]> {
+   585→    return conLatencia(NOTIFICACIONES.map((n) => ({ ...n })));
+   586→  },
+   587→
+   588→  async getAnomalias(): Promise<Anomalia[]> {
+   589→    return conLatencia(ANOMALIAS.map((a) => ({ ...a })));
+   590→  },
+   591→
+   592→  async resolverRescaneo(puestoId, mesaId) {
+   593→    await esperar(LATENCIA_REINSPECCION_MS);
+   594→    const puesto = puestoPorId(puestoId);
+   595→    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+   596→    if (!puesto || !mesa) return null;
+   597→    const teniaAlerta =
+   598→      Boolean(mesa.transmision.p1.alerta) || Boolean(mesa.transmision.p2.alerta);
+   599→    if (!teniaAlerta) return null;
+   600→    // T4: la alerta "Rescaneo" se resuelve (desaparece) y se recalcula.
+   601→    mesa.transmision.p1 = { ...mesa.transmision.p1, alerta: undefined };
+   602→    mesa.transmision.p2 = { ...mesa.transmision.p2, alerta: undefined };
+   603→    refrescarMesa(mesa);
+   604→    refrescarPuesto(puesto);
+   605→    const notificacion = crearNotificacion(
+   606→      "rescaneo",
+   607→      `Rescaneo completado en Mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
+   608→    );
+   609→    NOTIFICACIONES.unshift(notificacion);
+   610→    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
+   611→  },
+   612→
+   613→  async notificarMesa(puestoId, mesaId) {
+   614→    await conLatencia(true);
+   615→    const puesto = puestoPorId(puestoId);
+   616→    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+   617→    if (!puesto || !mesa) {
+   618→      // Sin puesto/mesa no hay notificación posible (jamás inventar).
+   619→      return crearNotificacion("sistema", "Supervisor notificó a la mesa (dato no encontrado)");
+   620→    }
+   621→    // T4: el estado de la mesa NO cambia — solo se registra la notificación.
+   622→    const notificacion = crearNotificacion(
+   623→      "sistema",
+   624→      `Supervisor notificó a la mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
+   625→    );
+   626→    NOTIFICACIONES.unshift(notificacion);
+   627→    return { ...notificacion };
+   628→  },
+   629→
+   630→  async aplicarTransicionVida() {
+   631→    await conLatencia(true);
+   632→    // Candidatas: mesas EN_PROCESO. Preferencia (D13): la primera cuya
+   633→    // transición COMPLETA su puesto (KPIs en vivo); si ninguna completa,
+   634→    // la primera EN_PROCESO en orden del mock.
+   635→    const candidatas: { puesto: Puesto; mesa: Mesa }[] = [];
+   636→    for (const puesto of PUESTOS) {
+   637→      for (const mesa of MESAS_POR_PUESTO[puesto.id] ?? []) {
+   638→        if (mesa.estadoMesa === "EN_PROCESO") candidatas.push({ puesto, mesa });
+   639→      }
+   640→    }
+   641→    if (candidatas.length === 0) return null;
+   642→    const elegida =
+   643→      candidatas.find(({ puesto, mesa }) => {
+   644→        const restantes = (MESAS_POR_PUESTO[puesto.id] ?? []).filter(
+   645→          (m) => m.id !== mesa.id && m.estadoMesa !== "COMPLETO"
+   646→        ).length;
+   647→        return restantes === 0;
+   648→      }) ?? candidatas[0];
+   649→    const { puesto, mesa } = elegida;
+   650→    // La transición completa las partes pendientes de la mesa.
+   651→    if (mesa.delegados.p1 !== "ok") mesa.delegados.p1 = "ok";
+   652→    if (mesa.delegados.p2 !== "ok") mesa.delegados.p2 = "ok";
+   653→    if (mesa.transmision.p1.estado !== "ok")
+   654→      mesa.transmision.p1 = { ...mesa.transmision.p1, estado: "ok" };
+   655→    if (mesa.transmision.p2.estado !== "ok")
+   656→      mesa.transmision.p2 = { ...mesa.transmision.p2, estado: "ok" };
+   657→    refrescarMesa(mesa);
+   658→    mesa.ultimaCarga = "Hace 1 min";
+   659→    const estadoAntes = puesto.estadoGlobal;
+   660→    refrescarPuesto(puesto);
+   661→    return {
+   662→      puestoId: puesto.id,
+   663→      mesaId: mesa.id,
+   664→      puestoEstado: puesto.estadoGlobal,
+   665→      puestoCompletado:
+   666→        estadoAntes !== "COMPLETO" && puesto.estadoGlobal === "COMPLETO",
+   667→    };
+   668→  },
+   669→
+   670→  // ── KIT SUP-4 (actas-v1) — el acta llega por el repositorio (§0-9) ──────
+   671→
+   672→  async getActaDeMesa(puestoId: string, mesaId: string) {
+   673→    const puesto = puestoPorId(puestoId);
+   674→    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+   675→    // null = mesa sin transmisión (NO_INICIADO) o inexistente.
+   676→    return conLatencia(puesto && mesa ? obtenerActa(mesa, puesto) : null);
+   677→  },
+   678→
+   679→  async aprobarActa(actaId: string, observacion: string) {
+   680→    await esperar(LATENCIA_REINSPECCION_MS);
+   681→    const acta = aprobarActaMock(actaId, observacion);
+   682→    if (!acta) return null;
+   683→    const puesto = puestoPorId(acta.puestoId);
+   684→    const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;
+   685→    // T5.3 — notificación nueva (plantilla 1/2 del kit).
+   686→    const notificacion = crearNotificacion(
+   687→      "sistema",
+   688→      `ACTA APROBADA — MESA ${acta.mesaId} (${etiquetaPuesto})`
+   689→    );
+   690→    NOTIFICACIONES.unshift(notificacion);
+   691→    // T5.3 — anomalía vinculada abierta pasa a revisada (badge incluido).
+   692→    const vinculada = ANOMALIAS.find(
+   693→      (a) =>
+   694→        !a.revisada && a.puestoId === acta.puestoId && a.mesaId === acta.mesaId
+   695→    );
+   696→    const anomalia = vinculada
+   697→      ? (() => {
+   698→          vinculada.revisada = true;
+   699→          return { ...vinculada };
+   700→        })()
+   701→      : undefined;
+   702→    return { acta, notificacion: { ...notificacion }, anomalia };
+   703→  },
+   704→
+   705→  async confirmarRescanActa(actaId: string, _observacion: string) {
+   706→    // La observación es OBLIGATORIA (T5.2) pero el kit no la imprime en el
+   707→    // evento/notificación del rescan (textos exactos de T5.4) — queda en la
+   708→    // auditoría del visor.
+   709→    await esperar(LATENCIA_REINSPECCION_MS);
+   710→    const acta = confirmarRescanActaMock(actaId, _observacion);
+   711→    if (!acta) return null;
+   712→    const puesto = puestoPorId(acta.puestoId);
+   713→    const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;
+   714→    // T5.4 — notificación nueva (plantilla 2/2 del kit).
+   715→    const notificacion = crearNotificacion(
+   716→      "rescaneo",
+   717→      `RESCANEO COMPLETADO — MESA ${acta.mesaId} (${etiquetaPuesto})`
+   718→    );
+   719→    NOTIFICACIONES.unshift(notificacion);
+   720→    return { acta, notificacion: { ...notificacion } };
+   721→  },
+   722→};
+   723→

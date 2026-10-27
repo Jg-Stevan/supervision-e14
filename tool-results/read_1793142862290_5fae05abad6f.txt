@@ -1,0 +1,691 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * KIT e107-prescan-qr-cola-v1 (§D.2) — orquestador del PRE-SCAN QR en
+     5→ * «PROCESAR COLA» + clasificador PURO + hook de progreso.
+     6→ *
+     7→ * El pedido del dueño (§0, contrato):
+     8→ *   Fase 1 — PRE-SCAN rápido: decode (EXIF ✓) → detección de quad con el
+     9→ *   detection-worker REAL → warp (recorte SIN rotar) → lectura de QR
+    10→ *   (BarcodeDetector → jsQR — sin el decodificador wasm lento, §F.3).
+    11→ *   Fase 2 — clasificación: DUPLICADA / YA-ENVIADA marcadas ANTES del OCR
+    12→ *   (el ahorro de los ~40 s); QR no leído JAMÁS se descarta — pasa al flujo
+    13→ *   normal (regla de oro 4).
+    14→ *   Fase 3 — tM() de siempre con la lista ya filtrada: «filtrar la lista»
+    15→ *   son MARCAS de estado previas a iniciar() (§B del kit) — CERO cambios en
+    16→ *   el runner/store: el único punto de contacto es la llamada `iniciar()`.
+    17→ *
+    18→ * Reglas de oro → cumplimiento mecánico (§E):
+    19→ *  · No tocar tM(): 0 edits en runner.ts/store.ts (QA lo escanea).
+    20→ *    — ENMIENDA KIT e14-quad-streaming-v1 (P5, orden del dueño): el runner
+    21→ *    ahora CONSUME por turno de clasificación (flag masivaStreaming, default
+    22→ *    OFF): `siguientePendiente` filtra por prescanOk mientras el turno está
+    23→ *    abierto y `iniciarRunner` re-chequea tras el drenaje. El QA
+    24→ *    qa-prescan-qr-cola.ts §G se actualiza EN ESTE MISMO kit (permite
+    25→ *    exactamente el token prescanOk en runner.ts/tipos.ts — el contrato
+    26→ *    e107 «cero edits» queda ampliado, todo lo demás intacto).
+    27→ *  · UI de progreso: «SONDEANDO QR… k/N» vía usePrescanQrEstado (D.3).
+    28→ *  · No bloquear main thread: detect/warp viven en el worker REAL; FIFO
+    29→ *    serial + hard-kill en prescan-qr.client.ts.
+    30→ *  · Sin pérdida de datos: cualquier fallo ⇒ fila queda PENDIENTE ⇒ Fase 3
+    31→ *    la procesa como hoy (try/catch por fila + guards anti-zombi).
+    32→ *
+    33→ * KIT e14-quad-streaming-v1 (P4): el quad detectado por el pre-scan ya NO
+    34→ * se tira — se estampa en la fila (RAM del lote) y el runner lo pasa al
+    35→ * bridge como quadPrecomputado (flag masivaQuad, default OFF) para saltar
+    36→ * la re-detección (desviación D66 resuelta — precalor.ts:26-31).
+    37→ * KIT e14-quad-streaming-v1 (P5, flag masivaStreaming, default OFF):
+    38→ * streaming seguro prescan→runner — variante SEGURA del plan §3-P5:
+    39→ *  · El turno se ABRE al empezar y se CIERRA en el finally (tras el
+    40→ *    barrido de cierre) — mientras está abierto, el filtro del runner
+    41→ *    solo consume filas decididas (prescanOk / DUPLICADA / nacidas después
+    42→ *    del arranque del turno). Sin turno abierto el filtro queda inerte:
+    43→ *    sin hambruna posible.
+    44→ *  · Arranque TEMPRANO: `iniciar()` tras el PRIMER stamp (el runner FIFO
+    45→ *    consume por agregadaEn a medida que las filas se deciden).
+    46→ *  · Barrido de cierre en el finally: toda fila del objetivo que siga
+    47→ *    PENDIENTE sin stamp (abort honesto, continue, catch) queda decidida
+    48→ *    aquí — JAMÁS una fila colgada.
+    49→ *  · PROCESAR IGUAL (forzarDedupOff — RL-e65b-6, el escape del dueño es
+    50→ *    sagrado): stamp UPFRONT — va directo al runner sin pre-scan.
+    51→ *  · Las guardas existentes (re-chequeo post-reserva runner.ts,
+    52→ *    esperarDesenlaceOriginal) quedan intactas — defensa en profundidad.
+    53→ *
+    54→ * El decodificador wasm lento: NO importado aquí (§F.3 — QA: 0 matches del
+    55→ * token). El tier correspondiente de la capa 0 (identidad-qr.ts) queda
+    56→ * intacto — cambio separado.
+    57→ */
+    58→import { create } from "zustand";
+    59→import { logger } from "../../logger";
+    60→import { leerFlags } from "../flags";
+    61→// KIT e14-gama-adaptativa-v1 (D74): warpLado/presupuesto de la corrida son
+    62→// EFECTIVOS (gama BAJO 1920/6 s · MEDIO 2560/5 s · resto = flag puro).
+    63→import { flagsMasivaEfectivos } from "../gama";
+    64→import {
+    65→  crearClientePrescan,
+    66→  DETECT_LONG_SIDE,
+    67→  downscaleLado,
+    68→  quadDeFracciones,
+    69→  type ClientePrescan,
+    70→} from "./prescan-qr.client";
+    71→import { BANDA_A, intentoSobrePixeles, type PixelesQr } from "./qr-pixeles";
+    72→// KIT e14-prescan-rescate-qr-v1 (ENMIENDA §F.3 — orden del dueño): el
+    73→// rescate del QR difícil vive en SU módulo (main thread, import dinámico
+    74→// de identidad-qr) — este orquestador no menciona al decodificador pesado
+    75→// (QA §F.3: 0 matches de su token — frontera intacta) y el worker del
+    76→// pre-scan JAMÁS lo ve (dictamen e73). Sin flag (default OFF) el módulo
+    77→// ni se intenta: byte-idéntico a hoy.
+    78→import { rescateQrDeWarped } from "./prescan-qr-rescate";
+    79→import {
+    80→  enviadaPorPayload as enviadaPorPayloadStore,
+    81→  marcarYaEnviada,
+    82→  originalQrDePayload as originalQrDePayloadStore,
+    83→  // P1 (plan masiva — brief Agente A): herencia del payload del sondeo
+    84→  // (flag masivaQrHandoff — default OFF; sin dato → camino de hoy).
+    85→  qrPayloadDeFila as qrPayloadDeFilaStore,
+    86→  registrarQrPayload as registrarQrPayloadStore,
+    87→  useMasivaStore,
+    88→} from "./store";
+    89→import { guardarRegistro, leerRegistro } from "./cola";
+    90→import type { FilaMasiva } from "./tipos";
+    91→// KIT e14-quad-streaming-v1 (P5): semáforo del turno — runner.ts lo consulta
+    92→// en su filtro; aquí solo se abre/cierra (módulo sin imports — sin ciclos).
+    93→import {
+    94→  abrirTurnoClasificacion,
+    95→  cerrarTurnoClasificacion,
+    96→} from "./turno-clasificacion";
+    97→// KIT flujo-dueno-v1 (K2 — brief Agente B): el warp de INGESTA. Este módulo
+    98→// es el REGISTRADOR de sus deps (aquí sí importa store.ts legítimamente —
+    99→// el módulo de la ingesta NO lo hace: cero ciclos, doctrina turno).
+   100→import {
+   101→  ESPERA_COLA_TOPE_MS,
+   102→  __registrarDepsWarpIngesta,
+   103→  esperarColaWarpIngesta,
+   104→  filaBajoWarpIngesta,
+   105→} from "./warp-ingesta";
+   106→// KIT e14-quad-streaming-v1 (P4): forma canónica del quad del core (solo
+   107→// tipo) — MOVIDA a prescan-qr.client.ts junto a quadDeFracciones (K2), que
+   108→// es quien la consume; aquí el tipo fluye por inferencia del helper.
+   109→
+   110→// KIT flujo-dueno-v1 (K2) — re-exports de los helpers MOVIDOS al cliente
+   111→// (doctrina §A.2 del kit e73: módulo compartido, cero diffs en consumidores
+   112→// — prescan-qr.test.ts y demás no cambian).
+   113→export { downscaleLado, quadDeFracciones } from "./prescan-qr.client";
+   114→
+   115→// KIT flujo-dueno-v1 (K2) — REGISTRO de las deps del warp de ingesta: este
+   116→// módulo carga con MasivaView (import estático del botón PROCESAR) ANTES de
+   117→// que exista cualquier cola. El módulo de la ingesta JAMÁS importa store.ts
+   118→// (store→warp-ingesta unidireccional — doctrina turno-clasificacion).
+   119→__registrarDepsWarpIngesta({
+   120→  storeState: () => useMasivaStore.getState(),
+   121→  registrarQrPayload: registrarQrPayloadStore,
+   122→  qrPayloadDeFila: qrPayloadDeFilaStore,
+   123→});
+   124→
+   125→// ─── Clasificador PURO (testeable — deps inyectadas, patrón e73) ────────────
+   126→
+   127→/** Veredicto del pre-scan para UNA fila (§D.2 — ESPEJO de cadenaDedup:
+   128→ *  primer ganador gana, FIFO por agregadaEn). */
+   129→export type VeredictoPrescan =
+   130→  | { accion: "duplicada"; originalId: string }
+   131→  | { accion: "ya-enviada"; enviadaId: string }
+   132→  | { accion: "registrar" } // payload NUEVO → registrarQrPayload + sigue PENDIENTE
+   133→  | { accion: "nada" }; // sin payload / conservador → sigue PENDIENTE
+   134→
+   135→export interface DepsClasificadorPrescan {
+   136→  originalDePayload: (p: string) => string | null;
+   137→  /** existe en filas (viva — QUITADA/vaciada ⇒ false). */
+   138→  filaViva: (id: string) => boolean;
+   139→  enviadaPorPayload: (p: string) => Promise<{ id: string } | null>;
+   140→}
+   141→
+   142→/**
+   143→ * Orden de decisión (kit §D.2 — literal):
+   144→ *  1. payload null → `nada` (los 4 arrugados pasan al flujo normal — regla
+   145→ *     de oro 4).
+   146→ *  2. original = originalDePayload(payload); si existe, ≠ filaId y la fila
+   147→ *     original está VIVA → `duplicada` (el reuso clona el desenlace — jamás
+   148→ *     doble envío).
+   149→ *     Guard transversal: match a fila NO viva → `nada` (conservador: OCR
+   150→ *     decidirá — jamás marcar DUPLICADA apuntando a un zombi).
+   151→ *  3. Si no: enviadaPorPayload(payload) → `ya-enviada` (via "payload") —
+   152→ *     mismo self-guard de la capa 0 (runner.ts:567: hit.id !== fila.id).
+   153→ *  4. Si no: `registrar`.
+   154→ */
+   155→export async function clasificarPayloadPrescan(
+   156→  payload: string | null,
+   157→  filaId: string,
+   158→  deps: DepsClasificadorPrescan,
+   159→): Promise<VeredictoPrescan> {
+   160→  // 1 · sin payload — los arrugados/giros pasan al OCR (jamás descartar)
+   161→  if (payload == null || payload.length === 0) return { accion: "nada" };
+   162→  // 2 · dup EN LOTE (mapaQrPayload — capas 0 del runner ven lo mismo)
+   163→  const original = deps.originalDePayload(payload);
+   164→  if (original != null && original !== filaId) {
+   165→    if (deps.filaViva(original)) return { accion: "duplicada", originalId: original };
+   166→    return { accion: "nada" }; // guard transversal — conservador: OCR decidirá
+   167→  }
+   168→  // 3 · histórico de ENVIADAS (ledger persistente — hit ⇒ YA-ENVIADA)
+   169→  const hit = await deps.enviadaPorPayload(payload);
+   170→  if (hit && hit.id !== filaId) return { accion: "ya-enviada", enviadaId: hit.id };
+   171→  // 4 · payload NUEVO — se registra (la capa 0 del runner lo verá igual)
+   172→  return { accion: "registrar" };
+   173→}
+   174→
+   175→// ─── Objetivo del pre-scan (R3 — puro, testeable) ───────────────────────────
+   176→
+   177→/**
+   178→ * Filas objetivo del pre-scan: SOLO PENDIENTE vivas. `forzarDedupOff`
+   179→ * (PROCESAR IGUAL / e65b) manda SIEMPRE — RL-e65b-6: el escape del dueño es
+   180→ * sagrado, la fila va directa a la Fase 3 sin pasar por el pre-scan.
+   181→ */
+   182→export function objetivoPrescan(filas: FilaMasiva[]): FilaMasiva[] {
+   183→  return filas.filter((f) => f.estado === "PENDIENTE" && !f.forzarDedupOff);
+   184→}
+   185→
+   186→// ─── Escritura del veredicto (extraída para vitest — patrón deps e73) ───────
+   187→
+   188→export interface DepsEscrituraPrescan {
+   189→  leerRegistro: typeof leerRegistro;
+   190→  guardarRegistro: typeof guardarRegistro;
+   191→  actualizarFila: (id: string, patch: Partial<FilaMasiva>) => void;
+   192→  marcarYaEnviada: typeof marcarYaEnviada;
+   193→  registrarQrPayload: (payload: string, id: string) => void;
+   194→}
+   195→
+   196→/**
+   197→ * Escribe el veredicto con la MISMA maquinaria de marcas de siempre (§C):
+   198→ *  · duplicada → write IDB (patrón cadenaDedup store.ts:586-594) + patch
+   199→ *    SOLO-VISUAL. §F.2: el write OMITE el campo `dedup` (opcional) —
+   200→ *    estado:"DUPLICADA" + dupOf bastan para reuso/UI/informe; el pre-scan
+   201→ *    NO miente telemetría ajena (sin token "qr-prescan" en la unión §G).
+   202→ *  · ya-enviada → marcarYaEnviada COMPLETA (guard anti-zombi + write IDB +
+   203→ *    patchFila + alimenta el ledger) con via "payload" (§C).
+   204→ *  · registrar → registrarQrPayload(payload, id) — la capa 0 del runner lo
+   205→ *    verá igual en su re-chequeo.
+   206→ *  · nada → no-op (queda PENDIENTE — Fase 3 lo procesa).
+   207→ * El CALLER ya garantizó fila VIVA y PENDIENTE en el instante previo al
+   208→ * write (anti-zombi §G); marcarYaEnviada re-verifica su guard por dentro.
+   209→ */
+   210→export async function aplicarVeredictoPrescan(
+   211→  filaId: string,
+   212→  veredicto: VeredictoPrescan,
+   213→  payload: string | null,
+   214→  deps: DepsEscrituraPrescan,
+   215→): Promise<void> {
+   216→  switch (veredicto.accion) {
+   217→    case "duplicada": {
+   218→      try {
+   219→        const reg = await deps.leerRegistro(filaId);
+   220→        await deps.guardarRegistro({
+   221→          ...reg,
+   222→          estado: "DUPLICADA",
+   223→          dupOf: veredicto.originalId,
+   224→          // SIN campo `dedup` (§F.2) — es opcional; el comportamiento queda
+   225→          // completo (reuso <1 s, UI, informe) y el contrato D57 intacto.
+   226→        });
+   227→      } catch {
+   228→        /* IDB caída / fila fuera de la cola → patch solo en memoria */
+   229→      }
+   230→      deps.actualizarFila(filaId, { estado: "DUPLICADA", dupOf: veredicto.originalId });
+   231→      return;
+   232→    }
+   233→    case "ya-enviada":
+   234→      // §C — marcarYaEnviada TAL CUAL (via "payload"): su guard interno
+   235→      // exige PENDIENTE (anti-zombi doble) y alimenta el ledger (RL-e65b-2).
+   236→      await deps.marcarYaEnviada(
+   237→        filaId,
+   238→        veredicto.enviadaId,
+   239→        "payload",
+   240→        undefined,
+   241→        undefined,
+   242→        payload ?? undefined,
+   243→      );
+   244→      return;
+   245→    case "registrar":
+   246→      if (payload) deps.registrarQrPayload(payload, filaId);
+   247→      return;
+   248→    case "nada":
+   249→      return; // queda PENDIENTE — Fase 3 lo procesa
+   250→  }
+   251→}
+   252→
+   253→// ─── Lectura de QR sobre el warp — EXACTAMENTE la cadena del harness ────────
+   254→
+   255→/** Declaración local mínima — el repo NO declara BarcodeDetector (la red
+   256→ *  line de identidad-qr.ts:54 lo PROHIBE para la capa 0/identidad y ese
+   257→ *  archivo queda INTACTO). §F.1: aquí lo ordena el dueño para este módulo
+   258→ *  NUEVO y es seguro por igualdad EXACTA de payload (Reed-Solomon — no hay
+   259→ *  «casi el mismo payload»; el error siempre cae del lado conservador). */
+   260→interface BarcodeDetectorLike {
+   261→  detect(source: ImageBitmapSource): Promise<{ rawValue: string }[]>;
+   262→}
+   263→declare const BarcodeDetector:
+   264→  | (new (opts?: { formats?: string[] }) => BarcodeDetectorLike)
+   265→  | undefined;
+   266→
+   267→/** Cap del harness para rasterizar el warp en el fallback jsQR. */
+   268→const QR_WARP_LADO_TOPE = 1600;
+   269→
+   270→/**
+   271→ * (a) BarcodeDetector nativo → (b) jsQR sobre los píxeles del warp
+   272→ * (intentoSobrePixeles — tryBoth ya viene adentro) → (c) null. Sin throw
+   273→ * jamás (doctrina del conservador).
+   274→ */
+   275→export async function leerQrDeWarped(warped: ImageBitmap): Promise<string | null> {
+   276→  try {
+   277→    if (typeof BarcodeDetector !== "undefined") {
+   278→      try {
+   279→        const bd = new BarcodeDetector({ formats: ["qr_code"] });
+   280→        const hits = await bd.detect(warped);
+   281→        if (hits.length > 0 && hits[0]!.rawValue) return hits[0]!.rawValue;
+   282→      } catch {
+   283→        /* cae a jsQR */
+   284→      }
+   285→    }
+   286→    if (typeof OffscreenCanvas === "undefined") return null;
+   287→    const lado = Math.max(warped.width, warped.height);
+   288→    const escala = lado > QR_WARP_LADO_TOPE ? QR_WARP_LADO_TOPE / lado : 1;
+   289→    const w = Math.max(1, Math.round(warped.width * escala));
+   290→    const h = Math.max(1, Math.round(warped.height * escala));
+   291→    const canvas = new OffscreenCanvas(w, h);
+   292→    const ctx = canvas.getContext("2d");
+   293→    if (!ctx) return null;
+   294→    ctx.drawImage(warped, 0, 0, w, h);
+   295→    const img = ctx.getImageData(0, 0, w, h);
+   296→    const pix: PixelesQr = { data: img.data, width: w, height: h };
+   297→    return intentoSobrePixeles(pix, BANDA_A);
+   298→  } catch {
+   299→    return null; // (c) sin throw jamás
+   300→  }
+   301→}
+   302→
+   303→// ─── Estado del pre-scan (banner D.3 — «SONDEANDO QR… k/N») ─────────────────
+   304→
+   305→export type FasePrescan = "idle" | "boot" | "sondeo" | "fin";
+   306→
+   307→export interface EstadoPrescan {
+   308→  corriendo: boolean;
+   309→  total: number;
+   310→  listo: number;
+   311→  leidos: number;
+   312→  fase: FasePrescan;
+   313→}
+   314→
+   315→export const usePrescanStore = create<EstadoPrescan>(() => ({
+   316→  corriendo: false,
+   317→  total: 0,
+   318→  listo: 0,
+   319→  leidos: 0,
+   320→  fase: "idle",
+   321→}));
+   322→
+   323→/** Hook del banner (D.3) — mismo gesto de suscripción del store masiva. */
+   324→export function usePrescanQrEstado(): EstadoPrescan {
+   325→  return usePrescanStore();
+   326→}
+   327→
+   328→function emitir(parche: Partial<EstadoPrescan>): void {
+   329→  usePrescanStore.setState(parche);
+   330→}
+   331→
+   332→// ─── Deps de producción (§C — las export reales del repo, tal cual) ─────────
+   333→
+   334→const DEPS_CLASIFICADOR: DepsClasificadorPrescan = {
+   335→  originalDePayload: originalQrDePayloadStore,
+   336→  filaViva: (id) => useMasivaStore.getState().filas.some((f) => f.id === id),
+   337→  enviadaPorPayload: enviadaPorPayloadStore,
+   338→};
+   339→
+   340→const DEPS_ESCRITURA: DepsEscrituraPrescan = {
+   341→  leerRegistro,
+   342→  guardarRegistro,
+   343→  actualizarFila: (id, patch) => useMasivaStore.getState().actualizarFila(id, patch),
+   344→  marcarYaEnviada,
+   345→  registrarQrPayload: registrarQrPayloadStore,
+   346→};
+   347→
+   348→// ─── Downscale a la clase 400 del core (mismo gesto del harness) ────────────
+   349→// KIT flujo-dueno-v1 (K2): MOVIDO a prescan-qr.client.ts (hogar del
+   350→// contrato del worker — ahora sirve a DOS consumidores) — re-exportado
+   351→// arriba. downscaleLado sigue importado aquí para el orquestador.
+   352→
+   353→// ─── KIT e14-quad-streaming-v1 (P4) — quad del pre-scan ya NO se tira ───────
+   354→// KIT flujo-dueno-v1 (K2): quadDeFracciones MOVIDA a prescan-qr.client.ts
+   355→// (ídem downscaleLado) — re-exportada arriba.
+   356→
+   357→// ─── Orquestador (impuro — D.1 + export de §C) ──────────────────────────────
+   358→
+   359→// Re-entrada R0 (doble protección con el flag del store — kit §D.2).
+   360→let corriendoModulo = false;
+   361→
+   362→/**
+   363→ * Interceptar el clic de «PROCESAR COLA»: pre-scan QR de las PENDIENTE
+   364→ * vivas → marcar DUPLICADA / YA-ENVIADA / registrar payloads → iniciar().
+   365→ * Kill-switch OFF (prescanQrCola=false) ⇒ `iniciar()` byte-idéntico a hoy
+   366→ * (sin instanciar worker ni emitir estado — R1).
+   367→ *
+   368→ * DRY RUN (KIT e14-solo-warp-qr-v1 — flag masivaSoloWarpQr): fases 1-2
+   369→ * INTACTAS — incluye marcar DUPLICADA / YA-ENVIADA por payload (pedido
+   370→ * explícito del dueño: la dup es señal de QR bien leído) — más el stamp
+   371→ * qrLeido por fila (verdadero/falso), y NINGUNA llamada iniciar() (cero
+   372→ * OCR, cero envío — la cola queda PENDIENTE, viva para el flujo normal).
+   373→ */
+   374→export async function prescanYIniciar(): Promise<void> {
+   375→  // R0 — re-entrada: doble clic / clic durante pre-scan → no-op
+   376→  if (corriendoModulo || usePrescanStore.getState().corriendo) return;
+   377→  const store = useMasivaStore.getState();
+   378→  // DRY RUN (KIT e14-solo-warp-qr-v1) — flag del dueño, leído UNA vez por
+   379→  // corrida (mismo gesto P4/P5: corrida atómica frente a flags).
+   380→  const soloWarpQr = leerFlags().masivaSoloWarpQr === true;
+   381→  // KIT e14-prescan-warp-lado-v1: lado máximo de la SALIDA del warp — leído
+   382→  // UNA vez por corrida (mismo gesto). Default 4032 = byte-idéntico (default
+   383→  // del worker); 1920 = remedio de los hard-kill «warp» (el coste del
+   384→  // warpPerspective escala con los píxeles de salida, no de entrada).
+   385→  // KIT e14-gama-adaptativa-v1 (D74): lectura EFECTIVA — en gama BAJO/MEDIO
+   386→  // adaptativa el plan baja el lado (1920/2560) SIN pisar un override manual
+   387→  // del dueño; flag OFF ⇒ el flag puro de siempre.
+   388→  const warpLado = flagsMasivaEfectivos().prescanWarpLado;
+   389→  // KIT e14-prescan-rescate-qr-v1 — rescate del QR difícil SOLO tras
+   390→  // fallo de BarcodeDetector/jsQR. Leído UNA vez por corrida (mismo gesto
+   391→  // P4/P5: corrida atómica frente a flags). Default OFF = byte-idéntico.
+   392→  const rescateOn = leerFlags().prescanQrRescate === true;
+   393→  // R1 — kill-switch del dueño: flag OFF ⇒ byte-idéntico a hoy
+   394→  if (!leerFlags().prescanQrCola) {
+   395→    if (soloWarpQr) {
+   396→      // DRY RUN sin pre-scan ⇒ no hay nada de dry run que hacer: JAMÁS
+   397→      // arrancar el pool (el contrato del modo es cero OCR, cero envío).
+   398→      logger.warn(
+   399→        "[e14] prescan-qr: DRY RUN exige prescanQrCola ON — cola intacta (cero OCR)",
+   400→      );
+   401→      return;
+   402→    }
+   403→    store.iniciar();
+   404→    return;
+   405→  }
+   406→  // Observabilidad del dueño — eco de la config REAL de esta corrida (la
+   407→  // lectura de overrides de localStorage ocurre AQUÍ, en vivo). Diagnóstico
+   408→  // pactado: si esta línea no muestra los overrides del dueño, el navegador
+   409→  // está corriendo código viejo (pestaña sin recargar tras el deploy / SW en
+   410→  // waiting del banner E-04) — NO es un problema de flags ni del prescan.
+   411→  logger.info(
+   412→    `[e14] prescan-qr corrida soloWarpQr=${soloWarpQr} warpLado=${warpLado} rescate=${rescateOn} presupuesto=${flagsMasivaEfectivos().prescanQrPresupuestoMs}`,
+   413→  );
+   414→  // R2 — cola ya corriendo (iniciar() es singleton no-op, igual hoy)
+   415→  if (store.corriendo) {
+   416→    store.iniciar();
+   417→    return;
+   418→  }
+   419→  // R3 — objetivo: solo PENDIENTE vivas; PROCESAR IGUAL manda SIEMPRE
+   420→  // KIT e14-quad-streaming-v1 (P5): los kill-switches y el TURNO se
+   421→  // resuelven AQUÍ, en el tramo 100% SÍNCRONO anterior al primer await —
+   422→  // el snapshot del objetivo y la marca del turno ven la MISMA tienda:
+   423→  // toda fila del objetivo nació con agregadaEn <= inicioTurno (el filtro
+   424→  // del runner no la exenta jamás: protegida hasta SU stamp); las que
+   425→  // lleguen después nacen exentas (nadie las va a clasificar). Los flags
+   426→  // se leen UNA vez por corrida (corrida atómica frente a flags).
+   427→  const quadOn = leerFlags().masivaQuad === true; // P4 — estampar el quad
+   428→  const streamingOn = leerFlags().masivaStreaming === true; // P5 — por turno
+   429→  // W1 (KIT k1-obs-prioridad — brief Agente A): estampar la prioridad de
+   430→  // fila (paso 4 del dueño). Mismo gesto P4/P5: los flags se leen UNA vez
+   431→  // por corrida (corrida atómica frente a flags).
+   432→  const prioridadOn = leerFlags().masivaPrioridad === true;
+   433→  if (streamingOn) abrirTurnoClasificacion(Date.now());
+   434→  // KIT flujo-dueno-v1 (K2): el warp de INGESTA posee sus filas — el objetivo
+   435→  // de este pase EXCLUYE las que están en SU cola (encoladas o en vuelo: su
+   436→  // stamp llega con el bombeo). Punto 7 del brief: PROCESAR queda como
+   437→  // ASEGURADOR — procesa filas SIN stamps y SIN dueño (agregadas mientras
+   438→  // corría la corrida o filas que la ingesta no pudo decidir). Fuera del
+   439→  // guard (flag OFF) el objetivo es el de hoy byte-idéntico.
+   440→  const ingestaOn = leerFlags().masivaWarpIngesta === true;
+   441→  const objetivo = objetivoPrescan(useMasivaStore.getState().filas).filter((f) =>
+   442→    ingestaOn ? !filaBajoWarpIngesta(f.id) : true,
+   443→  );
+   444→  if (objetivo.length === 0) {
+   445→    if (streamingOn) cerrarTurnoClasificacion(); // sin objetivo — turno inerte
+   446→    // DRY RUN: nada que sondear ⇒ cola intacta (el pool JAMÁS arranca).
+   447→    if (!soloWarpQr) store.iniciar(); // idempotente, como hoy
+   448→    return;
+   449→  }
+   450→  if (streamingOn) {
+   451→    // RL-e65b-6 — el escape del dueño es sagrado: las PROCESAR IGUAL van
+   452→    // DIRECTO al pool sin pre-scan (stamp upfront — sin carrera posible:
+   453→    // nadie las va a clasificar jamás).
+   454→    for (const f of useMasivaStore.getState().filas) {
+   455→      if (f.estado === "PENDIENTE" && f.forzarDedupOff) {
+   456→        useMasivaStore.getState().actualizarFila(f.id, { prescanOk: true });
+   457→      }
+   458→    }
+   459→  }
+   460→  corriendoModulo = true;
+   461→  emitir({ corriendo: true, total: objetivo.length, listo: 0, leidos: 0, fase: "boot" });
+   462→  let leidos = 0;
+   463→  const cliente: ClientePrescan = crearClientePrescan(); // R4
+   464→  try {
+   465→    if (!(await cliente.listo())) {
+   466→      // Abort honesto (§G): worker no bootea → flujo de HOY byte-idéntico.
+   467→      logger.info("[e14] prescan-qr: lector no disponible — flujo de hoy (abort honesto)");
+   468→    } else {
+   469→      emitir({ fase: "sondeo" });
+   470→      // R5 — FASE 1+2: por fila, EN ORDEN FIFO (for...of, serial, RAM móvil)
+   471→      let procesadas = 0;
+   472→      for (const fila of objetivo) {
+   473→        emitir({ listo: procesadas, leidos }); // «SONDEANDO QR… k/N»
+   474→        try {
+   475→          // P1 (brief Agente A) — flag masivaQrHandoff: si el sondeo de
+   476→          // ingesta (e73) YA leyó el QR de esta fila, TODO el bloque de
+   477→          // lectura de abajo (decode FULL + OpenCV + warp + BarcodeDetector/
+   478→          // jsQR) existía SOLO para obtener este payload → clasificar directo
+   479→          // y saltar (el quad no viaja — eso es P4, otro parche). Anti-zombi
+   480→          // IGUAL que el camino lento (fila VIVA y PENDIENTE en el instante
+   481→          // del write); flag OFF / sin payload estampado → camino de hoy byte
+   482→          // a byte. El estampado en mapaQrPayload lo hace aplicarVeredicto
+   483→          // (veredicto "registrar") — el mapa queda como siempre.
+   484→          const heredado = leerFlags().masivaQrHandoff
+   485→            ? qrPayloadDeFilaStore(fila.id)
+   486→            : null;
+   487→          if (heredado != null) {
+   488→            const vivaH = useMasivaStore
+   489→              .getState()
+   490→              .filas.find((f) => f.id === fila.id);
+   491→            if (vivaH && vivaH.estado === "PENDIENTE") {
+   492→              const veredictoH = await clasificarPayloadPrescan(
+   493→                heredado,
+   494→                fila.id,
+   495→                DEPS_CLASIFICADOR,
+   496→              );
+   497→              await aplicarVeredictoPrescan(fila.id, veredictoH, heredado, DEPS_ESCRITURA);
+   498→              leidos++;
+   499→              logger.info(
+   500→                `[e14] prescan-qr hereda payload (handoff) fila=${fila.id} veredicto=${veredictoH.accion}`,
+   501→              );
+   502→              // INTEGRACIÓN P1×P5 (e14-quad-streaming-v1): el camino heredado
+   503→              // TAMBIÉN es «fila decidida» — stamp prescanOk AQUÍ, no en el
+   504→              // barrido de cierre (sin esto, la fila más barata de clasificar
+   505→              // — sondeo-OK, lectura saltada — no llegaba al pool hasta el
+   506→              // FINAL del pase: P5 perdía a sus mejores clientes). Sin quad:
+   507→              // este camino no decodifica nada (el bridge detecta por su
+   508→              // lado, igual que hoy). Re-lectura fresca anti-zombi — mismo
+   509→              // gesto del stamp del camino lento.
+   510→              const vivaStampH = useMasivaStore
+   511→                .getState()
+   512→                .filas.find((f) => f.id === fila.id);
+   513→              if (vivaStampH && vivaStampH.estado === "PENDIENTE") {
+   514→                // DRY RUN: la herencia del payload del sondeo TAMBIÉN es «QR
+   515→                // leído» (el dato ya existía — el stamp es un espejo, jamás
+   516→                // inventa). prescanOk sigue atado a streaming como hoy.
+   517→                if (soloWarpQr) {
+   518→                  useMasivaStore.getState().actualizarFila(fila.id, { qrLeido: true });
+   519→                }
+   520→                if (streamingOn) {
+   521→                  useMasivaStore.getState().actualizarFila(fila.id, { prescanOk: true });
+   522→                  // P5 — arranque temprano (dry run JAMÁS arranca el pool).
+   523→                  if (!soloWarpQr) useMasivaStore.getState().iniciar();
+   524→                }
+   525→              }
+   526→            }
+   527→            continue; // el finally de abajo hace procesadas++ (contador honesto)
+   528→          }
+   529→          // Bytes originales: duermen en IDB (RegistroMasiva.archivo) —
+   530→          // NO hay `fila.file` en RAM (kit R5 dice fila.file; el gesto real
+   531→          // del repo es leerRegistro — desviación M-e107-2 del REPORTE).
+   532→          const reg = await leerRegistro(fila.id);
+   533→          const blob = reg.archivo;
+   534→          if (!blob) continue; // sin bytes → PENDIENTE (Fase 3)
+   535→          // Decode rápido respetando EXIF (kit R5 — imageOrientation).
+   536→          const bitmapFull = await createImageBitmap(blob, {
+   537→            imageOrientation: "from-image",
+   538→          }).catch(() => null);
+   539→          if (!bitmapFull) continue; // corrupto/HEIC raro → PENDIENTE (§G)
+   540→          let payload: string | null = null;
+   541→          // P4 — el quad detectado ya NO se tira (stamp aditivo abajo —
+   542→          // solo si masivaQuad ON; sin flag el trabajo es el de hoy).
+   543→          let quadVisto: Float32Array | null = null;
+   544→          try {
+   545→            const bitmap400 = await downscaleLado(bitmapFull, DETECT_LONG_SIDE).catch(
+   546→              () => null,
+   547→            );
+   548→            if (bitmap400) {
+   549→              const quad = await cliente.detectar(bitmap400); // bitmap400 transferido
+   550→              if (quad) {
+   551→                quadVisto = quad; // P4 — captura para el stamp (no altera el flujo)
+   552→                // bitmapFull TRANSFERIDO aquí (detached — close() de abajo
+   553→                // es no-op honesto); el warp sale SIN rotar (Anexo 1).
+   554→                const warped = await cliente.warpar(bitmapFull, quad, warpLado);
+   555→                if (warped) {
+   556→                  try {
+   557→                    payload = await leerQrDeWarped(warped);
+   558→                    // ENMIENDA §F.3 (KIT e14-prescan-rescate-qr-v1) — SOLO
+   559→                    // tras un null EXPLÍCITO del camino rápido: escalera
+   560→                    // difícil sobre el MISMO warped (esquina-600 → barrido
+   561→                    // presupuestado del rescate). Jamás empeora el camino
+   562→                    // rápido; null honesto del rescate → fila sigue
+   563→                    // PENDIENTE (regla de oro 4 — QR no leído jamás se
+   564→                    // descarta).
+   565→                    if (payload == null && rescateOn) {
+   566→                      payload = await rescateQrDeWarped(warped);
+   567→                    }
+   568→                  } finally {
+   569→                    try {
+   570→                      warped.close();
+   571→                    } catch {
+   572→                      /* noop */
+   573→                    }
+   574→                  }
+   575→                }
+   576→              }
+   577→            }
+   578→          } finally {
+   579→            try {
+   580→              bitmapFull.close(); // no-op si fue transferido (detached)
+   581→            } catch {
+   582→              /* noop */
+   583→            }
+   584→          }
+   585→          // Anti-zombi: la fila pudo morir (quitar/vaciar) durante el sondeo
+   586→          // — el write del pre-scan exige fila VIVA y PENDIENTE (§G).
+   587→          const viva = useMasivaStore.getState().filas.find((f) => f.id === fila.id);
+   588→          if (!viva || viva.estado !== "PENDIENTE") continue;
+   589→          const veredicto = await clasificarPayloadPrescan(payload, fila.id, DEPS_CLASIFICADOR);
+   590→          await aplicarVeredictoPrescan(fila.id, veredicto, payload, DEPS_ESCRITURA);
+   591→          if (payload) leidos++;
+   592→          // KIT e14-quad-streaming-v1 (P4/P5) — stamp de la fila decidida.
+   593→          // Sin awaits entre el veredicto aplicado y este stamp (re-lectura
+   594→          // fresca anti-zombi): el pool jamás ve la fila a medio decidir —
+   595→          // sin stamp el filtro del runner la retiene (streaming ON).
+   596→          // · prescanOk (P5): la fila entra al FIFO del pool YA (arranque
+   597→          //   temprano — iniciar() idempotente, no-op mientras corre).
+   598→          // · quad (P4): fracciones del worker — solo con flag ON y lectura
+   599→          //   del pre-scan; quadDeFracciones valida la forma (jamás inventa).
+   600→          const vivaStamp = useMasivaStore.getState().filas.find((f) => f.id === fila.id);
+   601→          if (vivaStamp && vivaStamp.estado === "PENDIENTE") {
+   602→            const quadFila = quadOn ? quadDeFracciones(quadVisto) : null;
+   603→            // W1 (KIT k1-obs-prioridad — brief Agente A): estampado de la
+   604→            // prioridad de fila — SOLO con flag masivaPrioridad ON:
+   605→            //  · 1 — fila CON QR leído (payload del warp — warp OK por
+   606→            //    construcción) + quad OK (el worker detectó el quad que
+   607→            //    produjo el warp).
+   608→            //  · 2 — fila sin QR (lectura imposible — el warp no rescató).
+   609→            //  · Sin stamp (continue por fila sin bytes/decode, barrido de
+   610→            //    cierre, camino hand-off) ⇒ prioridad EFECTIVA 2 por default
+   611→            //    en el sort del runner (JAMÁS se estampa 3: la DUPLICADA se
+   612→            //    deriva del estado — fuente única de verdad).
+   613→            const prioridadFila = prioridadOn
+   614→              ? payload != null && quadVisto != null
+   615→                ? 1
+   616→                : 2
+   617→              : null;
+   618→            // DRY RUN (KIT e14-solo-warp-qr-v1): veredicto QR por fila para
+   619→            // la UI — espejo del payload del pre-scan (true = leído, false =
+   620→            // la lectura no produjo payload). Con dry run ON la fila JAMÁS
+   621→            // entra al pool: el bloque de abajo (prescanOk/quad/prioridad +
+   622→            // iniciar()) queda SOLO para el flujo normal (byte-idéntico).
+   623→            if (soloWarpQr) {
+   624→              useMasivaStore.getState().actualizarFila(fila.id, {
+   625→                qrLeido: payload != null,
+   626→              });
+   627→            } else if (streamingOn || quadFila || prioridadFila != null) {
+   628→              useMasivaStore.getState().actualizarFila(fila.id, {
+   629→                ...(streamingOn ? { prescanOk: true } : {}),
+   630→                ...(quadFila ? { quad: quadFila } : {}),
+   631→                ...(prioridadFila != null
+   632→                  ? { prioridadProceso: prioridadFila }
+   633→                  : {}),
+   634→              });
+   635→              if (streamingOn) useMasivaStore.getState().iniciar(); // P5 — temprano
+   636→            }
+   637→          }
+   638→        } catch {
+   639→          /* fila sigue PENDIENTE — JAMÁS descartar (regla de oro 4) */
+   640→        } finally {
+   641→          procesadas++;
+   642→        }
+   643→      }
+   644→      emitir({ listo: procesadas, leidos });
+   645→    }
+   646→  } finally {
+   647→    // R6 — el worker del pre-scan muere SIEMPRE al terminar (RAM).
+   648→    cliente.destruir();
+   649→    if (streamingOn) {
+   650→      // KIT flujo-dueno-v1 (K2): con el warp de ingesta activo, ESPERAR
+   651→      // (acotado) a que su cola serial decida las filas que posee — el
+   652→      // barrido de abajo NO puede releasear filas que la ingesta está por
+   653→      // clasificar (la gemela pagaría OCR — peligro §3-P5 del plan).
+   654→      // Timeout ⇒ abort honesto: el barrido decide igual (residual
+   655→      // documentado en el REPORTE §P5-residual — defensas de fondo intactas).
+   656→      if (ingestaOn) {
+   657→        const drenada = await esperarColaWarpIngesta(ESPERA_COLA_TOPE_MS);
+   658→        if (!drenada) {
+   659→          logger.warn(
+   660→            `[e14] prescan-qr: cola warp-ingesta NO drenó en ${ESPERA_COLA_TOPE_MS} ms — barrido de cierre decide (abort honesto)`,
+   661→          );
+   662→        }
+   663→      }
+   664→      // P5 — BARRIDO DE CIERRE: TODA fila PENDIENTE sin stamp (abort
+   665→      // honesto, continue por fila sin bytes/decode, catch, llegada a mitad
+   666→      // del turno) queda DECIDIDA aquí — la fase de clasificación de este
+   667→      // ciclo terminó y nadie la va a marcar ya. Después el turno CIERRA y
+   668→      // el filtro del runner queda INERTE: sin hambruna por construcción.
+   669→      for (const f of useMasivaStore.getState().filas) {
+   670→        if (f.estado === "PENDIENTE" && f.prescanOk !== true) {
+   671→          useMasivaStore.getState().actualizarFila(f.id, { prescanOk: true });
+   672→        }
+   673→      }
+   674→      cerrarTurnoClasificacion();
+   675→    }
+   676→    emitir({ corriendo: false, fase: "fin", leidos });
+   677→    corriendoModulo = false;
+   678→  }
+   679→  // R7 — FASE 3: tM() con la lista ya filtrada. ÚNICO punto de contacto
+   680→  // (flag OFF / abort honesto: iniciar() del flujo de hoy byte-idéntico).
+   681→  // DRY RUN: PUNTO DE CORTE — el pool JAMÁS arranca (cero OCR, cero envío;
+   682→  // la cola queda PENDIENTE con los stamps qrLeido de la fase 1-2).
+   683→  if (!soloWarpQr) {
+   684→    useMasivaStore.getState().iniciar();
+   685→  } else {
+   686→    logger.info(
+   687→      "[e14] prescan-qr: DRY RUN masivaSoloWarpQr ON — cola intacta (cero OCR, cero envío)",
+   688→    );
+   689→  }
+   690→}
+   691→

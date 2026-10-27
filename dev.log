@@ -1,0 +1,36 @@
+▲ Next.js 16.4.2 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.21.203:3000
+- Environments: .env
+✓ Ready in 276ms
+✓ Running next.config.ts took 32ms
+
+○ Compiling / ...
+ GET / 200 in 325ms (next.js: 110ms, application-code: 215ms)
+ GET / 200 in 204ms (next.js: 1.3ms, application-code: 203ms)
+⚠ Blocked cross-origin request to Next.js dev resource /__nextjs_font/geist-latin.woff2 from "preview-chat-a403ac9d-0615-423b-8857-f07b9630d7c7.space-z.ai".
+Cross-origin access to Next.js dev resources is blocked by default for safety.
+
+To allow this host in development, add it to "allowedDevOrigins" in next.config.js and restart the dev server:
+
+// next.config.js
+module.exports = {
+  allowedDevOrigins: ['preview-chat-a403ac9d-0615-423b-8857-f07b9630d7c7.space-z.ai'],
+}
+
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ POST /api/e14/envios/ 404 in 703ms (next.js: 656ms, application-code: 47ms)
+ POST /api/e14/envios/ 404 in 46ms (next.js: 10ms, application-code: 36ms)
+ GET / 200 in 40ms (next.js: 1.2ms, application-code: 39ms)
+⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+▲ Next.js 16.4.2 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.21.203:3000
+- Environments: .env
+✓ Ready in 309ms
+✓ Running next.config.ts took 40ms
+
+○ Compiling / ...
+ GET / 200 in 374ms (next.js: 117ms, application-code: 257ms)
+ GET / 200 in 51ms (next.js: 1.3ms, application-code: 49ms)
+ GET / 200 in 35ms (next.js: 1.5ms, application-code: 34ms)

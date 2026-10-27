@@ -1,0 +1,705 @@
+   401→          onDragOver={(e) => {
+   402→            e.preventDefault();
+   403→            e.stopPropagation();
+   404→          }}
+   405→          onDragLeave={(e) => {
+   406→            e.preventDefault();
+   407→            e.stopPropagation();
+   408→            dragCounterRef.current--;
+   409→            if (dragCounterRef.current <= 0) {
+   410→              dragCounterRef.current = 0;
+   411→              setIsDraggingGlobal(false);
+   412→            }
+   413→          }}
+   414→          onDrop={(e) => {
+   415→            e.preventDefault();
+   416→            e.stopPropagation();
+   417→            dragCounterRef.current = 0;
+   418→            setIsDraggingGlobal(false);
+   419→            if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+   420→              void agregarFiles(Array.from(e.dataTransfer.files));
+   421→            }
+   422→          }}
+   423→        >
+   424→          <div className="w-24 h-24 rounded-3xl bg-[#10b981]/15 border-2 border-[#10b981] flex items-center justify-center text-[#10b981] mb-6 shadow-2xl shadow-[#10b981]/30 animate-bounce">
+   425→            <StitchStackIcon className="w-12 h-12" />
+   426→          </div>
+   427→          <h2 className="font-mono text-2xl md:text-3xl font-black text-white uppercase tracking-wider mb-3">
+   428→            SUELTA LOS ARCHIVOS AQUÍ
+   429→          </h2>
+   430→          <p className="font-mono text-xs md:text-sm text-slate-300 max-w-md uppercase tracking-wider mb-5">
+   431→            Se agregarán directamente a la cola de digitalización E-14
+   432→          </p>
+   433→          <div className="flex flex-wrap gap-2 justify-center font-mono text-[11px] text-slate-300 uppercase tracking-widest bg-slate-900/80 px-5 py-2.5 rounded-full border border-slate-700/80 shadow-md">
+   434→            <span>FOTOS (JPG/PNG)</span> • <span>PDF</span> • <span>ZIP</span> • <span>RAR</span> • <span>HEIC</span>
+   435→          </div>
+   436→        </div>
+   437→      )}
+   438→
+   439→      {/* ---------- HEADER FIJO / STICKY SUPERIOR CON BOTÓN PROCESAR COLA ---------- */}
+   440→      <header className="sticky top-0 z-30 w-full bg-[#090d12]/92 backdrop-blur-xl border-b border-slate-800/80 px-4 py-3 shadow-lg shadow-black/40">
+   441→        <div className="w-full max-w-6xl mx-auto flex items-center justify-between gap-3">
+   442→          {/* Título + estado visual */}
+   443→          <div className="min-w-0 flex items-center gap-2.5">
+   444→            <div className="w-8 h-8 rounded-xl bg-[#10b981]/15 border border-[#10b981]/40 flex items-center justify-center text-[#10b981] shrink-0">
+   445→              <StitchStackIcon className="w-4 h-4" />
+   446→            </div>
+   447→            <div className="min-w-0">
+   448→              {/* KIT e14-gama-adaptativa-v1 — flex-wrap: en móvil el chip de
+   449→                  gama ENVUELVE a la línea siguiente (jamás tapa el título ni
+   450→                  desborda sobre los botones de la derecha). */}
+   451→              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   452→                <h1 className="font-mono text-sm md:text-base font-black tracking-wider text-white uppercase truncate">
+   453→                  CARGA MASIVA
+   454→                </h1>
+   455→                {hayCola && (
+   456→                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-slate-800 bg-[#10161f] font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">
+   457→                    {terminadas}/{filas.length}
+   458→                  </span>
+   459→                )}
+   460→                {/* KIT e14-gama-adaptativa-v1 (D74) — chip SOLO con
+   461→                    adaptaciones activas (BAJO/MEDIO + flag ON): transparencia
+   462→                    del dueño (el espíritu D6 — detectar Y reportar). Con el
+   463→                    detalle completo en el title (ajustes aplicados + cómo
+   464→                    desactivar). `hidden sm:inline-flex` — MISMO patrón del
+   465→                    contador {terminadas}/{filas}: en móvil (<640 px) la fila
+   466→                    de acciones derecha ya ocupa el ancho y el chip no cabe
+   467→                    sin tapar el título/botón (verificado en 390 px); desde sm
+   468→                    sí hay sitio. El detalle del plan SIEMPRE queda en la
+   469→                    traza `[e14] gama plan …` de consola. */}
+   470→                {gama.activo && (
+   471→                  <span
+   472→                    className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-300 whitespace-nowrap"
+   473→                    title={`Gama ${gama.tier} detectada${gama.tierInferido ? " (inferida)" : ""} — modo adaptado (KIT e14-gama-adaptativa-v1 · D74): ${gama.ajustes.join(" · ")}. Desactivable con el flag masivaAdaptativoGama=false.`}
+   474→                  >
+   475→                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mr-1" />
+   476→                    GAMA {gama.tier} · ADAPTADO
+   477→                  </span>
+   478→                )}
+   479→              </div>
+   480→              <p className="font-mono text-[9px] md:text-[10px] tracking-wider text-slate-400 uppercase truncate">
+   481→                {corriendo ? (
+   482→                  <span className="text-[#10b981] font-bold flex items-center gap-1.5">
+   483→                    <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-ping" />
+   484→                    PROCESANDO EN COLA…
+   485→                  </span>
+   486→                ) : pendientes > 0 ? (
+   487→                  `${pendientes} PENDIENTES DE ENVÍO`
+   488→                ) : hayCola ? (
+   489→                  "COLA COMPLETADA"
+   490→                ) : (
+   491→                  "ARRASTRA ARCHIVOS O SELECCIONA"
+   492→                )}
+   493→              </p>
+   494→            </div>
+   495→          </div>
+   496→
+   497→          {/* Acciones principales fijas: PROCESAR / PAUSAR + VACIAR */}
+   498→          <div className="relative flex items-center gap-2 shrink-0">
+   499→            {corriendo ? (
+   500→              <button
+   501→                type="button"
+   502→                onClick={pausar}
+   503→                aria-label="Pausar la cola"
+   504→                className="min-h-[44px] px-4 rounded-xl border border-amber-500/50 bg-amber-500/15 text-amber-300 font-mono text-[11px] font-bold uppercase tracking-wider hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+   505→              >
+   506→                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+   507→                PAUSAR
+   508→              </button>
+   509→            ) : (
+   510→              <button
+   511→                type="button"
+   512→                // KIT e107 (§D.3): el clic pasa por el pre-scan QR —
+   513→                // prescanYIniciar llama iniciar() con la lista filtrada
+   514→                // (flag OFF/abort honesto ⇒ byte-idéntico al de hoy).
+   515→                onClick={() => void prescanYIniciar()}
+   516→                disabled={!colaDisponible || (pendientes === 0 && duplicadas === 0) || prescan.corriendo}
+   517→                aria-label="Procesar la cola"
+   518→                className="min-h-[44px] px-4 md:px-5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-[#090d12] font-mono text-[11px] md:text-xs font-black uppercase tracking-wider shadow-md shadow-[#10b981]/25 hover:shadow-[#10b981]/40 active:scale-[0.98] transition cursor-pointer disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed flex items-center gap-1.5"
+   519→              >
+   520→                <span className="w-2 h-2 rounded-full bg-[#090d12]" />
+   521→                {dryRun ? "SONDEAR QR" : "PROCESAR COLA"}
+   522→                {pendientes + duplicadas > 0 && (
+   523→                  <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[#090d12]/20 font-extrabold text-[10px]">
+   524→                    {pendientes + duplicadas}
+   525→                  </span>
+   526→                )}
+   527→              </button>
+   528→            )}
+   529→
+   530→            {/* KIT e14-solo-warp-qr-v1 — DRY RUN: toggle del dueño (D6 — la
+   531→                app nunca sola: default OFF, siempre visible). ON = «PROCESAR
+   532→                COLA» pasa a SONDEAR QR: pre-scan (quad+warp+QR) con chips
+   533→                QR ✓/✗ y JAMÁS iniciar() — cero OCR, cero envío. */}
+   534→            <button
+   535→              type="button"
+   536→              onClick={toggleDryRun}
+   537→              aria-pressed={dryRun}
+   538→              aria-label="Modo solo Warp y QR (prueba en seco)"
+   539→              title="PRUEBA EN SECO: sondea quad + warp + QR de toda la cola y NADA más — cero OCR, cero envío. El dedup por QR sigue marcando duplicadas."
+   540→              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 ${
+   541→                dryRun
+   542→                  ? "border-amber-400/70 bg-amber-400/15 text-amber-300 shadow-sm shadow-amber-400/20"
+   543→                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
+   544→              }`}
+   545→            >
+   546→              <span className={`w-2 h-2 rounded-full ${dryRun ? "bg-amber-400" : "bg-slate-600"}`} />
+   547→              SOLO QR
+   548→            </button>
+   549→
+   550→            <button
+   551→              type="button"
+   552→              onClick={() => {
+   553→                if (!vaciarArmado) {
+   554→                  setVaciarArmado(true);
+   555→                  return;
+   556→                }
+   557→                setVaciarArmado(false);
+   558→                void vaciar();
+   559→              }}
+   560→              disabled={!hayCola || corriendo}
+   561→              aria-label={
+   562→                vaciarArmado ? "Confirmar vaciar toda la cola" : "Vaciar toda la cola"
+   563→              }
+   564→              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+   565→                vaciarArmado
+   566→                  ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
+   567→                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
+   568→              }`}
+   569→            >
+   570→              {vaciarArmado ? "¿SEGURO?" : "VACIAR"}
+   571→            </button>
+   572→
+   573→            {/* KIT e107-prescan-qr-cola-v1 (§D.3): banner del pre-scan —
+   574→                hermano visual del chip «Sondeo QR» de e73 (overlay sobre el
+   575→                header, SIN mover el layout). fase "boot" → «Preparando
+   576→                lector…»; al "fin" desaparece (el % por-fila de la Fase 3 es
+   577→                el sistema de siempre — cero trabajo extra). */}
+   578→            {prescan.corriendo && (
+   579→              <div
+   580→                className="absolute right-0 top-full mt-2 z-40 min-w-[230px] rounded-xl border border-[#10b981]/40 bg-[#090d12]/95 px-3.5 py-2 shadow-lg shadow-black/40 backdrop-blur-md"
+   581→                role="status"
+   582→                aria-live="polite"
+   583→                aria-label={
+   584→                  prescan.fase === "boot"
+   585→                    ? "Preparando lector de códigos QR"
+   586→                    : `Sondeando QR: ${prescan.listo} de ${prescan.total}`
+   587→                }
+   588→              >
+   589→                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#10b981] whitespace-nowrap">
+   590→                  {prescan.fase === "boot"
+   591→                    ? "PREPARANDO LECTOR…"
+   592→                    : `SONDEANDO QR… ${prescan.listo}/${prescan.total}`}
+   593→                </p>
+   594→                <p className="font-mono text-[9px] uppercase tracking-wider text-slate-400 whitespace-nowrap">
+   595→                  {dryRun
+   596→                    ? `${prescan.leidos} leídos · prueba en seco — cero OCR`
+   597→                    : `${prescan.leidos} leídos · los no leídos pasan al OCR`}
+   598→                </p>
+   599→              </div>
+   600→            )}
+   601→            {/* KIT e14-solo-warp-qr-v1 — DRY RUN: resumen PERSISTENTE tras el
+   602→                sondeo (el banner de e107 desaparece al "fin" — el dueño pidió
+   603→                ver cuántos QR se leyeron). Solo-lectura del store del prescan;
+   604→                se oculta si la cola normal llega a correr (corriendo). */}
+   605→            {!prescan.corriendo && !corriendo && dryRun && prescan.fase === "fin" && prescan.total > 0 && (
+   606→              <div
+   607→                className="absolute right-0 top-full mt-2 z-40 min-w-[230px] rounded-xl border border-amber-400/50 bg-[#090d12]/95 px-3.5 py-2 shadow-lg shadow-black/40 backdrop-blur-md"
+   608→                role="status"
+   609→                aria-live="polite"
+   610→                aria-label={`Prueba en seco terminada: ${prescan.leidos} de ${prescan.total} códigos QR leídos`}
+   611→              >
+   612→                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 whitespace-nowrap">
+   613→                  DRY RUN — QR {prescan.leidos}/{prescan.total}
+   614→                </p>
+   615→                <p className="font-mono text-[9px] uppercase tracking-wider text-slate-400 whitespace-nowrap">
+   616→                  cero OCR · cero envío · cola intacta
+   617→                </p>
+   618→              </div>
+   619→            )}
+   620→          </div>
+   621→        </div>
+   622→      </header>
+   623→
+   624→      {/* ---------- CUERPO DE LA VISTA (SCROLL PRINCIPAL) ---------- */}
+   625→      <div className="w-full max-w-6xl mx-auto px-4 py-5 flex flex-col gap-4 pb-24">
+   626→        {/* ---------- FALLBACK IDB ---------- */}
+   627→        {!colaDisponible && (
+   628→          <p
+   629→            role="alert"
+   630→            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
+   631→          >
+   632→            TU NAVEGADOR NO SOPORTA LA COLA — IMPORTA DE A UNA EN ESCANEAR
+   633→          </p>
+   634→        )}
+   635→        {colaDisponible && avisoCola && (
+   636→          <p
+   637→            role="alert"
+   638→            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
+   639→          >
+   640→            {avisoCola}
+   641→          </p>
+   642→        )}
+   643→
+   644→        {/* ---------- ZONA DE CARGA (input + botón manual + hint) ---------- */}
+   645→        <div className="rounded-2xl border-2 border-dashed border-slate-800 bg-[#10161f] hover:border-slate-700 px-4 py-6 text-center transition-all">
+   646→          <input
+   647→            ref={inputRef}
+   648→            id="masiva-archivos"
+   649→            type="file"
+   650→            multiple
+   651→            accept="image/*,.heic,.heif,.zip,.rar,.pdf"
+   652→            className="sr-only"
+   653→            onChange={(e) => {
+   654→              void agregarFiles(Array.from(e.target.files ?? []));
+   655→              e.target.value = "";
+   656→            }}
+   657→          />
+   658→          <div className="flex flex-col items-center justify-center gap-2">
+   659→            <button
+   660→              type="button"
+   661→              onClick={() => inputRef.current?.click()}
+   662→              aria-label="Elegir fotos de actas para la cola"
+   663→              className="min-h-[44px] inline-flex items-center gap-2 px-6 rounded-xl bg-[#10b981]/15 border border-[#10b981]/50 font-mono text-xs font-bold uppercase tracking-wider text-[#10b981] hover:bg-[#10b981]/25 transition cursor-pointer shadow-sm active:scale-[0.98]"
+   664→            >
+   665→              <StitchStackIcon className="w-4 h-4" />
+   666→              ELEGIR FOTOS O ARCHIVOS
+   667→            </button>
+   668→            <p className="font-mono text-[11px] tracking-wider text-slate-400 uppercase mt-1">
+   669→              SUELTA ARCHIVOS EN CUALQUIER PARTE DE ESTA PANTALLA
+   670→            </p>
+   671→            <span className="font-mono text-[9px] text-slate-400 uppercase tracking-widest">
+   672→              SOPORTA MÚLTIPLES FOTOS, PDF, ZIP O RAR
+   673→            </span>
+   674→          </div>
+   675→
+   676→          {guardando > 0 && (
+   677→            <p
+   678→              className="mt-3 inline-block rounded-full border border-slate-700 bg-slate-800 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-300"
+   679→              role="status"
+   680→              aria-live="polite"
+   681→            >
+   682→              GUARDANDO {guardando}…
+   683→            </p>
+   684→          )}
+   685→
+   686→          {/* KIT e73-sondeo-qr-precoz-v1 (§E — deseado): chip del SONDEO QR en
+   687→              ingesta — N leídos / M con payload (en vivo, junto al progreso de
+   688→              ingesta; SIN tocar la lógica de la cola — SOLO-LECTURA del store). */}
+   689→          {sondeadas > 0 && (
+   690→            <p
+   691→              className="mt-3 inline-block rounded-full border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-[#10b981]"
+   692→              role="status"
+   693→              aria-label={`Sondeo QR: ${sondeadas} leídos, ${conPayload} con payload`}
+   694→            >
+   695→              SONDEO QR {conPayload}/{sondeadas}
+   696→            </p>
+   697→          )}
+   698→        </div>
+   699→
+   700→        {/* ---------- BARRA DE PROGRESO DEL LOTE ---------- */}
+   701→        {hayCola && (
+   702→          <div className="flex items-center justify-between gap-3 rounded-xl bg-[#10161f] border border-slate-800 px-3.5 py-2.5 shadow-xs">
+   703→            <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-300 truncate">
+   704→              PROCESANDO {terminadas}/{filas.length}
+   705→              {filaActiva && progreso && (
+   706→                <span className="text-slate-400 font-medium">
+   707→                  {" "}
+   708→                  — {filaActiva.nombre} · {etiquetaVida(progreso)}
+   709→                </span>
+   710→              )}
+   711→            </p>
+   712→            <p className="font-mono text-[10px] uppercase tracking-wider text-slate-400 shrink-0">
+   713→              {corriendo ? "COLA ACTIVA" : pendientes > 0 ? `${pendientes} EN COLA` : "COLA QUIETA"}
+   714→            </p>
+   715→          </div>
+   716→        )}
+   717→
+   718→        {/* Aviso HEIC */}
+   719→        {filaActiva && /\.(heic|heif)$/i.test(filaActiva.nombre) && (
+   720→          <p
+   721→            role="status"
+   722→            aria-live="polite"
+   723→            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400"
+   724→          >
+   725→            CONVIRTIENDO HEIC… LA CONVERSIÓN PUEDE TARDAR UNOS SEGUNDOS
+   726→          </p>
+   727→        )}
+   728→
+   729→        {/* ---------- BANDEJA: FILTROS + LOTE ---------- */}
+   730→        {hayCola && (
+   731→          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filtrar por estado">
+   732→            {FILTROS.map(({ valor, label }) => (
+   733→              <button
+   734→                key={valor}
+   735→                type="button"
+   736→                onClick={() => setFiltro(valor)}
+   737→                aria-pressed={filtro === valor}
+   738→                className={`min-h-[44px] px-3 py-1 rounded-full border font-mono text-[10px] font-bold uppercase tracking-wider transition ${
+   739→                  filtro === valor
+   740→                    ? "border-[#10b981] text-[#10b981] bg-[#10b981]/15"
+   741→                    : "border-slate-800 text-slate-400 hover:text-white hover:border-slate-700"
+   742→                }`}
+   743→              >
+   744→                {label}
+   745→              </button>
+   746→            ))}
+   747→            <span
+   748→              className="font-mono text-[10px] uppercase tracking-wider text-slate-400"
+   749→              aria-label={`Conteos: ${enviadas} enviadas, ${enCola} en cola, ${pendientes} pendientes, ${duplicadas} duplicadas, ${yaEnviadas} ya enviadas, ${errores} errores`}
+   750→            >
+   751→              ENVIADAS {enviadas} · EN COLA {enCola} · PENDIENTES {pendientes}
+   752→              {duplicadas > 0 && <> · DUPLICADAS {duplicadas}</>}
+   753→              {yaEnviadas > 0 && <> · YA ENVIADAS {yaEnviadas}</>} · ERRORES {errores}
+   754→            </span>
+   755→            {(advertenciasPend > 0 || enviandoLote) && !corriendo && (
+   756→              <button
+   757→                type="button"
+   758→                disabled={enviandoLote}
+   759→                onClick={() => void enviarLote("ADVERTENCIA")}
+   760→                aria-label={`Enviar ${advertenciasPend} actas con advertencia`}
+   761→                className="ml-auto min-h-[44px] px-3.5 rounded-full border border-amber-400/60 text-amber-400 bg-amber-400/10 font-mono text-[10px] font-bold uppercase tracking-wider hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition"
+   762→              >
+   763→                {enviandoLote ? "ENVIANDO…" : `ENVIAR ADVERTENCIAS (${advertenciasPend})`}
+   764→              </button>
+   765→            )}
+   766→          </div>
+   767→        )}
+   768→
+   769→        {/* ---------- BANDEJA: FILAS (SIN RESTRICCIÓN RÍGIDA DE ALTURA PARA SCROLL FLUIDO) ---------- */}
+   770→        {hayCola && (
+   771→          <ul className="flex flex-col gap-2 pr-1" aria-label="Bandeja de resultados">
+   772→            {visiblesOrdenadas.map((f) => {
+   773→              const pildora = pildoraDe(f);
+   774→              const esActiva = progreso?.id === f.id && f.estado === "PROCESANDO";
+   775→              // KIT e64v — Cambio A: gemela CONFIRMADA (desenlace heredado)
+   776→              // → fila azul. La dup aplazada aún no confirma → sin azul.
+   777→              const esDup = esDuplicada(f);
+   778→              // D65 (T3.3) — señal de vida de la fila (barra h-1 discreta):
+   779→              const enColaVida = f.estado === "PENDIENTE" || f.estado === "DUPLICADA";
+   780→              const posCola = enColaVida ? colaVida.indexOf(f.id) + 1 : 0;
+   781→              const pctProceso = porcentajeProcesoActa(f, Boolean(esActiva), progreso);
+   782→              // % SOLO si es dato REAL (OCR del reconocedor) — kit T3 honestidad.
+   783→              const ocrPct =
+   784→                esActiva && progreso?.etapa === "ocr" && progreso.ocrFraccion != null
+   785→                  ? Math.min(100, Math.max(0, Math.round(progreso.ocrFraccion * 100)))
+   786→                  : null;
+   787→              return (
+   788→                <li
+   789→                  key={f.id}
+   790→                  className={`rounded-2xl border px-3.5 py-3 transition-all ${
+   791→                    esDup
+   792→                      ? // KIT e64v — Cambio A: specs dark del kit (bg/borde azul).
+   793→                        // El repo es dark-only (paleta oscura hardcodeada — sin
+   794→                        // variante `dark:`): los tokens dark aplican directos.
+   795→                        "bg-blue-950/60 border-blue-800 hover:border-blue-700"
+   796→                      : `bg-[#10161f] ${
+   797→                          esActiva ? "border-[#10b981]/60 ring-1 ring-[#10b981]/60 shadow-md shadow-[#10b981]/10" : "border-slate-800 hover:border-slate-700"
+   798→                        }`
+   799→                  }`}
+   800→                >
+   801→                  <div className="flex items-center gap-3">
+   802→                  {/* Thumb 40px (o cuadrado pendiente) */}
+   803→                  {f.thumb ? (
+   804→                    <img
+   805→                      src={f.thumb}
+   806→                      alt={`Miniatura de ${f.nombre}`}
+   807→                      className="w-11 h-11 rounded-xl object-cover bg-[#090d12] border border-slate-700 shrink-0"
+   808→                    />
+   809→                  ) : (
+   810→                    <div
+   811→                      aria-hidden
+   812→                      className="w-11 h-11 rounded-xl bg-[#090d12] border border-slate-800 flex items-center justify-center text-slate-500 shrink-0"
+   813→                    >
+   814→                      <StitchStackIcon className="w-5 h-5" />
+   815→                    </div>
+   816→                  )}
+   817→
+   818→                  {/* Nombre + estado/motivo */}
+   819→                  <div className="min-w-0 flex-1">
+   820→                    {/* D59 — KIT e14-info-acta-filas-v1 (T4): línea de título
+   821→                        ENCIMA del nombre con la info reconocida del acta
+   822→                        (idea del dueño, mockup Stitch corregido — paleta del
+   823→                        repo: brand-green mono). Fila sin infoTitulo queda
+   824→                        EXACTAMENTE como hoy (cero regresión); null = sin
+   825→                        datos → no se pinta nada (jamás inventar). */}
+   826→                    {f.infoTitulo && (
+   827→                      <p
+   828→                        className="font-mono text-[11px] font-bold uppercase tracking-wider text-brand-green truncate"
+   829→                        title={f.infoTitulo}
+   830→                      >
+   831→                        {f.infoTitulo}
+   832→                      </p>
+   833→                    )}
+   834→                    <p
+   835→                      className={`font-mono text-[11px] font-bold uppercase truncate ${
+   836→                        f.estado === "ERROR" ? "text-red-300" : "text-white"
+   837→                      }`}
+   838→                    >
+   839→                      {f.nombre}
+   840→                    </p>
+   841→                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+   842→                      <span
+   843→                        className={`px-2 py-0.5 rounded-full border font-mono text-[9px] font-bold uppercase tracking-wider ${pildora.clases}`}
+   844→                      >
+   845→                        {pildora.label}
+   846→                      </span>
+   847→                      {/* KIT e64v — Cambio A: chip azul de la gemela CONFIRMADA.
+   848→                          Etiqueta SIEMPRE visible (el color jamás es el único
+   849→                          portador de información — accesibilidad/daltonismo);
+   850→                          refleja el desenlace heredado (jamás inventa — kit §1).
+   851→                          Convive con QR chip / ≡ original / YA ENVIADA (flex-wrap
+   852→                          del contenedor — red line 5). Icono: CheckIcon propio
+   853→                          del repo (el icono del kit era opcional y lucide no
+   854→                          existe en el repo — sistema de diseño propio manda). */}
+   855→                      {esDup && (
+   856→                        <span
+   857→                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-900 text-blue-300 font-mono text-[9px] font-bold tracking-wider"
+   858→                          aria-label={`Gemela confirmada — ${etiquetaDupDe(f)}`}
+   859→                        >
+   860→                          <CheckIcon className="w-3 h-3" strokeWidth={2.5} />
+   861→                          {etiquetaDupDe(f)}
+   862→                        </span>
+   863→                      )}
+   864→                      {/* D66 — KIT e14-decode-unico-precalor-v1 (T3.5): mini-señal
+   865→                          PREPARADA — la fila PENDIENTE ya tiene master esperando
+   866→                          (el precalor trabajó en la espera; D45 intacto: la fila
+   867→                          NO procesa sola). Chip pequeñito y nada más — sin % ni
+   868→                          promesas. Flag transitorio (muere con la recarga). */}
+   869→                      {f.estado === "PENDIENTE" && f.precalentada === true && (
+   870→                        <span
+   871→                          className="px-1.5 py-0.5 rounded-full border border-brand-green/40 text-brand-green/90 font-mono text-[9px] font-bold uppercase tracking-wider"
+   872→                          title="El precalor ya decodificó esta fila (master listo)"
+   873→                        >
+   874→                          PREPARADA
+   875→                        </span>
+   876→                      )}
+   877→                      {/* e64-qr T-0.2 — chip del estado de la CAPA 0 QR (solo
+   878→                          presencia, JAMÁS payload — red line 10). QR ✗ solo en
+   879→                          LISTA: en PENDIENTE/PROCESANDO aún no hay veredicto
+   880→                          (honestidad del kit). Resuelve la mitad de los
+   881→                          reportes «no lee»: el dueño VERÁ cuándo sí leyó. */}
+   882→                      {f.qrEstado === "leido" && (
+   883→                        <span
+   884→                          className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-emerald-300/90"
+   885→                          aria-label="QR leído"
+   886→                        >
+   887→                          QR ✓
+   888→                        </span>
+   889→                      )}
+   890→                      {f.qrEstado === "sin-payload" && f.estado === "LISTA" && (
+   891→                        <span
+   892→                          className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-slate-400"
+   893→                          aria-label="QR no decodificado"
+   894→                        >
+   895→                          QR ✗
+   896→                        </span>
+   897→                      )}
+   898→                      {/* KIT e14-solo-warp-qr-v1 — DRY RUN: veredicto del
+   899→                          pre-scan QR (stamp qrLeido — RAM del lote). QR ✓ =
+   900→                          el warp produjo payload; QR ✗ = la lectura no pudo;
+   901→                          AUSENTE = el pre-scan no llegó a leer (sin bytes/
+   902→                          decode — jamás inventar, regla de oro 4). Mismo
+   903→                          estilo del chip QR de e64 — SOLO-VISUAL, cero OCR. */}
+   904→                      {f.qrLeido === true && (
+   905→                        <span
+   906→                          className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-emerald-300/90"
+   907→                          aria-label="QR leído por el pre-scan (prueba en seco)"
+   908→                        >
+   909→                          QR ✓
+   910→                        </span>
+   911→                      )}
+   912→                      {f.qrLeido === false && (
+   913→                        <span
+   914→                          className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-red-300/90"
+   915→                          aria-label="QR no leído por el pre-scan (prueba en seco)"
+   916→                        >
+   917→                          QR ✗
+   918→                        </span>
+   919→                      )}
+   920→                      {/* KIT e14-masiva-tiempos-v1 (PR-1): la DUPLICADA señala
+   921→                          a su original — transparencia total del dedup. */}
+   922→                      {f.estado === "DUPLICADA" && f.dupOf && (
+   923→                        <span className="font-mono text-[9px] uppercase tracking-wider text-gray-400 truncate">
+   924→                          ≡ {filas.find((o) => o.id === f.dupOf)?.nombre ?? "OTRA FILA"}
+   925→                        </span>
+   926→                      )}
+   927→                      {/* e65-dedup-enviadas-v1 (T-7): chip YA ENVIADA — la
+   928→                          fila nació con contenido ya enviado (bytes/dhash);
+   929→                          cero OCR, cero envío. JUNTO al chip DUPLICADA. */}
+   930→                      {f.estado === "YA-ENVIADA" && (
+   931→                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/60 text-emerald-300 bg-emerald-500/10">
+   932→                          YA ENVIADA
+   933→                        </span>
+   934→                      )}
+   935→                      {f.estado === "ERROR" && f.error && (
+   936→                        <span className="font-mono text-[9px] uppercase tracking-wider text-red-400/80 truncate">
+   937→                          {f.error}
+   938→                        </span>
+   939→                      )}
+   940→                      {f.motivo && f.statusActa === "RECHAZADA" && (
+   941→                        <span className="font-mono text-[9px] uppercase tracking-wider text-red-400/80">
+   942→                          {f.motivo}
+   943→                        </span>
+   944→                      )}
+   945→                    </div>
+   946→                  </div>
+   947→
+   948→                  {/* % del proceso · score · página · nivel (div:nth-of-type(3)) */}
+   949→                  <div className="flex items-center gap-2 sm:gap-3 shrink-0 font-mono text-[10px] uppercase tracking-wider text-gray-400">
+   950→                    <span
+   951→                      className={`font-mono text-[10px] sm:text-[11px] font-black tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1.5 transition-all ${
+   952→                        esActiva || f.estado === "PROCESANDO"
+   953→                          ? "border-[#10b981]/60 bg-[#10b981]/15 text-[#10b981] shadow-xs"
+   954→                          : f.estado === "LISTA"
+   955→                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+   956→                            : f.estado === "ERROR"
+   957→                              ? "border-red-500/40 bg-red-500/10 text-red-400"
+   958→                              : "border-slate-800 bg-[#090d12] text-slate-400"
+   959→                      }`}
+   960→                      title={`Progreso del proceso del acta: ${pctProceso}%`}
+   961→                    >
+   962→                      {(esActiva || f.estado === "PROCESANDO") && (
+   963→                        <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-ping shrink-0" />
+   964→                      )}
+   965→                      {pctProceso}%
+   966→                    </span>
+   967→                    {typeof f.score === "number" && (
+   968→                      <span className="text-gray-200 font-bold hidden md:inline" title="Score de calidad">
+   969→                        {f.score.toFixed(1)}
+   970→                      </span>
+   971→                    )}
+   972→                    <span className="hidden sm:inline">{f.pagina ?? "-/-"}</span>
+   973→                    {f.nivel && (
+   974→                      <span
+   975→                        className={`hidden sm:inline px-1.5 py-0.5 rounded border ${
+   976→                          f.nivel === "AUTO"
+   977→                            ? "border-brand-green/50 text-brand-green"
+   978→                            : "border-brand-borderdim text-gray-500"
+   979→                        }`}
+   980→                      >
+   981→                        {f.nivel}
+   982→                      </span>
+   983→                    )}
+   984→                  </div>
+   985→
+   986→                  {/* Acciones por fila */}
+   987→                  <div className="flex items-center gap-1.5 shrink-0">
+   988→                    {/* KIT e14-masiva-tiempos-v1 (PR-1): rescate del kit §2 —
+   989→                        reprocesar la gemela COMPLETA por si el dhash la
+   990→                        confundió (fotos distintas parecidas en thumb).
+   991→                        e65 (T-7): también sobre YA-ENVIADA — ÚNICO escape del
+   992→                        dueño para estampar QR/OCR en una fila ya enviada. */}
+   993→                    {(f.estado === "DUPLICADA" || f.estado === "YA-ENVIADA") && (
+   994→                      <button
+   995→                        type="button"
+   996→                        onClick={() => void procesarIgual(f.id)}
+   997→                        aria-label={`Reprocesar ${f.nombre} completo aunque esté duplicada`}
+   998→                        className="min-h-[44px] px-2.5 rounded-lg border border-amber-400/50 text-amber-400 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+   999→                      >
+  1000→                        PROCESAR IGUAL
+  1001→                      </button>
+  1002→                    )}
+  1003→                    {f.estado === "LISTA" && (
+  1004→                      <button
+  1005→                        type="button"
+  1006→                        onClick={() => void abrirActa(f.id)}
+  1007→                        aria-label={`Abrir ${f.nombre} en revisión`}
+  1008→                        className="min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-brand-border text-gray-300 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-brand-green hover:text-brand-green focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/60"
+  1009→                      >
+  1010→                        ABRIR
+  1011→                      </button>
+  1012→                    )}
+  1013→                    {/* D59 — KIT e14-info-acta-filas-v1 (T4): «REINTENTAR» del
+  1014→                        mockup en filas ERROR — re-encola (PENDIENTE) para que
+  1015→                        PROCESAR la procese; SIN_ARCHIVO_ORIGINAL si el
+  1016→                        registro no trae el archivo original (honesto). */}
+  1017→                    {f.estado === "ERROR" && (
+  1018→                      <button
+  1019→                        type="button"
+  1020→                        onClick={() => void reintentar(f.id)}
+  1021→                        aria-label={`Reintentar ${f.nombre}: re-encolar para procesar`}
+  1022→                        className="min-h-[44px] px-2.5 rounded-lg border border-red-500/40 text-red-300 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
+  1023→                      >
+  1024→                        REINTENTAR
+  1025→                      </button>
+  1026→                    )}
+  1027→                    <button
+  1028→                      type="button"
+  1029→                      // FIX (auditoría 2-b #15): QUITAR fuera de la fila en
+  1030→                      // PROCESO — el desenlace de la foto activa ya está en
+  1031→                      // vuelo (el runner descarta el resultado de una fila
+  1032→                      // quitada, pero el botón mentía sobre lo que hace).
+  1033→                      disabled={f.estado === "PROCESANDO"}
+  1034→                      onClick={() => void quitar(f.id)}
+  1035→                      aria-label={`Quitar ${f.nombre} de la cola`}
+  1036→                      className="min-h-[44px] min-w-[44px] rounded-lg text-gray-400 hover:text-red-400 font-mono text-[10px] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
+  1037→                    >
+  1038→                      QUITAR
+  1039→                    </button>
+  1040→                  </div>
+  1041→                  </div>
+  1042→
+  1043→                  {/* D65 (T3.3) — BARRA DE VIDA (h-1, tipografía discreta — no
+  1044→                      compite con los chips): EN COLA → vacía + «#N de M»;
+  1045→                      PROCESANDO preparando/detección/verificación → animada
+  1046→                      SIN número; OCR con fracción REAL → determinada + %;
+  1047→                      LISTA → 100% verde un instante (transitorio); ERROR →
+  1048→                      roja. aria-live SOLO en el texto de etapa (los cambios
+  1049→                      de % van en un hermano sin aria-live — kit T3.5).
+  1050→                      SPRINT-B (B2): re-cableada del bloque original D65
+  1051→                      (perdido en el zip 4f9c871 — AUDITORIA-REGRESION
+  1052→                      #1/#2). Plomería intacta: recienListas/enColaVida/
+  1053→                      posCola/colaVida + ocrPct (honesto, solo dato real). */}
+  1054→                  {(enColaVida || esActiva || f.estado === "ERROR" || (f.estado === "LISTA" && recienListas.has(f.id))) && (
+  1055→                    <div className="mt-2">
+  1056→                      {esActiva && ocrPct != null ? (
+  1057→                        <div
+  1058→                          role="progressbar"
+  1059→                          aria-valuemin={0}
+  1060→                          aria-valuemax={100}
+  1061→                          aria-valuenow={ocrPct}
+  1062→                          aria-label={`OCR ${ocrPct}%`}
+  1063→                          className="h-1 rounded-full bg-white/10 overflow-hidden"
+  1064→                        >
+  1065→                          <div className="h-full bg-brand-green" style={{ width: `${ocrPct}%` }} />
+  1066→                        </div>
+  1067→                      ) : esActiva ? (
+  1068→                        <div className="h-1 rounded-full bg-brand-green/40 animate-pulse" aria-hidden />
+  1069→                      ) : f.estado === "ERROR" ? (
+  1070→                        <div className="h-1 rounded-full bg-red-500/40" aria-hidden />
+  1071→                      ) : f.estado === "LISTA" ? (
+  1072→                        <div className="h-1 rounded-full bg-brand-green" aria-hidden />
+  1073→                      ) : (
+  1074→                        <div className="h-1 rounded-full bg-white/5" aria-hidden />
+  1075→                      )}
+  1076→                      {(enColaVida || (esActiva && progreso)) && (
+  1077→                        <p className="mt-1 font-mono text-[11px] tabular-nums tracking-wider text-gray-400 uppercase truncate">
+  1078→                          <span aria-live="polite">
+  1079→                            {enColaVida
+  1080→                              ? `EN COLA #${posCola} DE ${colaVida.length}`
+  1081→                              : progreso
+  1082→                                ? etiquetaVida({ etapa: progreso.etapa })
+  1083→                                : ""}
+  1084→                          </span>
+  1085→                          {ocrPct != null && <span> {ocrPct}%</span>}
+  1086→                        </p>
+  1087→                      )}
+  1088→                    </div>
+  1089→                  )}
+  1090→                </li>
+  1091→              );
+  1092→
+  1093→            })}
+  1094→            {visibles.length === 0 && (
+  1095→              <li className="rounded-xl border border-brand-borderdim bg-brand-surface/40 px-3 py-4 text-center font-mono text-[10px] uppercase tracking-wider text-gray-400">
+  1096→                SIN FILAS CON ESE FILTRO
+  1097→              </li>
+  1098→            )}
+  1099→          </ul>
+  1100→        )}
+  1101→      </div>
+  1102→    </section>
+  1103→  );
+  1104→}
+  1105→
