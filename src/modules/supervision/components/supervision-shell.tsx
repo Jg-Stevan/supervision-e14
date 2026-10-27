@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   Activity,
   Bell,
@@ -25,6 +30,11 @@ import { StatusDot } from "./status-dot";
 import { DatosProvider, useDatos } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
+// KIT carga-masiva-supervision-v1 (D27) — la vista CARGA MASIVA es el módulo
+// digitalizador trasplantado (src/modules/digitalizador/**). ÚNICO seam de
+// UI supervision→digitalizador: la vista recibe `onVerEnMonitor` para
+// aterrizar un acta publicada en el visor (props, sin contexto cruzado).
+import { MasivaView as VistaCargaMasiva } from "@/modules/digitalizador/components/e14/screens/MasivaView";
 
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
  * (el export estático sigue siendo trivial: una sola página).
@@ -32,7 +42,12 @@ import { VistaAnomalias } from "./vista-anomalias";
  * KIT SUP-5 (D20): "notificaciones" e "informes" quedan DORMIDAS — sus
  * componentes y su lógica en el store permanecen intactos e inalcanzables
  * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista. */
-type VistaId = "monitor" | "notificaciones" | "anomalias" | "informes";
+type VistaId =
+  | "monitor"
+  | "carga-masiva"
+  | "notificaciones"
+  | "anomalias"
+  | "informes";
 
 /**
  * D20 — Retiro TEMPORAL de módulos (no borrado): las entradas cuyo
@@ -64,8 +79,8 @@ const ITEMS_NAV: ItemNav[] = [
   {
     Icono: Upload,
     etiqueta: "Carga masiva",
-    deshabilitado: true,
-    tooltip: "Se conectará al digitalizador (fase de integración)",
+    // D27 — activada: el digitalizador (módulo masiva) vive en este repo.
+    vista: "carga-masiva",
   },
   {
     Icono: Bell,
@@ -223,10 +238,18 @@ function ContenidoNav({
  * sus componentes (T1.3); sus archivos quedan dormidos en el repo. Si
  * llegaran por estado (imposible hoy), caen al monitor.
  */
-function VistaActual({ vista }: { vista: VistaId }) {
+function VistaActual({
+  vista,
+  onVerEnMonitor,
+}: {
+  vista: VistaId;
+  onVerEnMonitor?: ComponentProps<typeof VistaCargaMasiva>["onVerEnMonitor"];
+}) {
   switch (vista) {
     case "anomalias":
       return <VistaAnomalias />;
+    case "carga-masiva":
+      return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
     default:
       return <VistaMonitor />;
   }
@@ -250,7 +273,8 @@ export function SupervisionShell() {
 }
 
 function ShellInterno() {
-  const { notificacionesNoLeidas, anomaliasAbiertas, cargando } = useDatos();
+  const { notificacionesNoLeidas, anomaliasAbiertas, cargando, abrirVisor } =
+    useDatos();
   const [vista, setVista] = useState<VistaId>("monitor");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -352,7 +376,15 @@ function ShellInterno() {
               <div className="h-96 w-full animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
             </div>
           ) : (
-            <VistaActual vista={vista} />
+            <VistaActual
+              vista={vista}
+              onVerEnMonitor={(puestoId, mesaId, tipo) => {
+                // D27 — VER EN MONITOR: aterriza el acta publicada en el
+                // visor (cambia a MONITOR y abre el acta de esa mesa).
+                elegirVista("monitor");
+                abrirVisor(puestoId, mesaId, tipo ? { tipo } : undefined);
+              }}
+            />
           )}
         </main>
       </div>

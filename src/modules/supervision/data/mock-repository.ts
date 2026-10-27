@@ -37,6 +37,8 @@ import type {
 } from "../domain/types";
 import type { PuestoDivipola } from "../domain/divipola";
 import { zonaParaUI } from "../domain/divipola";
+import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
+import { consultarActaRuntime } from "./actas-runtime";
 import { ID_ENLACE_ROMA, CARGAR_CATALOGO } from "./divipola-adapter";
 import { crearRandomDeterministico } from "../domain/acta";
 import type { SupervisionRepository } from "./supervision-repository";
@@ -533,6 +535,94 @@ function refrescarPuesto(puesto: Puesto): void {
   puesto.estadoGlobal = estadoGlobalTrasMesas(puesto.estadoGlobal, mesas);
 }
 
+/**
+ * KIT carga-masiva-supervision-v1 (D27) — superpone el registro RUNTIME del
+ * digitalizador (fotos + encabezado impreso) sobre el acta base del mock.
+ * Las fotos del runtime MANDAN en las páginas que traen; el resto cae al
+ * acta base o al sintético D18. Si la mesa no tenía acta (NO_INICIADO), se
+ * construye una mínima honesta desde el registro runtime.
+ */
+function fusionarActaRuntime(
+  base: ActaMesa | null,
+  runtime: import("./actas-reales/actas-reales").ActaRealLista,
+  puesto: Puesto,
+  mesa: Mesa
+): ActaMesa {
+  const horaRuntime = (() => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} LOCAL`;
+  })();
+  const acta: ActaMesa = base
+    ? {
+        ...base,
+        formularios: { ...base.formularios },
+        historial: [...base.historial],
+        fotos: { ...(base.fotos ?? {}) },
+      }
+    : {
+        id: `#MSV-${runtime.idEnlace.replace(/_/g, "")}-${runtime.mesa}`,
+        mesaId: mesa.id,
+        puestoId: puesto.id,
+        horaCarga: horaRuntime,
+        formularios: { TRANSMISION: [], DELEGADOS: [] },
+        historial: [
+          {
+            hora: horaRuntime,
+            titulo: "CARGA MASIVA",
+            detalle: "Acta recibida del digitalizador (carga masiva)",
+            nivel: "NEUTRAL",
+          },
+        ],
+        version: 1,
+      };
+
+  // Formularios: tamaño y estado por página — runtime con foto → VALIDA;
+  // sin foto → lo que diga el base, o PENDIENTE.
+  const formularios: Record<FormularioTipo, PaginaActa[]> = {
+    TRANSMISION: [...acta.formularios.TRANSMISION],
+    DELEGADOS: [...acta.formularios.DELEGADOS],
+  };
+  for (const formulario of ["TRANSMISION", "DELEGADOS"] as FormularioTipo[]) {
+    const slotRuntime = runtime.fotos[formulario];
+    if (!slotRuntime) continue;
+    const total = Math.max(
+      slotRuntime.length,
+      formularios[formulario].length,
+      1
+    );
+    const paginas: PaginaActa[] = [];
+    for (let i = 0; i < total; i++) {
+      paginas.push({
+        numero: i + 1,
+        estado: slotRuntime[i]
+          ? "VALIDA"
+          : (formularios[formulario][i]?.estado ?? "PENDIENTE"),
+      });
+    }
+    formularios[formulario] = paginas;
+  }
+  acta.formularios = formularios;
+
+  // Fotos: el runtime manda donde trae foto; el base cubre el resto.
+  const fotos = { ...(acta.fotos ?? {}) } as NonNullable<ActaMesa["fotos"]>;
+  for (const formulario of ["TRANSMISION", "DELEGADOS"] as FormularioTipo[]) {
+    const slotRuntime = runtime.fotos[formulario];
+    if (!slotRuntime) continue;
+    const baseSlot = fotos[formulario] ?? [];
+    const total = Math.max(slotRuntime.length, baseSlot.length);
+    const fusion: (import("../domain/acta").FotoActa | null)[] = [];
+    for (let i = 0; i < total; i++) {
+      fusion.push(slotRuntime[i] ?? baseSlot[i] ?? null);
+    }
+    fotos[formulario] = fusion;
+  }
+  acta.fotos = fotos;
+
+  // Encabezado impreso verbatim del runtime (se muestra, no se interpreta).
+  acta.impresion = runtime.impresion;
+  return acta;
+}
+
 function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   if (!f) return true;
   if (f.pais && puesto.codigoPais !== f.pais) return false;
@@ -672,8 +762,48 @@ export const mockSupervisionRepository: SupervisionRepository = {
   async getActaDeMesa(puestoId: string, mesaId: string) {
     const puesto = puestoPorId(puestoId);
     const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+    if (!puesto || !mesa) return conLatencia(null);
+    // KIT carga-masiva (D27): el registro RUNTIME del digitalizador manda —
+    // sus fotos se superponen al acta base (o la construyen si la mesa era
+    // NO_INICIADO y no tenía acta). Sin runtime, camino de siempre.
+    const runtime = consultarActaRuntime(puestoId, mesaId);
+    if (runtime) {
+      return conLatencia(
+        fusionarActaRuntime(obtenerActa(mesa, puesto), runtime, puesto, mesa)
+      );
+    }
     // null = mesa sin transmisión (NO_INICIADO) o inexistente.
-    return conLatencia(puesto && mesa ? obtenerActa(mesa, puesto) : null);
+    return conLatencia(obtenerActa(mesa, puesto));
+  },
+
+  // ── KIT carga-masiva-supervision-v1 (D27) — estado del monitor ──────────
+
+  async registrarCargaMasiva(puestoId, mesaId, formulario, paginas) {
+    await conLatencia(true);
+    const puesto = puestoPorId(puestoId);
+    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+    if (!puesto || !mesa) return null;
+    // Las partes de la mesa reflejan lo recibido: TRANSMISION pág n →
+    // transmisión pn ok (1|2); DELEGADOS → delegados presentes. Idempotente
+    // por construcción (ok → ok).
+    if (formulario === "TRANSMISION") {
+      for (const pagina of paginas) {
+        if (pagina === 1) mesa.transmision.p1 = { ...mesa.transmision.p1, estado: "ok" };
+        if (pagina === 2) mesa.transmision.p2 = { ...mesa.transmision.p2, estado: "ok" };
+      }
+    } else {
+      mesa.delegados.p1 = "ok";
+      mesa.delegados.p2 = "ok";
+    }
+    refrescarMesa(mesa);
+    mesa.ultimaCarga = "Hace 1 min";
+    refrescarPuesto(puesto);
+    const notificacion = crearNotificacion(
+      "sistema",
+      `CARGA MASIVA — MESA ${mesa.id} (${etiquetaDePuesto(puesto)})`
+    );
+    NOTIFICACIONES.unshift(notificacion);
+    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
   },
 
   async aprobarActa(actaId: string, observacion: string) {

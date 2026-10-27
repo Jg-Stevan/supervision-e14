@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   basePath,
   images: { unoptimized: true },
   trailingSlash: true,
+  // El módulo digitalizador trasplantado (masiva) fue construido con
+  // StrictMode OFF en su repo origen (digielect14): doble montaje dispara
+  // doble pre-warm OCR/worker — se conserva su premisa (D27).
+  reactStrictMode: false,
+  // Mismo patrón del repo origen: orígenes de dev permitidos (previews).
+  allowedDevOrigins: ["*.space-z.ai", "localhost", "127.0.0.1"],
 };
 
 export default nextConfig;

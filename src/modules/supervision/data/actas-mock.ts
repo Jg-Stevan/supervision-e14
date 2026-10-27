@@ -390,7 +390,7 @@ export function aprobarActaMock(
  * La observación es obligatoria (T5.2); el kit no la imprime en el evento. */
 export function confirmarRescanActaMock(
   actaId: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- obligatoria (T5.2); el kit no la imprime en el evento del rescan
+   
   _observacion: string
 ): ActaMesa | null {
   const hallada = actaEnCache(actaId);

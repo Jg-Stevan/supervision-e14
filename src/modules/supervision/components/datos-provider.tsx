@@ -16,6 +16,7 @@ import {
   TRANSICION_CADA_SEGUNDOS,
 } from "../data/mock-repository";
 import { tieneActa } from "../data/actas-mock";
+import { suscribirseActasRuntime } from "../data/actas-runtime";
 import type {
   ActaMesa,
   FormularioTipo,
@@ -248,6 +249,39 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       notificaciones: [notificacion, ...prev.notificaciones],
     }));
     toast.success(notificacion.texto);
+  }, []);
+
+  // ── KIT carga-masiva-supervision-v1 (D27) — publicaciones del
+  // digitalizador: cada acta que la CARGA MASIVA envía aterriza aquí → el
+  // repo actualiza la mesa (partes + KPIs derivados) y el monitor la refleja
+  // en vivo, junto con la notificación del evento. Patrón idéntico a
+  // reinspeccionar/notificar (el store del shell manda — kit SUP-3 T4).
+  useEffect(() => {
+    const repo = mockSupervisionRepository;
+    const desuscribir = suscribirseActasRuntime(async (evento) => {
+      const resultado = await repo.registrarCargaMasiva(
+        evento.idEnlace,
+        evento.mesa,
+        evento.formulario,
+        evento.paginas
+      );
+      if (!resultado) return;
+      const puestos = await repo.getPuestos();
+      setEstado((prev) => ({
+        ...prev,
+        puestos,
+        mesasPorPuesto: {
+          ...prev.mesasPorPuesto,
+          [evento.idEnlace]:
+            prev.mesasPorPuesto[evento.idEnlace]?.map((m) =>
+              m.id === resultado.mesa.id ? resultado.mesa : m
+            ) ?? [resultado.mesa],
+        },
+        notificaciones: [resultado.notificacion, ...prev.notificaciones],
+      }));
+      toast.success(resultado.notificacion.texto);
+    });
+    return desuscribir;
   }, []);
 
   // ── T5/T6 — estado de lectura/revisión (solo UI, sin persistencia) ─────

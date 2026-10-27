@@ -483,3 +483,55 @@ Ajuste aplicado (opción ofrecida por el kit):
   quedan intactas; Roma mesa 1 sigue EXACTA al mockup (sintético
   `#A92-F`); el acta real solo altera el estado del ancla (NO_INICIADO →
   COMPLETO en los KPIs derivados — la única transición de estado del kit).
+
+## D27 — TRASPLANTE del módulo CARGA MASIVA (digitalizador → supervision, kit carga-masiva-supervision-v1)
+
+- **Decisión:** el módulo de carga masiva del digitalizador
+  (`digielect14` — cola persistente IndexedDB, dedup de 3 capas
+  SHA-256/QR/dhash, pre-scan QR, runner OCR OpenCV+RapidOCR vía
+  `@jg-stevan/scanner-core`, clasificación DIVIPOL, envío automático de
+  ÓPTIMAS) se TRASPLANTA a este repo como `src/modules/digitalizador/**`
+  (lib/e14 del motor + vista MasivaView + adaptador store-e14). El
+  placeholder deshabilitado del nav queda ACTIVADO como vista
+  `"carga-masiva"` (D11 — estado interno, sin rutas).
+- **Se completan mutuamente (el join D22 en runtime):** cada envío de la
+  cola masiva publica el acta en `data/actas-runtime.ts` — la
+  clasificación AUTO del OCR (dept/mun/zona/puesto/mesa/tipo/página)
+  se normaliza a `idEnlace` (dep 2 · mun 3 · zona 3 · puesto 2 dígitos),
+  se valida contra el catálogo (D25 a/b/d — cuarentena `BLOQUEADA: …`
+  en consola y en la bandeja si falla) y la foto procesada viaja como
+  `FotoActa` + encabezado impreso verbatim (`ImpresionActa`, D23/D24 —
+  se muestra, no se interpreta). `mock-repository` superpone el registro
+  runtime en `getActaDeMesa` y `registrarCargaMasiva` actualiza las
+  partes de la mesa (TRANSMISION pág n → transmisión pn ok · DELEGADOS →
+  delegados ok) + KPIs derivados + notificación — el monitor refleja la
+  carga EN VIVO. El caption del visor prefiere la etiqueta/barcode del
+  acta runtime sobre el manifest estático.
+- **Adaptador (punto de costura):** `store-e14.ts` reemplaza al store del
+  flujo individual de digielect14 con la superficie EXACTA que consume
+  el motor (5 puntos del kit T3): `online`, `registrarEnvioMasiva`
+  (→ publicación fire-and-forget), `contarMotivoNoEnvioActa` (mismas
+  claves), `abrirActaMasiva`/`cerrarActaMasiva` (→ modal de revisión de
+  la bandeja, con VER EN MONITOR cuando el acta aterrizó en el catálogo
+  — seam por props con el shell: `onVerEnMonitor`).
+- **Limpieza del port (sin experimentos):** quedan FUERA del trasplante
+  los experimentos flag-OFF del repo origen y su maquinaria: warp de
+  ingesta (K2), quad-streaming/turno de clasificación (P4/P5), rescate
+  ZXing del pre-scan (§F.3), cascada OCR Tesseract (K3, sin motor),
+  DRY RUN «solo QR», hand-off P1, prioridad W1, dhash-resize (NO-GO) +
+  sus flags de `FlagsApp` y sus whitelists; también `tools/bench-*`,
+  `lab/`, `scripts/qa-*`, PanelDev, informe/obs-de-informe y los tests
+  vitest (su harness queda en el repo origen). El núcleo productivo
+  (runner, cola IDB, dedup 3 capas, identidad QR/serie, precalor,
+  watchdog, gama adaptativa, histórico, ledger-remoto fail-soft) llega
+  INTACTO.
+- **Límites honestos del port:** sin backend (D8) — la "publicación" es
+  memoria de sesión (recargar restablece; §0-5); el ledger remoto D1 de
+  idempotencia queda SIN endpoint (su cliente fail-soft sigue —
+  "ledger remoto indisponible — continúo"; el histórico IDB
+  `e14-masiva-historico-v1` conserva la dedup de enviadas). Los assets
+  del motor (modelos RapidOCR ~16 MB, onnxruntime, OpenCV, workers,
+  zxing wasm, divipol.json) viven en `public/` con la misma convención
+  `NEXT_PUBLIC_BASE_PATH` del repo origen. `reactStrictMode: false` se
+  conserva (premisa del motor: pre-warm idempotente por diseño de su
+  repo origen).

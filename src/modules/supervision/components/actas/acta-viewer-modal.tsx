@@ -134,12 +134,16 @@ function VisorAbierto() {
     actaActual?.fotos?.[visorActa.tipo]?.[paginaActiva - 1] ?? null;
   const impresion = actaActual?.impresion;
   const esActaReal = Boolean(fotoActiva && impresion);
-  // Etiqueta/barcode impresos del formulario visible (del manifest, D24 —
-  // el loader es memoizado en módulo: consultar aquí es gratis).
+  // Etiqueta/barcode impresos del formulario visible: primero el ACTA en
+  // memoria (impresion.etiquetaFormulario/barcode — viaja con las actas del
+  // RUNTIME de carga masiva, D27), luego el manifest estático (D24 — el
+  // loader es memoizado en módulo: consultar aquí es gratis).
   const registroReal =
     cargarActasReales().actas[`${visorActa.puestoId}::${visorActa.mesaId}`];
-  const etiquetaReal = registroReal?.etiquetasImpresas[visorActa.tipo];
-  const barcodeReal = registroReal?.barcodesImpresos[visorActa.tipo];
+  const etiquetaReal =
+    impresion?.etiquetaFormulario ??
+    registroReal?.etiquetasImpresas[visorActa.tipo];
+  const barcodeReal = impresion?.barcode ?? registroReal?.barcodesImpresos[visorActa.tipo];
 
   // Caja de layout = bounding box exacta del papel escalado + rotado
   // (giros de 90° intercambian ancho/alto — el scroll del canvas es fiel).
@@ -324,10 +328,10 @@ function VisorAbierto() {
                         filter: filtroDeContraste(contraste),
                       }}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element --
-                          asset importado estáticamente del módulo (D24);
+                      {/* La foto real se muestra tal cual (D23) — asset
+                          importado estáticamente del módulo (D24);
                           next/image está prohibido por el kit §0-3 */}
-                      <img
+<img
                         src={fotoActiva.src}
                         width={FOTO_ANCHO_BASE}
                         height={fotoAltoBase}

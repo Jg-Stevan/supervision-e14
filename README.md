@@ -141,8 +141,39 @@ el botón ☰ (se cierra con ✕, Escape o clic fuera).
 3. ~~Centro de notificaciones~~ — dormido (código intacto).
 4. ~~Generar informes~~ — dormido (código intacto).
 
-Carga masiva queda como placeholder deshabilitado (integración futura
-con el digitalizador).
+## Carga Masiva — el digitalizador ya vive aquí (kit `carga-masiva-supervision-v1` / D27)
+
+**ACTIVA.** El módulo de carga masiva del digitalizador
+(`digielect14`) fue **trasplantado** a este repo como
+`src/modules/digitalizador/**` (kit D27): sueltas/seleccionas N fotos
+(JPG/PNG/HEIC), PDF, ZIP o RAR → cola persistente (IndexedDB) → sondeo
+QR en ingesta → runner secuencial con el pipeline REAL (detección
+OpenCV → warp → calidad → OCR RapidOCR → gate → clasificación DIVIPOL)
+→ envío automático de ÓPTIMAS → **publicación en el monitor**.
+
+**Cómo se completan mutuamente (join `idEnlace` D22 en runtime):**
+
+1. La clasificación AUTO del OCR se normaliza a `idEnlace`
+   (`88_680_005_86` → PORTUGAL · Sábado Lisboa · mesa 003) y se valida
+   contra el catálogo (D25 — cuarentena `BLOQUEADA: …` si falla).
+2. La foto procesada + el encabezado impreso aterrizan en
+   `data/actas-runtime.ts` (la contraparte en runtime del loader
+   estático SUP-6).
+3. `registrarCargaMasiva` mueve las partes de la mesa (TRANSMISIÓN
+   pág n → parte ok), los KPIs derivados y la notificación — el
+   monitor refleja la carga **en vivo**.
+4. El visor de actas muestra la **foto real** con el caption
+   «ACTA REAL · …» y el encabezado impreso verbatim (D23/D24); desde
+   el modal de revisión de la bandeja, **VER EN MONITOR** aterriza el
+   acta publicada directamente en el visor.
+
+**Límites honestos:** sin backend (D8) — la publicación es memoria de
+sesión (recargar restablece; §0-5); el ledger remoto D1 de idempotencia
+queda sin endpoint (su cliente fail-soft sigue; el histórico IndexedDB
+conserva la dedup de enviadas). Los assets del motor (modelos RapidOCR
+~16 MB, onnxruntime, OpenCV, workers, zxing) viven en `public/`.
+La limpieza del port (sin experimentos flag-OFF ni benches) está
+documentada en `docs/DECISIONS.md` D27.
 
 ## Visor de Actas (kit `SUP-4` / `actas-v1`)
 

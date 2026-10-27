@@ -10,7 +10,7 @@
  * implementación sigue siendo el mock.
  */
 
-import type { ActaMesa } from "../domain/acta";
+import type { ActaMesa, FormularioTipo } from "../domain/acta";
 import type {
   Anomalia,
   FiltrosPuestos,
@@ -60,4 +60,18 @@ export interface SupervisionRepository {
     actaId: string,
     observacion: string
   ): Promise<{ acta: ActaMesa; notificacion: Notificacion } | null>;
+
+  // ── KIT carga-masiva-supervision-v1 (D27) ───────────────────────────────
+  /** CARGA MASIVA — registra la llegada de una acta del digitalizador:
+   * actualiza las partes de la mesa según el formulario/páginas recibidas
+   * (TRANSMISION pág n → transmisión pn ok · DELEGADOS → delegados ok),
+   * recalcula mesa + puesto y genera la notificación del evento. El ACTA
+   * (fotos/encabezado) vive en `actas-runtime.ts` — este método solo mueve
+   * el ESTADO del monitor. null si el puesto/mesa no existen. */
+  registrarCargaMasiva(
+    puestoId: string,
+    mesaId: string,
+    formulario: FormularioTipo,
+    paginas: number[]
+  ): Promise<{ mesa: Mesa; notificacion: Notificacion } | null>;
 }
