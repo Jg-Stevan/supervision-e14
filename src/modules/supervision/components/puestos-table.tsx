@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { ChevronDown, Eye } from "lucide-react";
 import {
   Collapsible,
@@ -61,6 +61,10 @@ function MiniProgreso({ pct, color }: { pct: number; color: string }) {
   );
 }
 
+/** D42 — KIT e14-monitor-memo-v1: array vacío ESTABLE — `?? []` creaba una
+ *  identidad nueva por fila por render y rompía el memo de PuestoRow. */
+const MESAS_VACIAS: Mesa[] = [];
+
 interface PuestosTableProps {
   puestos: Puesto[];
   /** Mesas del store del shell (kit SUP-3 T4 — ya no se piden al repo
@@ -85,13 +89,18 @@ export function PuestosTable({
     () => new Set(expandidoInicialId ? [expandidoInicialId] : [])
   );
 
-  const toggle = (id: string) =>
-    setExpandidos((prev) => {
-      const siguiente = new Set(prev);
-      if (siguiente.has(id)) siguiente.delete(id);
-      else siguiente.add(id);
-      return siguiente;
-    });
+  // D42 — toggle ESTABLE (useCallback): el onToggle por fila ya no cambia
+  // de identidad en cada render del padre → el memo de PuestoRow aplica.
+  const toggle = useCallback(
+    (id: string) =>
+      setExpandidos((prev) => {
+        const siguiente = new Set(prev);
+        if (siguiente.has(id)) siguiente.delete(id);
+        else siguiente.add(id);
+        return siguiente;
+      }),
+    []
+  );
 
   if (puestos.length === 0) {
     return (
@@ -134,9 +143,9 @@ export function PuestosTable({
           <PuestoRow
             key={puesto.id}
             puesto={puesto}
-            mesas={mesasPorPuesto[puesto.id] ?? []}
+            mesas={mesasPorPuesto[puesto.id] ?? MESAS_VACIAS}
             abierto={expandidos.has(puesto.id)}
-            onToggle={() => toggle(puesto.id)}
+            onToggle={toggle}
             mesaEnAccionId={mesaEnAccionId}
             onReinspeccionar={onReinspeccionar}
             onNotificar={onNotificar}
@@ -147,7 +156,12 @@ export function PuestosTable({
   );
 }
 
-function PuestoRow({
+/** D42 — KIT e14-monitor-memo-v1: PuestoRow va MEMOIZADO. Con el contexto
+ *  de datos memoizado (D42 en datos-provider) y props estables (toggle
+ *  estable, MESAS_VACIAS estable), una fila solo re-renderiza cuando SUS
+ *  datos cambiaron — el re-render completo de 949 filas por tecla/tick
+ *  desaparece. */
+const PuestoRow = memo(function PuestoRow({
   puesto,
   mesas,
   abierto,
@@ -159,7 +173,7 @@ function PuestoRow({
   puesto: Puesto;
   mesas: Mesa[];
   abierto: boolean;
-  onToggle: () => void;
+  onToggle: (id: string) => void;
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
   onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
@@ -171,7 +185,11 @@ function PuestoRow({
   // NO_INICIADO).
   const tieneActa = mesas.some((m) => m.estadoMesa !== "NO_INICIADO");
   return (
-    <Collapsible open={abierto} onOpenChange={(v) => v !== abierto && onToggle()} asChild>
+    <Collapsible
+      open={abierto}
+      onOpenChange={(v) => v !== abierto && onToggle(puesto.id)}
+      asChild
+    >
       <tbody>
         <CollapsibleTrigger asChild>
           <TableRow
@@ -253,4 +271,4 @@ function PuestoRow({
       </tbody>
     </Collapsible>
   );
-}
+});

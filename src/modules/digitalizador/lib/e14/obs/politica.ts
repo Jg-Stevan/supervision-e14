@@ -155,6 +155,11 @@ export function leerOverridesFlags(): Partial<FlagsApp> {
     // byte-idéntico a hoy en TODOS los dispositivos — D74) sería
     // inalcanzable (DOBLE whitelist — cada puerta su línea).
     if (typeof o.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = o.masivaAdaptativoGama;
+    // KIT e14-capa0-qr-worker-v1 (D40) — mismo criterio: sin esta línea el
+    // override localStorage del kill-switch `capa0QrWorker` (false = cadena
+    // de capa 0 en main byte-idéntica a hoy) sería inalcanzable (DOBLE
+    // whitelist — cada puerta su línea).
+    if (typeof o.capa0QrWorker === "boolean") limpio.capa0QrWorker = o.capa0QrWorker;
     return limpio;
   } catch {
     return {};

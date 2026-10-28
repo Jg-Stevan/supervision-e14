@@ -1033,3 +1033,108 @@ modelos OCR cuantizados (int8/latin ~5 MB — −11 MB de red), capa 0 QR al wor
 peor bloqueo de UI ~15-17 s), round-trip base64 en cola.ts (writes completos ×2 por
 desenlace), React.memo/virtualización del monitor (949 filas × re-renders), Service Worker
 de pre-cache, y backend real del ledger de envíos (el «envío» hoy es memoria de sesión).
+
+---
+
+## D40 — KIT e14-capa0-qr-worker-v1: CAPA 0 QR al WORKER (el hilo UI deja de comerse los ~15-17 s SYNC)
+
+**Fecha:** 2026-02-15 · **Origen:** auditoría externa (prioridad gama baja). La capa 0 del
+runner (sin `qrPrevio`) corría la cadena completa en el HILO PRINCIPAL: peor caso SIN QR
+documentado ~15-17 s SYNC (identidad-qr.ts/D74). La ironía gama baja: el cortocircuito D36
+pausa el sondeo justo ahí → sin `qrPrevio` → el decode pesado SIEMPRE bloqueaba la UI en el
+dispositivo que menos lo aguanta.
+
+**Qué cambia.**
+1. **`capa0-qr.worker.ts` NUEVO** (worker jsQR-only): MISMA cadena de main en el MISMO
+   orden — ladderBase → recorte-600 (jsQR) → barrido → barrido-nitido → barrido-binarizado
+   → rotaciones 90/180/270 → rescate 4096 (MISMA condición de main: canvas clampeado ≥2048)
+   — con el presupuesto de pared D74 chequeado ANTES de cada tier pesado (`vencido()` igual
+   que main). Decode del Blob con `createImageBitmap(EXIF from-image)` + OffscreenCanvas
+   (receta del sondeo worker) + `bitmap.close()` inmediato. **Red line e73 RESPETADA:
+   zxing-wasm JAMÁS en el worker** (el grafo del bundle es jsQR-only — smoke verificado:
+   0 `zxing`, 0 `process.env`, 133.8 KB).
+2. **`capa0-qr.client.ts` NUEVO** (cliente hermano del sondeo): worker precompilado en
+   `public/scanner/capa0-qr.worker.js` (IIFE via `scripts/build-capa0-worker.mjs` con
+   Bun.build — cero dependencias nuevas, kit §0.3), peticiones con `id` correlativo
+   (map de pendientes — soporta pool=2 del D38 amplificado), hard-kill
+   `presupuesto+1500 ms` → terminate + respawn perezoso + pendientes a null,
+   feature-detect Worker/OffscreenCanvas, kill-switch leído EN el llamado.
+3. **Runner (punto único):** flag ON → `decodificarQrCapa0Worker(blob, plan de gama)`.
+   Worker corrió y no leyó nada → MAIN corre SOLO el tier zxing (`decodificarQrDeCapture`
+   con opción ADITIVA `soloZxing` — recorte-600 con los 2 binarizadores + barrido zxing,
+   sin re-pagar los jsQR ya corridos en el worker) ⇒ **cobertura EXACTA a la cadena de
+   hoy**. Worker NO corrió (kill-switch OFF/feature-detect/hard-kill) ⇒ camino de hoy
+   byte-idéntico (decode main + cadena completa con SU presupuesto de gama).
+4. **Módulo puro:** `QR_ROTACIONES`, `ladderBaseDePixeles`, `nitidezQrDePixeles`,
+   `binarizadaQrDePixeles` (+NITIDEZ_K, BINARIZADA_*) se MOVIERON byte a byte a
+   `qr-pixeles.ts` (MISMA doctrina del FIX DICTAMEN-e73 §3.1) y identidad-qr.ts los
+   re-exporta — cero diffs en consumidores.
+5. **Flag:** `capa0QrWorker` (default true, ADITIVO AL FINAL — D57) + doble whitelist
+   (flags.ts + politica.ts). false = byte-idéntico a hoy.
+
+**Verificación E2E (sandbox, agent-browser, tsc 0 · lint 0/0):** override
+`{sondeoQrPrecoz:false, prescanQrCola:false}` (fuerza capa 0 sin `qrPrevio`) → upload
+acta-sim-intermedia.jpg + gemela byte-exacta → PROCESAR COLA: traza
+`capa0-qr worker fila=…-0 tier=base ms=515 payload=CSSz/bGj…` (el WORKER leyó el QR,
+hilo UI libre) → payload registrado como original → OCR → **ENVIADA**;
+Conteos `1 enviadas, 0 errores`; 0 errores de consola/dev.log. Build del worker:
+`bun scripts/build-capa0-worker.mjs` (133.8 KB, red lines limpias).
+
+## D41 — KIT e14-lectura-raw-v1: cola SIN el peaje materializar↔compactar
+
+**Fecha:** 2026-02-15 · **Origen:** auditoría externa. Cada `leerRegistro` materializaba
+las fotos (FileReader blob→dataURL de 2-16 MB) y cada `guardarRegistro` posterior las
+re-compactaba (`atob` byte a byte, síncrono en main) — el ciclo completo se pagaba en cada
+marca de dedup/veto/estado/re-save, varias veces por fila.
+
+**Qué cambia.**
+1. **`cola.ts`: `leerRegistroRaw(id)` NUEVO** — el `get` crudo SIN `materializarFotos`.
+   `leerRegistro` queda byte-idéntico (raw + materializar) para los callers que SÍ
+   muestran fotos (REVISIÓN/bandeja). Compatibilidad §2.1 intacta (legacy pre-e68 pasa
+   tal cual; el próximo write lo compacta).
+2. **Runner — los 5 reads que NO consumen dataURLs pasan a RAW:** (a) copia de gemelas
+   `reutilizarResultadoCritica` (las fotos del original viajan ahora como BLOBS del
+   registro: `fotoOriginalBlob/fotoProcesadaBlob` explícitos — compactarRegistro aplica
+   el MISMO cleanup §3 sobre ellos: DUPLICADA → fotoOriginalBlob fuera; legacy con
+   dataURLs dentro del acta se compacta igual al guardar), (b) des-marca
+   reprocesa-completo, (c) re-save dedup/qrPayload/qrEstado, (d) read principal de
+   `procesarUno` (solo consume `archivo`; el desenlace NUEVO reemplaza el acta
+   wholesale), (e) re-lectura del watchdog (solo `archivo`). `store.ts` intocado
+   (sus reads son UI/de-ingesta — materializar ahí es no-op o necesario).
+
+**Verificación E2E (misma corrida D40):** gemela byte-exacta marcada en ingesta
+(`dedup … instantanea sha256 dupOf=…`) → al procesar:
+`dedup fila=…-1 dupOf=…-0 reutiliza status=DUPLICADA score=8.5 ms=19` — copia completa
+(LISTA, thumb, título, serie, métricas de copia) en 19 ms con lecturas RAW y fotos como
+Blobs; recarga → la cola restaura 2/2 con sus desenlaces. tsc 0 · lint 0/0.
+
+## D42 — KIT e14-monitor-memo-v1: ticker en contexto HOJA + valor memoizado + PuestoRow memo
+
+**Fecha:** 2026-02-15 · **Origen:** auditoría externa. El monitor re-renderizaba ~14k
+componentes cada 5 s SOLO para «Sincronizado hace Xs»: `segundosDesdeSync` viajaba en el
+estado grande → el valor del contexto se re-creaba cada tick → 949 filas reconciliadas
+sin que nada cambiara (y el OCR competiendo con ese trabajo durante cargas masivas).
+
+**Qué cambia.**
+1. **Ticker → contexto hoja** (`ContextoTicker` + `useDatosTicker`): los segundos viven
+   FUERA del estado grande; el ÚNICO consumidor es el chip de la cabecera (monitor-global
+   → prop). El contexto de DATOS solo cambia con eventos REALES (transiciones,
+   publicaciones, acciones).
+2. **`valor` del contexto MEMOIZADO** (todas las acciones ya eran useCallback estables).
+3. **`PuestoRow` MEMOIZADO** + props estables: `toggle` a useCallback, `onToggle` firma
+   `(id) => void` (pasado directo — adiós arrow inline por fila) y `MESAS_VACIAS`
+   constante de módulo (el `?? []` creaba identidad nueva por fila y rompía el memo).
+   Neto por tick de 5 s: re-render de los componentes raíz + chip; las 949 filas quedan
+   memoizadas (baja de ~14k componentes reconciliados a ~decenas).
+4. La pausa `document.hidden` del D39 se conserva intacta (mismo effect, nuevo estado).
+
+**Verificación E2E (misma corrida):** monitor con 950 `<tbody>` (949 filas + header),
+ticker vivo `Sincronizado hace 10s → 15s` con KPIs derivados correctos
+(232/44/199/474 — invariante D38/D39 del dueño), 0 errores de consola/dev.log.
+tsc 0 · lint 0/0. **Pendiente consciente:** virtualización de la tabla y coalescing de
+publicaciones quedan para decisión del dueño (el memo ya elimina el peaje por tick).
+
+**Qué NO se tocó (conservador):** pipeline OCR/bridge/watchdog, criterios/score/reglas de
+negocio, sondeo/prescan/dhash, persistMs (contrato D61), `store.ts` de la masiva,
+workflows (D39: la retractación del hallazgo de CI quedó registrada — `branches: [main]`
+SIEMPRE fue válido).

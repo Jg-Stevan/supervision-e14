@@ -6,7 +6,7 @@ import { KpiCard, type TonoKpi } from "./kpi-card";
 import { PuestosTable } from "./puestos-table";
 import { ResumenChips } from "./resumen-chips";
 import { EsqueletoMonitor } from "./esqueleto";
-import { useDatos } from "./datos-provider";
+import { useDatos, useDatosTicker } from "./datos-provider";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
 /**
@@ -22,11 +22,14 @@ export function VistaMonitor() {
     puestos,
     mesasPorPuesto,
     resumen,
-    segundosDesdeSync,
     mesaEnAccionId,
     reinspeccionar,
     notificar,
   } = useDatos();
+  // D42 — KIT e14-monitor-memo-v1: los segundos del ticker viven en su
+  // contexto hoja — este componente (y las 949 filas) ya NO re-renderiza
+  // cada 5 s; solo el chip del ticker lo hace.
+  const { segundos: segundosDesdeSync } = useDatosTicker();
   const [filtros, setFiltros] = useState<FiltrosPuestos>({});
 
   const filtrados = useMemo(() => {
