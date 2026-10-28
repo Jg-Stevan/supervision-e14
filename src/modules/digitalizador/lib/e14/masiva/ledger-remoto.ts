@@ -37,6 +37,20 @@ export const LEDGER_RUTA = "/api/e14/envios";
 /** Timeout del check (kit §A.3: 3 s — fallo → seguir como hoy). */
 export const LEDGER_TIMEOUT_MS = 3_000;
 
+/**
+ * D29 — ADAPTACIÓN supervision-e14: este repo es EXPORT ESTÁTICO a GitHub
+ * Pages (KIT INSTRUCCIONES-sup-e14-pages-v1 §3/D8) — no tiene backend ni
+ * binding D1: la route /api/e14/envios vive SOLO en digielect14. Aquí cada
+ * llamada era un 404 garantizado (ruido de red + latency muerta en el
+ * runner). La propia doctrina del kit dice que el remoto es una red EXTRA,
+ * jamás una dependencia → en este repo la red extra directamente NO EXISTE
+ * y se corta en el punto ÚNICO (check → null, registrar → silencio, válvula
+ * → LEDGER_AUSENTE_E14): mismos contratos, mismos callers, cero cambios en
+ * runner.ts/store.ts. Si supervision-e14 gana algún día un backend con la
+ * route, poner LEDGER_REMOTO_ACTIVO = true restaura la ruta completa.
+ */
+export const LEDGER_REMOTO_ACTIVO = false as boolean;
+
 /** SHA-256 de un TEXTO (el payload QR) → hex 64. null si crypto.subtle no
  *  está (contexto raro — el caller salta el remoto, conservador). El hash
  *  de dedup.ts (hashBytesDeArchivo) es de ARCHIVO; este es del STRING del
@@ -95,6 +109,9 @@ export async function consultarEnvioRemoto(
   payloadHash: string,
   deps: { traer?: TraerLedger } = {},
 ): Promise<RespuestaCheck | null> {
+  // D29 — sin backend en supervision-e14 → «ledger indisponible» SIN red
+  // (idéntico al contrato de timeout/500: el caller continúa como hoy).
+  if (!LEDGER_REMOTO_ACTIVO) return null;
   try {
     const r = await postConTimeout({ action: "check", payloadHash }, deps);
     if (!r.ok) return null;
@@ -117,6 +134,8 @@ export async function registrarEnvioRemoto(
   datos: DatosRegistroRemoto,
   deps: { traer?: TraerLedger } = {},
 ): Promise<void> {
+  // D29 — fire-and-forget ya era best-effort: sin backend → no-op silencioso.
+  if (!LEDGER_REMOTO_ACTIVO) return;
   const r = await postConTimeout(
     {
       action: "registrar",
@@ -137,6 +156,8 @@ export async function registrarEnvioRemoto(
 export async function vaciarLedgerRemoto(
   deps: { traer?: TraerLedger } = {},
 ): Promise<{ ok: boolean; error?: string }> {
+  // D29 — la válvula del dueño tampoco tiene receptor aquí (honesto, no simulado).
+  if (!LEDGER_REMOTO_ACTIVO) return { ok: false, error: "LEDGER_AUSENTE_E14" };
   try {
     const traer = deps.traer ?? fetch;
     const r = await traer(`${LEDGER_RUTA}?confirmacion=e14-reset-pruebas`, {

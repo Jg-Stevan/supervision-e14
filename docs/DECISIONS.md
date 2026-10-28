@@ -568,3 +568,40 @@ solo registro local, sin inventar ubicación).
   fuera de la vista (se anula al abrirla). La semilla no cuenta.
 - **CSS:** utilidades `scroll-panel` (scrollbar fina webkit/Firefox) y
   `fila-llegada` (destello 1.6 s de llegada nueva) en globals.css.
+
+## D29 — LEDGER REMOTO de envíos: CORTADO en supervision-e14 (repo estático sin backend)
+
+**Problema:** el módulo masiva trasplantado (D27) conserva su cliente del ledger
+remoto (`ledger-remoto.ts`, kit WAVE3 §A.3) que consulta/registra cada envío en
+`/api/e14/envios`. Esa route vive SOLO en digielect14 (D1 vía OpenNext). En
+supervision-e14 cada llamada era un 404 garantizado: ruido en la red y en el
+log del dev server, y latencia muerta en el runner (timeout 3 s era el peor
+caso por fila).
+
+**Por qué NO se implementó la route aquí:** supervision-e14 es export estático
+a GitHub Pages (`output: "export"`, KIT INSTRUCCIONES-sup-e14-pages-v1 §3/D8).
+Una route handler no existe en un deploy estático y además rompería el build
+de Pages — la vía correcta no era un backend nuevo.
+
+**Decisión:** válvula de punto ÚNICO en `ledger-remoto.ts` — constante
+exportada `LEDGER_REMOTO_ACTIVO = false` (D29) que corta las tres funciones en
+su entrada, respetando el CONTRATO ORIGINAL de cada una (doctrina del
+conservador: el remoto es una red EXTRA, jamás una dependencia):
+
+- `consultarEnvioRemoto()` → `null` (= «ledger indisponible»: el caller
+  continúa como hoy — idéntico al contrato de timeout/500).
+- `registrarEnvioRemoto()` → `return` silencioso (ya era fire-and-forget
+  best-effort).
+- `vaciarLedgerRemoto()` → `{ ok: false, error: "LEDGER_AUSENTE_E14" }`
+  (honesto: no simula éxito; la válvula no tiene receptor aquí y jamás tuvo
+  caller en este repo).
+
+Cero cambios en runner.ts/store.ts (mismos callers, mismos contratos). Si
+algún día supervision-e14 gana un backend con la route, basta
+`LEDGER_REMOTO_ACTIVO = true` para restaurar la ruta completa intacta.
+
+**Verificación:** dos corridas E2E nuevas (acta-sim-intermedia.jpg → ALEMANIA
+Frankfurt MESA 012; acta-sim-baja.jpg → EGIPTO El Cairo MESA 001) con cola
+procesada completa (ENVIADA AUTO, QR ✓, 100%): cero `POST /api/e14/envios`
+nuevos en el log del dev server (16 antes → 16 después, todas previas al
+gate), cero errores de consola, recepción contando las llegadas en vivo.
