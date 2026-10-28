@@ -27,6 +27,14 @@
  *   el espejo en RAM de la corrida VIVA sigue funcionando para la UI.
  */
 
+// KIT ocr-router-v1 fase 4 — el informe se AUTO-IDENTIFICA: el tier §4.4
+// aplicado por la capa adaptativa (gama.ts) y la resolución EN VIVO del
+// motor OCR (rapidocr.ts — decisión del router + modelos REALES + origen +
+// motivo). Observador pasivo igual que el resto del kit: getters de módulo
+// que jamás lanzan, cero coste nuevo, el pipeline NUNCA cambia por esto.
+import { planGamaActual } from "../gama";
+import { motorOcrActual } from "../ocr/rapidocr";
+
 const DB_NOMBRE = "e14-masiva-metricas-v1";
 const DB_VERSION = 1;
 const STORE_ACTAS = "actas"; // keyPath "id" — una fila por desenlace (re-put idempotente)
@@ -472,6 +480,25 @@ export async function exportarInformeMetricas(): Promise<string> {
       rq.onerror = () => resolve([]);
     });
   }
+  // KIT ocr-router-v1 fase 4 — AUTO-IDENTIFICACIÓN del informe (cierra el
+  // hueco de evidencia del A/B real del dueño 2026-10-28: dos informes con
+  // el mismo kit donde era imposible saber qué motor corrió en cada uno).
+  // ADITIVO AL FINAL (patrón D57 — mismo criterio de hangResumen/enviosDetalle):
+  // los informes previos no cambian de forma; quien lee el JSON viejo no se
+  // entera. Ausencia = honesta (sin detección de gama / motor no iniciado).
+  //  · gama: tier §4.4 aplicado por la capa adaptativa + efectivo (si hubo
+  //    degradación reactiva en la corrida).
+  //  · motorOcr: decisión del router + modelos que REALMENTE cargaron
+  //    (pueden diferir si la sonda de carga de v5 falló ⇒ v4) + origen y
+  //    motivo. Ausente = el motor OCR no inició en esta sesión.
+  let gama: { tier: string; tierEfectivo: string } | null = null;
+  try {
+    const g = planGamaActual();
+    gama = { tier: g.tier, tierEfectivo: g.tierEfectivo };
+  } catch {
+    gama = null;
+  }
+  const motor = motorOcrActual(); // getter puro del módulo — jamás lanza
   return JSON.stringify(
     {
       generado: new Date().toISOString(),
@@ -480,6 +507,8 @@ export async function exportarInformeMetricas(): Promise<string> {
       nucleos: typeof navigator !== "undefined" ? navigator.hardwareConcurrency ?? null : null,
       corridas,
       actas,
+      ...(gama && { gama }),
+      ...(motor && { motorOcr: motor }),
     },
     null,
     2,
