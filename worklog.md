@@ -127,3 +127,25 @@ Task ID: 6 (cont.) — RESULTADO
 - (b) BOTÓN REINICIAR ENVÍOS: COMPLETADO y verificado E2E (ver D33 en docs/DECISIONS.md). 3 ediciones: historico.ts (resetearIndicePayload), store.ts (reiniciarEnvios), MasivaView.tsx (botón 2 toques). Prueba: YA-ENVIADA reproducida → reinicio → ledger 0 → mismo archivo nace PENDIENTE → pipeline completo (score 8.5). Commit + PUSH (lección D32).
 - NOTA: badge «GAMA BAJO · ADAPTADO» SÍ existe (chip D74 en MasivaView) — la pérdida real del D32 no-pushed era menor a lo estimado.
 - SIGUIENTE (c): métricas por acta/etapa + informe en Carga Masiva — usar obs/ existente; con el reset ya se puede re-pasar el lote real del dueño para medir.
+
+Task ID: 6 (cont.) — ESTADO DEL PUSH
+- El sandbox NO tiene credenciales de GitHub (git push → «could not read Username»). El commit 7c1c22e (D33) está LOCAL en main.
+- Artefactos para el dueño (convención download/, gitignoreado): download/supervision-e14-d33.bundle (bundle completo de main) + download/patches-d33/0001-*.patch (patch único).
+- El dueño aplica con: `git fetch /ruta/supervision-e14-d33.bundle main:main` o `git am 0001-*.patch` — y PUSHEA desde su máquina. LECCIÓN D32 reincidente: sin push, el siguiente reinicio de sandbox vuelve a comerse el trabajo.
+
+---
+Task ID: 7
+Agent: Z.ai Code (orquestador principal)
+Task: (c) MÉTRICAS por acta individual + INFORME de comportamiento en Carga Masiva — el dueño quiere saber cuánto tarda cada acta, en qué etapa tarda, y tener datos reales para diagnosticar fallos. D33 ya pushed a origin/main (7c1c22e) con token del dueño — riesgo D32 neutralizado.
+
+Plan (leer si la sesión muere):
+1. Explorar observabilidad existente (obs/, tipos.ts FilaMasiva, runner.ts traces «pipeline total=», sondeoQrMs) — NO duplicar lo que ya mide.
+2. Módulo metricas.ts en masiva/: registro por acta {id, archivo, etapas: {sondeoQr, cola, prescan, ocr, clasificacion, envio}, wall, desenlace, score} + agregados de corrida {inicio, fin, total, porEtapa, fallos}. Persistir en IDB NUEVA (e14-masiva-metricas-v1) — sobrevive recargas (prevención del dueño).
+3. UI «INFORME» en MasivaView: panel con duración total de corrida, desglose por etapa (barras), top actas más lentas, fallos con motivo. Botón EXPORTAR (JSON descargable) para que el dueño lo archive.
+4. E2E agent-browser con lote real del dueño (o actas sintéticas) — validar números contra traces del logger.
+5. D34 en DECISIONS.md + commit + PUSH inmediato.
+
+Task ID: 7 — RESULTADO
+- (c) MÉTRICAS + INFORME: COMPLETADO y verificado E2E (ver D34 en docs/DECISIONS.md). metricas.ts (IDB e14-masiva-metricas-v1 + 4 hooks fire-and-forget en runner) + InformeCorrida.tsx (panel: KPIs, barras por etapa, actas más lentas con cuello, fallos, historial de corridas, export JSON, limpiar). Dato real del sandbox: OCR = 98% del trabajo pipeline (2.0s de 2.1s) — la palanca sigue siendo el OCR.
+- Contrato verificado: REINICIAR ENVÍOS (D33) NO toca las métricas (IDBs separadas) → el dueño compara corridas antes/después del reset.
+- Commit + PUSH inmediato (lección D32/D33).

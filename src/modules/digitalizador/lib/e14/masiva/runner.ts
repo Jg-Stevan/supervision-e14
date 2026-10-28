@@ -69,6 +69,16 @@ import {
   matarYRecrearWorkers,
 } from "./runner-watchdog";
 import { marcarFila, marcarVida, vidaDe, vidas } from "./runner-vida";
+// D34 — KIT e14-metricas-corrida-v1: observador PASIVO de tiempos por acta
+// (corrida inicia/fin + desenlace LISTA/ERROR + copia) — fire-and-forget,
+// el pipeline NUNCA cambia por esto (metricas.ts §0).
+import {
+  cerrarCorridaMetrica,
+  iniciarCorridaMetrica,
+  registrarMetricaCopia,
+  registrarMetricaDesenlace,
+  registrarMetricaError,
+} from "./metricas";
 import { logger } from "../../logger";
 // e63f — KIT e63f-autoenvio-v1 (F2): re-lectura interna pre-«repetir-primero».
 // Lógica pura en masiva/relectura.ts (testeable headless); aquí solo la
@@ -353,6 +363,19 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
       envioEnCola: actaCopia.hashSha256 === "EN COLA",
       serie: serieCopia, // e63k — el mapa de identidad cubre gemelas copiadas
       error: null,
+    });
+    // D34 — métricas: la COPIA jamás pagó pipeline (guard e72) — totalMs
+    // propio ≈0 y ocrMs=0 EXPLÍCITO como datos reales; etapas heredadas
+    // quedan FUERA (no son trabajo de esta fila).
+    registrarMetricaCopia({
+      filaId: fila.id,
+      nombre: fila.nombre,
+      status: actaCopia.status,
+      score: actaCopia.score,
+      totalMs: actaCopia.diagnostico?.tiempos?.totalMs ?? null,
+      esperaMs: actaCopia.diagnostico?.tiempos?.esperaMs ?? null,
+      ocrMs: actaCopia.diagnostico?.tiempos?.ocrMs,
+      dedup: registro.dedup,
     });
     return true;
   } catch {
@@ -1557,6 +1580,15 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       serie: identidad?.serie ?? null,
       error: null,
     });
+    // D34 — métricas por acta (observador pasivo — fire-and-forget): el
+    // desglose de etapas YA existe en actaFinal.diagnostico.tiempos.
+    registrarMetricaDesenlace({
+      filaId: fila.id,
+      nombre: fila.nombre,
+      acta: actaFinal,
+      sondeoQrMs: fila.sondeoQrMs,
+      dedup: registro?.dedup,
+    });
   } catch (err) {
     // Errores de IDB/decode/pipeline NUNCA tumban la UI (kit §3): la
     // entrada pasa a ERROR con motivo corto (repetible — quitar y
@@ -1571,6 +1603,13 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       error: motivoCorto(err),
       infoTitulo: null,
       thumb: undefined,
+    });
+    // D34 — métricas: desenlace ERROR (totalMs null — jamás inventar).
+    registrarMetricaError({
+      filaId: fila.id,
+      nombre: fila.nombre,
+      error: motivoCorto(err),
+      sondeoQrMs: fila.sondeoQrMs,
     });
     if (registro) {
       try {
@@ -1671,8 +1710,10 @@ export function iniciarRunner(): void {
   rescatesCorrida = 0; // WAVE3 §B — techo del rescate por CORRIDA
   colaSesionIniciada = true; // e63g FASE 1: sesión viva — el swap puede rearrancar
   useMasivaStore.setState({ corriendo: true });
+  iniciarCorridaMetrica(); // D34 — abre corrida de métricas (fire-and-forget)
   void bucle().finally(() => {
     corriendoFlag = false;
+    cerrarCorridaMetrica(); // D34 — cierra la corrida (drenada o pausada)
     useMasivaStore.setState({ corriendo: false, progreso: null });
   });
 }

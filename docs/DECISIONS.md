@@ -755,3 +755,60 @@ pulso) quedó committeado SOLO local y nunca pushed — PERDIDO con el reinicio 
 sandbox (fc9318f no existe en origin). Lo esencial sobrevivió (D30/D31 pushed; gama/
 dedup base llegaron con D27). El número D32 se considera RESERVADO-perdido; esta
 decisión continúa en D33. Lección institucional: push SIEMPRE al cerrar cada tarea.
+
+## D34 — MÉTRICAS por acta + INFORME DE CARGA en el masiva (kit e14-metricas-corrida-v1)
+
+**Pedido literal del dueño (2026-10-28):** «quiero saber cuánto tardó en procesarse
+cada acta (individual) para saber cuáles están tardando más… en el mismo masiva
+podemos agregar como un algo para sacar un informe de cómo se está comportando la
+carga masiva, cuánto está tardando, en qué está tardando para tener datos reales y
+poder diagnosticar bien los fallos».
+
+**Hallazgo que guía el diseño:** los tiempos por acta YA EXISTEN y YA viajan al
+acta (`DiagnosticoActa.tiempos` — procesoMs/calidadMs/ocrMs/totalMs + D61
+esperaMs/decodeMs/detectMs/persistMs/envioMs) y en la fila (sondeoQrMs, dedup,
+etapaAlMorir). Lo que faltaba era VISIBILIDAD + AGREGACIÓN + HISTORIA. Cero
+instrumentación nueva del pipeline: un observador pasivo en 4 puntos.
+
+**Implementación (2 archivos nuevos + 1 edit, fire-and-forget, §0 intocado):**
+
+1. `masiva/metricas.ts` NUEVO — IDB SEPARADA `e14-masiva-metricas-v1` (stores
+   `actas` + `corridas`, índice porCorrida; filas de NÚMEROS, jamás Blob — L7).
+   Hooks: `iniciarCorridaMetrica()` (iniciarRunner — cierra honesta una corrida
+   huérfana antes de abrir la nueva), `registrarMetricaDesenlace()` (desenlace
+   LISTA — lee `actaFinal.diagnostico.tiempos` QUE YA ESTÁ EN SCOPE), 
+   `registrarMetricaCopia()` (reutilizarResultado — totalMs propio ≈0 + ocrMs=0
+   EXPLÍCITO del guard e72; etapas heredadas FUERA), `registrarMetricaError()`
+   (catch — totalMs null, jamás inventar), `cerrarCorridaMetrica()` (finally del
+   bucle). Espejo RAM de la corrida viva + suscripción de UI. Poda a 30 corridas.
+   `cuelloDeEtapas()` PURO: máx de decode/detect/ocr/persist/envio — la espera de
+   cola y el sondeo (ingesta paralela) NO compiten por «cuello».
+2. `screens/InformeCorrida.tsx` NUEVO — panel entre filtros y bandeja: KPIs
+   (actas / trabajo pipeline / OCR p50-p95 / desenlaces), barras «¿EN QUÉ SE VA
+   EL TIEMPO?» (share % del trabajo), + sondeo y + espera como info aparte,
+   ACTAS MÁS LENTAS (top 5 con cuello/score/desenlace, chip COPIA), FALLOS
+   (con motivo), HISTORIAL de corridas (clic cambia la vista), EXPORTAR JSON
+   (descarga completa) y LIMPIAR (escoba 2 toques). Cero ruido: sin corridas el
+   panel NO se renderiza. Misma estética mono/dark del módulo.
+3. `runner.ts` — SOLO los 4 hooks (try/catch interno en cada uno: un fallo de
+   métrica jamás toca el desenlace). `MasivaView.tsx` — import + render del panel.
+
+**Contratos:** D33 (REINICIAR ENVÍOS) NO toca las métricas — IDBs separadas:
+comparar corridas ANTES/DESPUÉS de un reset es exactamente el caso de uso del
+dueño. `vaciar()`/`reiniciarEnvios()` byte a byte. El informe es LOCAL del dueño
+(export manual — sin canal obs nuevo: el canal obs/ mantiene su privacidad
+actaIdHash y otro propósito). Persistencia sobrevive recargas.
+
+**Verificación E2E (sandbox 2 hilos, agent-browser, tsc 0 · lint 0/0):** lote de
+2 actas sintéticas (1 real-pipeline + 1 gemela dhash → COPIA): panel EN CURSO en
+vivo → COMPLETADA · 5.4 s; KPIs ACTAS 2 · TRABAJO 2.1 s · OCR p50/p95 2.0s/2.0s;
+barras DECODE 50 ms (2%) / OCR 2.0 s (98%); sondeo 224 ms · espera en cola
+20.6 s (etiquetada «no es trabajo — es turno»); lentas: acta real 3.4 s cuello
+OCR vs copia 23 ms DUPLICADA. IDB verificada por eval: corrida fin sellado +
+2 actas con cuello/desenlace correctos. Recarga → informe persiste. REINICIAR
+ENVÍOS → cola vacía y el informe INTACTO. Export sin errores de consola. cero
+errores JS/dev.log.
+
+**Qué NO se hizo (consciente):** no se estampa por-fila en la bandeja (el informe
+lo cubre; el acta detallada ya trae tiempos en REVISIÓN); no hay agregados
+trans-corrida en la UI (van en el export); no se toca obs/ ni telemetría.

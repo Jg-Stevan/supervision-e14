@@ -38,6 +38,9 @@ import { prescanYIniciar, usePrescanQrEstado } from "@/modules/digitalizador/lib
 // consume presupuestos de recursos en BAJO/MEDIO (transparencia del dueño).
 import { planGamaActual, refrescarPlanGama, type PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 import type { Acta } from "@/modules/digitalizador/lib/e14/types";
+// D34 — KIT e14-metricas-corrida-v1: informe de comportamiento de la carga
+// (corrida viva + historial + export JSON) — datos reales para diagnosticar.
+import InformeCorrida from "./InformeCorrida";
 import { CheckIcon, StitchStackIcon } from "../icons";
 
 /** Seam de UI (D27): props que el shell de supervision entrega a la vista.
@@ -1001,6 +1004,9 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
             )}
           </div>
         )}
+
+        {/* ---------- D34 — INFORME DE CARGA (se oculta solo sin datos) ---------- */}
+        <InformeCorrida />
 
         {/* ---------- BANDEJA: FILAS (SIN RESTRICCIÓN RÍGIDA DE ALTURA PARA SCROLL FLUIDO) ---------- */}
         {hayCola && (
