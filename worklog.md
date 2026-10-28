@@ -47,3 +47,21 @@ Stage Summary:
 - La vista RECEPCIÓN DE ACTAS está ACTIVA en el nav (badge en vivo) y muestra TODO lo que llega: ingesta inicial (semilla del ancla) + publicaciones en vivo del masiva, con desenlace honesto (publicada/cuarentena D25/sin join).
 - Puntos de costura: recepcion-log es el único log (actas-runtime y store-e14 escriben ahí); la vista consume por suscripción; VER EN MONITOR reutiliza el seam por props D27.
 - Límites honestos: memoria de sesión (D8 — recargar restablece; el histórico durable sigue siendo el IDB del masiva); SIN_JOIN no aterriza en el monitor (no hay join confiable); filas BLOQUEADA/SIN_JOIN no mueven KPIs del monitor (comportamiento D27 intacto).
+
+---
+Task ID: 3
+Agent: Z.ai Code (orquestador principal)
+Task: Verificación final de estado (Task 1 masiva + Task 2 recepción ya completados) — detectado y resuelto el ruido recurrente de POST /api/e14/envios 404 (ledger remoto sin receptor en este repo).
+
+Work Log:
+- Estado heredado verificado: Task 1 (port masiva, commit 4feaf89) y Task 2 (recepción, commit 896670f) completados; dev server :3000 sano (GET / 200).
+- dev.log mostraba POST /api/e14/envios 404 recurrentes: el cliente del ledger remoto (ledger-remoto.ts, WAVE3 §A.3, portado con el masiva) apunta a una route que SOLO existe en digielect14 (D1 vía OpenNext).
+- Descartado implementar la route en supervision-e14: el repo es export estático a GitHub Pages (output: "export", D8) — una route handler no existiría en el deploy y rompería el build de Pages.
+- Gate de punto ÚNICO en ledger-remoto.ts (D29): LEDGER_REMOTO_ACTIVO = false → consultarEnvioRemoto→null (contrato «ledger indisponible»), registrarEnvioRemoto→no-op (ya era fire-and-forget), vaciarLedgerRemoto→{ok:false,LEDGER_AUSENTE_E14}. Cero cambios en runner.ts/store.ts.
+- Verificación: tsc 0 errores; lint 0/0; E2E agent-browser con 2 corridas nuevas (acta-sim-intermedia.jpg → ALEMANIA Frankfurt MESA 012; acta-sim-baja.jpg → EGIPTO El Cairo MESA 001): ENVIADA AUTO ×3 en cola (incluida la fila histórica PORTUGAL MESA 003), QR ✓, 100%, COLA COMPLETADA; conteo de envios en dev.log 16→16 (cero nuevos 404); cero errores de consola; badge RECEPCIÓN DE ACTAS contó la llegada post-reload y la vista mostró la fila PUBLICADA (88_120_015_02 · MESA 012, SCORE 8.5).
+- Commit en main: 8e68a8a (fix + DECISIONS.md D29).
+
+Stage Summary:
+- Los tres entregables quedan cerrados: masiva portado y limpio (D27), recepción en vivo (D28) y el ledger remoto cortado con honestidad de contrato en el repo estático (D29).
+- La completación mutua digielect14↔supervision-e14 queda así: en digielect14 el masiva usa su ledger D1 nativo; en supervision-e14 el masiva alimenta el monitor/recepción y el ledger queda listo para reactivarse con una constante si algún día hay backend.
+- Límite honesto: los 404 históricos ya presentes en dev.log son de sesiones previas al gate (no se borran logs).
