@@ -65,3 +65,21 @@ Stage Summary:
 - Los tres entregables quedan cerrados: masiva portado y limpio (D27), recepción en vivo (D28) y el ledger remoto cortado con honestidad de contrato en el repo estático (D29).
 - La completación mutua digielect14↔supervision-e14 queda así: en digielect14 el masiva usa su ledger D1 nativo; en supervision-e14 el masiva alimenta el monitor/recepción y el ledger queda listo para reactivarse con una constante si algún día hay backend.
 - Límite honesto: los 404 históricos ya presentes en dev.log son de sesiones previas al gate (no se borran logs).
+
+---
+Task ID: 4
+Agent: Z.ai Code (orquestador principal)
+Task: Mejorar los tiempos de procesamiento del módulo masiva (pedido directo del dueño) + preparar los cambios para subir.
+
+Work Log:
+- Exploración (subagente Explore, very thorough): mapa completo del pipeline con presupuestos — OCR domina (12.5-22.6 s de ~21 s), 3-4 pasadas QR redundantes por fila (sondeo→prescan→capa-0 sin compartir resultados), ~5-6 decodes del mismo blob, master a 4032, frío OCR ~27 s tras kill, cola serial con pool 2 + prefetch.
+- Línea base medida con protocolo reproducible (reset IDB → reload → 2 actas sim-extra → click → poll 1 s): wall 15.7 s; pipeline total= 6498+5763 ms; sondeo leyó ambos QR (429-653 ms tier=full) pero prescan y capa-0 re-decodificaban todo.
+- KIT e14-qr-heredado-v1 (D30) implementado — 5 ediciones: campo FilaMasiva.qrPrevio (tipos.ts, aditivo al final), estampa del sondeo en cadenaDedup (store.ts), estampa del prescan en aplicarVeredictoPrescan-registrar + skip por fila + early-exit del boot OpenCV cuando TODAS traen payload (prescan-qr.ts), herencia en la capa 0 del runner con traza hereda-payload (runner.ts). Fallback byte-idéntico cuando qrPrevio está ausente (flags OFF/abort/recarga).
+- Descartado por conservador (documentado en D30): dhash con decode reducido (rompe hashes históricos), tocar la mini-sonda de orientación (regresión de las 12 RECHAZADAS), master 4032 (calidad), doble write persistMs (telemetría D61).
+- Verificación: tsc 0 errores; lint 0/0; E2E agent-browser back-to-back mismo protocolo: wall 15.7 s → 12.8 s (−18 %), trazas «boot omitido» + «hereda-payload ×2», pipeline total= estable (6421+5341 — control OCR intacto), resultados idénticos (clasificación AUTO MESA 001/012, ENVIADA AUTO, QR ✓ 100%), RECEPCIÓN DE ACTAS contó las 2 llegadas, dev.log sin errores, cero POST al ledger (D29 intacto).
+- Commit en main + artefactos renovados en download/ (bundle + patches) para que el dueño los suba a GitHub.
+
+Stage Summary:
+- El masiva procesa más rápido SIN tocar el camino OCR ni las doctrinas de dedup: el payload QR (llave EXACTA de siempre) se lee UNA vez en la capa más temprana disponible y viaja a la identidad por qrPrevio.
+- Presupuesto honesto: −18 % wall en lote pequeño limpio del sandbox; el ahorro crece por fila con fotos grandes/dispositivos lentos y alega el peor caso QR-duro (~15-17 s) cuando el sondeo ya leyó.
+- Lo que domina los tiempos sigue siendo el OCR (rec ~3 s/fila) — siguiente palanca real si el dueño quiere más: calidad/resolución del rec y orientación, ambos con riesgo de calidad (decisión del dueño).
