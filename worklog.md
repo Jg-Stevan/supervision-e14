@@ -271,6 +271,26 @@ Task ID: 11 — RESULTADO (KIT monitor-jornada-v1)
   supervision-e14-monitor-jornada-v1.bundle + patches 0001/0002 + capturas.
 
 ---
+Task ID: 12
+Agent: Z.ai Code (orquestador principal)
+Task: Mejorar los visores de documentos (zoom con rueda del mouse y pellizco táctil) y habilitar edición (recorte/rotar) de actas NO enviadas automáticamente en el módulo masiva.
+
+Work Log:
+- NUEVO supervision/components/actas/visor-zoom.tsx (KIT visor-gestos-v1): primitivo compartido de visor con ZOOM REAL — rueda del mouse anclada al cursor (listener nativo passive:false, deltaMode normalizado, trackpad-pinch ctrlKey con coeficiente mayor), pellizco de 2 dedos anclado al punto medio (Pointer Events + setPointerCapture fail-safe), arrastre para desplazar (1 puntero), doble clic/toque (ajustar ↔ 2.2×), ajuste inicial contain automático (ResizeObserver + re-fit por rotación y fitKey), límites de offset (nada de vacíos) y API imperativa (acercar/alejar/ajustar/fijarZoom) + onZoomChange (espejo del % para la toolbar).
+- acta-viewer-modal.tsx: el canvas vive en VisorZoom (fuera la caja de scroll y su math de zoom); toolbar opera por ref; % de zoom real visible; botón AJUSTAR nuevo (Scan); límites compartidos [0.3, 4] con acta-toolbar.tsx (LIMITE_ZOOM actualizado). Rotación/contraste/pantalla completa intactos.
+- acta-toolbar.tsx: separador + botón "Ajustar a la pantalla" + % tabular; etiquetas de los botones de zoom documentan los gestos («también con la rueda del mouse o pellizco»).
+- MasivaView.tsx — ModalRevisor (KIT editor-masiva-v1): foto vive en VisorZoom (hint flotante «ZOOM: RUEDA O PELLIZCO · MOVER: ARRASTRA · DOBLE TOQUE: AJUSTAR», canvas h-[44vh]/sm:h-[52vh], modal max-w-3xl). Actas SIN envío automático ganan barra EDITAR FOTO: ROTAR (90° horneo por canvas vía rotateProcessedDataUrl) y RECORTAR (modo propio: foto estática + overlay pointer-events para arrastrar el rect en % + exterior atenuado por box-shadow + APLICAR hornea recortarDataUrl NUEVO en image-utils.ts); chip EDITADA + DESHACER (restaura la foto pre-edición de la sesión). Enviadas AUTO: mismo visor mejorado, sin editor (pedido del dueño).
+- store-e14.ts: acción editarActaActual(patch) — parche inmutable de actaActual sin tocar id; la persistencia ya existía (sincronizarAlVolver re-persiste en IDB + thumb fresco + fila al cerrar el modal).
+- Fix proactivo: setPointerCapture bajo try/catch en visor-zoom y en el overlay de recorte (pointerIds sintéticos/automation lanzan NotFoundError y abortaban el gesto — visto en dev.log durante la verificación).
+- Verificación E2E agent-browser (:3000): visor del dashboard — ajuste inicial 34%, rueda ±(34→129→34%), botones (34→53%), arrastre con clamp (x centrado, y +50px), pinza 3× (34→103%), doble toque vuelve al ajuste; masiva — acta real subida y procesada ENVIADA AUTO (visor mejorado sin editor + zoom legible del acta), acta dañada (drop sintético del 55% superior) → RECHAZADA BAJO 4.9 (no enviada) → editor visible: ROTAR hornea 90° (chip EDITADA + DESHACER), RECORTAR dibuja y aplica (foto recortada), DESHACER restaura, ciclo editar→cerrar→reabrir conserva la edición (IDB round-trip); móvil 390px — visor dashboard (toolbar 2 filas, pinza 30→83%) y modal masiva con editor OK. lint 0/0 · tsc 0.
+- Commits en main: feat(visores) + docs(worklog Task 12).
+
+Stage Summary:
+- Ambos visores (dashboard y masiva) comparten el MISMO primitivo VisorZoom: zoom con rueda/pellizco/arrastre/doble toque, ajuste automático y % real en la toolbar.
+- El módulo masiva completa el ciclo de revisión: actas no enviadas auto se CORRIGEN (recorte/rotación horneadas + persistencia IDB + thumb en bandeja); las enviadas auto se INSPECCIONAN mejor (zoom legible).
+- Límites honestos: DESHACER cubre la sesión de edición actual (tras reabrir, la edición persistida es la fuente de verdad); la edición no re-corre OCR (la clasificación existente se conserva — corregir la foto es para inspección/registro, no re-clasificación).
+
+---
 Task ID: 13
 Agent: Z.ai Code (orquestador principal)
 Task: El dueño pide poner en práctica la estrategia por dispositivo del benchmark OCR

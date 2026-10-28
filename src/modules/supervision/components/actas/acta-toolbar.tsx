@@ -5,20 +5,23 @@ import {
   Maximize,
   Minimize,
   RotateCw,
+  Scan,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { cn } from "cn";
 
 /**
- * Toolbar flotante del visor (kit SUP-4 §2.2 / T4): zoom (pasos 0.25,
- * rango [0.5, 3.0] — los límites deshabilitan su botón), rotación (cicla
+ * Toolbar flotante del visor (kit SUP-4 §2.2 / T4): zoom (multiplicativo
+ * por ref sobre VisorZoom — kit visor-gestos-v1, límites [0.3, 4.0] — los
+ * límites deshabilitan su botón), AJUSTAR (contain), rotación (cicla
  * 0/90/180/270°), contraste (NORMAL → ALTO → NEGATIVO) y pantalla
- * completa. Fondo #121919/90 + backdrop-blur, sin sombras: jerarquía por
- * borde 1px (D14/D17).
+ * completa. El % de zoom es ESPEJO de la escala real (VisorZoom
+ * onZoomChange). Fondo #121919/90 + backdrop-blur, sin sombras:
+ * jerarquía por borde 1px (D14/D17).
  */
 
-const LIMITE_ZOOM = { min: 0.5, max: 3.0 } as const;
+const LIMITE_ZOOM = { min: 0.3, max: 4.0 } as const;
 
 function BotonHerramienta({
   etiqueta,
@@ -59,6 +62,7 @@ export function ActaToolbar({
   zoom,
   onZoomMas,
   onZoomMenos,
+  onAjustar,
   onRotar,
   onContraste,
   pantallaCompleta,
@@ -67,6 +71,7 @@ export function ActaToolbar({
   zoom: number;
   onZoomMas: () => void;
   onZoomMenos: () => void;
+  onAjustar: () => void;
   onRotar: () => void;
   onContraste: () => void;
   pantallaCompleta: boolean;
@@ -79,18 +84,30 @@ export function ActaToolbar({
       className="mx-4 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-center gap-2 rounded-[4px] border border-(--border) bg-(--input)/90 p-1.5 backdrop-blur"
     >
       <BotonHerramienta
-        etiqueta="Acercar"
+        etiqueta="Acercar (también con la rueda del mouse o pellizco)"
         onClick={onZoomMas}
         deshabilitado={zoom >= LIMITE_ZOOM.max}
       >
         <ZoomIn className="size-4" aria-hidden />
       </BotonHerramienta>
+      <span
+        className="min-w-[3.25rem] text-center font-mono text-[10px] tabular-nums tracking-wider text-muted-foreground"
+        aria-label="Nivel de zoom actual"
+      >
+        {Math.round(zoom * 100)}%
+      </span>
       <BotonHerramienta
-        etiqueta="Alejar"
+        etiqueta="Alejar (también con la rueda del mouse o pellizco)"
         onClick={onZoomMenos}
         deshabilitado={zoom <= LIMITE_ZOOM.min}
       >
         <ZoomOut className="size-4" aria-hidden />
+      </BotonHerramienta>
+      <BotonHerramienta
+        etiqueta="Ajustar a la pantalla"
+        onClick={onAjustar}
+      >
+        <Scan className="size-4" aria-hidden />
       </BotonHerramienta>
       <Separador />
       <BotonHerramienta etiqueta="Rotar" onClick={onRotar}>

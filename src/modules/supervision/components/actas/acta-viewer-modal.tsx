@@ -12,6 +12,10 @@ import { ActaToolbar } from "./acta-toolbar";
 import { DocumentoE14 } from "./documento-e14";
 import { ActaAcciones } from "./acta-acciones";
 import { ActaHistorial } from "./acta-historial";
+import {
+  VisorZoom,
+  type VisorZoomHandle,
+} from "./visor-zoom";
 
 /**
  * VISOR DE ACTAS (kit SUP-4 §2.2 / T3-T5): modal por estado (D17 — NO es
@@ -23,8 +27,12 @@ import { ActaHistorial } from "./acta-historial";
  *   zoom/rotación/contraste/pantalla completa vuelven a su estado inicial
  *   en el siguiente uso (T3.1) — sin effect de reset.
  * - Canvas: toolbar flotante (T4), flechas laterales de página, documento
- *   sintético centrado con zoom/rotación/contraste por CSS y caption
- *   inferior. Skeleton del papel durante la carga (~400 ms).
+ *   centrado con zoom/rotación/contraste y caption inferior. KIT
+ *   visor-gestos-v1: el zoom vive en VisorZoom — RUEDA DEL MOUSE (ancla en
+ *   el cursor), PELLIZCO TÁCTIL (2 dedos), arrastre para desplazar y doble
+ *   clic/toque (ajustar ↔ acercar); los botones de la toolbar operan por
+ *   ref. Ajuste inicial automático (contain) por página/foto (fitKey).
+ *   Skeleton del papel durante la carga (~400 ms).
  * - Sidebar (w-80): acciones del supervisor, observaciones, historial y
  *   nota de auditoría. <1024px se apila (T6.1).
  * - Sin sombras en TODO el modal: jerarquía = borde 1px + capas tonales +
@@ -38,15 +46,9 @@ import { ActaHistorial } from "./acta-historial";
 
 type ContrasteModo = "NORMAL" | "ALTO" | "NEGATIVO";
 
-const ZOOM_INICIAL = 0.8;
-const ZOOM_PASO = 0.25;
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 3.0;
-const PAPEL_ANCHO = 794;
-const PAPEL_ALTO = 1123;
-/** SUP-6 (D23): ancho base de la foto real a zoom 1 (ancho completo
- * visible al abrir; el alto por el aspect ratio intrínseco ~1:3 —
- * navegación por scroll vertical). */
+/** KIT visor-gestos-v1: ancho base de la foto real (el ALTO sale del aspect
+ * ratio intrínseco ~1:3). El AJUSTE INICIAL (contain) lo escala para entrar
+ * completo — ver VisorZoom. */
 const FOTO_ANCHO_BASE = 460;
 
 function filtroDeContraste(modo: ContrasteModo): string | undefined {
@@ -79,11 +81,14 @@ function VisorAbierto() {
   } = useDatos();
 
   // Estado local de UI del canvas (vive SOLO con el modal abierto).
-  const [zoom, setZoom] = useState(ZOOM_INICIAL);
+  // KIT visor-gestos-v1: la escala REAL vive dentro de VisorZoom — aquí solo
+  // el espejo para la toolbar (% y deshabilitar botones en los límites).
+  const [zoom, setZoom] = useState(1);
   const [rotacion, setRotacion] = useState(0);
   const [contraste, setContraste] = useState<ContrasteModo>("NORMAL");
   const [pantallaCompleta, setPantallaCompleta] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const visorRef = useRef<VisorZoomHandle>(null);
 
   // Escape cierra + bloqueo de scroll de fondo + foco al panel (T6.5).
   useEffect(() => {
@@ -100,14 +105,9 @@ function VisorAbierto() {
     };
   }, [cerrarVisor]);
 
-  const acercar = useCallback(
-    () => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_PASO) * 100) / 100)),
-    []
-  );
-  const alejar = useCallback(
-    () => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_PASO) * 100) / 100)),
-    []
-  );
+  const acercar = useCallback(() => visorRef.current?.acercar(), []);
+  const alejar = useCallback(() => visorRef.current?.alejar(), []);
+  const ajustar = useCallback(() => visorRef.current?.ajustar(), []);
   const rotar = useCallback(() => setRotacion((r) => (r + 90) % 360), []);
   const ciclarContraste = useCallback(() => {
     setContraste((c) =>
@@ -145,18 +145,14 @@ function VisorAbierto() {
     registroReal?.etiquetasImpresas[visorActa.tipo];
   const barcodeReal = impresion?.barcode ?? registroReal?.barcodesImpresos[visorActa.tipo];
 
-  // Caja de layout = bounding box exacta del papel escalado + rotado
-  // (giros de 90° intercambian ancho/alto — el scroll del canvas es fiel).
-  // Con FOTO REAL la caja usa las dimensiones de la FOTO (no las del
-  // papel A4 794×1123 — kit T5.1).
-  const rotado = rotacion % 180 !== 0;
-  const cajaAncho = Math.round((rotado ? PAPEL_ALTO : PAPEL_ANCHO) * zoom);
-  const cajaAlto = Math.round((rotado ? PAPEL_ANCHO : PAPEL_ALTO) * zoom);
+  // KIT visor-gestos-v1: el alto base de la foto sale del aspect ratio —
+  // el AJUSTE (contain) y la escala los maneja VisorZoom (sin caja de
+  // scroll: transform translate·scale·rotate + límites de offset).
   const fotoAltoBase = fotoActiva
     ? Math.round((fotoActiva.alto / fotoActiva.ancho) * FOTO_ANCHO_BASE)
     : 0;
-  const fotoCajaAncho = Math.round((rotado ? fotoAltoBase : FOTO_ANCHO_BASE) * zoom);
-  const fotoCajaAlto = Math.round((rotado ? FOTO_ANCHO_BASE : fotoAltoBase) * zoom);
+  // Re-ajuste al cambiar página/formulario/mesa (aspect ratio distinto).
+  const fitKey = `${visorActa.puestoId}::${visorActa.mesaId}::${visorActa.tipo}::${paginaActiva}`;
 
   const puedePaginaAnterior = paginaActiva > 1;
   const puedePaginaSiguiente = paginaActiva < paginas.length;
@@ -227,12 +223,15 @@ function VisorAbierto() {
             aria-label="Documento del acta"
             className="relative flex min-h-[40vh] flex-1 flex-col bg-(--surface-lowest) lg:min-h-0 lg:overflow-hidden"
           >
-            {/* Toolbar flotante (permite wrap a 375px — T6.3) */}
+            {/* Toolbar flotante (permite wrap a 375px — T6.3). KIT
+                visor-gestos-v1: los botones operan por REF sobre VisorZoom
+                (una sola fuente de verdad de la escala); el % es espejo. */}
             <div className="absolute inset-x-0 top-4 z-20 flex justify-center px-4">
               <ActaToolbar
                 zoom={zoom}
                 onZoomMas={acercar}
                 onZoomMenos={alejar}
+                onAjustar={ajustar}
                 onRotar={rotar}
                 onContraste={ciclarContraste}
                 pantallaCompleta={pantallaCompleta}
@@ -274,8 +273,12 @@ function VisorAbierto() {
               <ChevronRight className="size-5" aria-hidden />
             </button>
 
-            {/* Canvas: documento centrado, overflow-auto (zoom/rotación) */}
-            <div className="min-h-0 flex-1 overflow-auto">
+            {/* Canvas — KIT visor-gestos-v1 (VisorZoom): ajuste inicial
+                automático, RUEDA = zoom anclado al cursor, PELLIZCO = zoom
+                con 2 dedos, arrastre = desplazar, doble clic/toque = ajustar
+                ↔ acercar. Rotación/contraste viajan como props (el padre las
+                maneja); la escala vive dentro del componente. */}
+            <div className="min-h-0 flex-1">
               {actaCargando || !actaActual ? (
                 actaCargando ? (
                   /* Skeleton del papel (patrón vida-v1) mientras llega el
@@ -313,59 +316,49 @@ function VisorAbierto() {
                 )
               ) : fotoActiva ? (
                 /* SUP-6 (D23): la foto real es el "papel" del canvas —
-                   misma lógica de transform/filtro CSS que el sintético
+                   rotación/contraste por CSS viajan como props del VisorZoom
                    (D18); documento-e14.tsx NO se toca. Sin cifras de
                    votación en la UI (§0-1): la imagen se muestra tal cual. */
-                <div className="flex min-h-full min-w-full items-center justify-center p-6">
-                  <div
-                    className="relative shrink-0"
-                    style={{ width: fotoCajaAncho, height: fotoCajaAlto }}
-                  >
-                    <div
-                      className="absolute top-1/2 left-1/2"
-                      style={{
-                        transform: `translate(-50%, -50%) scale(${zoom}) rotate(${rotacion}deg)`,
-                        filter: filtroDeContraste(contraste),
-                      }}
-                    >
-                      {/* La foto real se muestra tal cual (D23) — asset
-                          importado estáticamente del módulo (D24);
-                          next/image está prohibido por el kit §0-3 */}
-<img
-                        src={fotoActiva.src}
-                        width={FOTO_ANCHO_BASE}
-                        height={fotoAltoBase}
-                        alt={`Acta real E-14 ${etiquetaReal ?? visorActa.tipo} — página ${paginaActiva}, escaneo del digitalizador (encabezado impreso ubicado; sin lectura de votos)`}
-                        draggable={false}
-                        className="block select-none rounded-[4px] border border-(--border) bg-white"
-                      />
-                    </div>
-                  </div>
-                </div>
+                <VisorZoom
+                  ref={visorRef}
+                  rotacion={rotacion}
+                  filtro={filtroDeContraste(contraste)}
+                  onZoomChange={setZoom}
+                  fitKey={fitKey}
+                  ariaLabel="Documento del acta — zoom con la rueda del mouse o pellizco con los dedos"
+                  className="h-full w-full"
+                >
+                  {/* La foto real se muestra tal cual (D23) — asset
+                      importado estáticamente del módulo (D24);
+                      next/image está prohibido por el kit §0-3 */}
+                  <img
+                    src={fotoActiva.src}
+                    width={FOTO_ANCHO_BASE}
+                    height={fotoAltoBase}
+                    alt={`Acta real E-14 ${etiquetaReal ?? visorActa.tipo} — página ${paginaActiva}, escaneo del digitalizador (encabezado impreso ubicado; sin lectura de votos)`}
+                    draggable={false}
+                    className="block select-none rounded-[4px] border border-(--border) bg-white"
+                  />
+                </VisorZoom>
               ) : (
                 mesa && (
-                  <div className="flex min-h-full min-w-full items-center justify-center p-6">
-                    <div
-                      className="relative shrink-0"
-                      style={{ width: cajaAncho, height: cajaAlto }}
-                    >
-                      <div
-                        className="absolute top-1/2 left-1/2"
-                        style={{
-                          transform: `translate(-50%, -50%) scale(${zoom}) rotate(${rotacion}deg)`,
-                          filter: filtroDeContraste(contraste),
-                        }}
-                      >
-                        <DocumentoE14
-                          tipo={visorActa.tipo}
-                          pagina={paginaActiva}
-                          mesa={mesa}
-                          acta={actaActual}
-                          puesto={puesto!}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  <VisorZoom
+                    ref={visorRef}
+                    rotacion={rotacion}
+                    filtro={filtroDeContraste(contraste)}
+                    onZoomChange={setZoom}
+                    fitKey={fitKey}
+                    ariaLabel="Documento del acta — zoom con la rueda del mouse o pellizco con los dedos"
+                    className="h-full w-full"
+                  >
+                    <DocumentoE14
+                      tipo={visorActa.tipo}
+                      pagina={paginaActiva}
+                      mesa={mesa}
+                      acta={actaActual}
+                      puesto={puesto!}
+                    />
+                  </VisorZoom>
                 )
               )}
             </div>

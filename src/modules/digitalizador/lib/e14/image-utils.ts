@@ -261,6 +261,45 @@ export async function procesadaVaciaDataUrl(url: string): Promise<boolean> {
 }
 
 /**
+ * KIT editor-masiva-v1 — RECORTE por canvas: recorta `rect` (coordenadas
+ * NATURALES de la imagen) y hornea un JPEG/PNG nuevo (misma disciplina de
+ * `rotateProcessedDataUrl` — canvas puro, thumb 160px para la bandeja).
+ * El rect llega saneado (0 ≤ x,y · w,h ≥ 1) desde el modal de revisión.
+ */
+export async function recortarDataUrl(
+  url: string,
+  rect: { x: number; y: number; w: number; h: number }
+): Promise<{ url: string; thumb: string; w: number; h: number }> {
+  const img = await loadImageMemo(url);
+  const natW = img.naturalWidth;
+  const natH = img.naturalHeight;
+  if (!natW || !natH) throw new Error("imagen sin dimensiones");
+  // Clamp duro a los límites de la imagen (defensivo — jamás inventar píxeles)
+  const x = Math.max(0, Math.min(Math.round(rect.x), natW - 1));
+  const y = Math.max(0, Math.min(Math.round(rect.y), natH - 1));
+  const w = Math.max(1, Math.min(Math.round(rect.w), natW - x));
+  const h = Math.max(1, Math.min(Math.round(rect.h), natH - y));
+  const canvas = canvasCon(w, h); // SPRINT-A A3 — factory
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("sin contexto 2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+  const tW = 160;
+  const tH = Math.max(1, Math.round((h / w) * tW));
+  const tCanvas = canvasCon(tW, tH); // SPRINT-A A3 — factory
+  const tCtx = tCanvas.getContext("2d");
+  if (tCtx) {
+    tCtx.imageSmoothingQuality = "high";
+    tCtx.drawImage(canvas, 0, 0, tW, tH);
+  }
+  const [urlOut, thumb] = await Promise.all([
+    encodePngDataUrl(canvas),
+    Promise.resolve(tCanvas.toDataURL("image/jpeg", 0.8)),
+  ]);
+  return { url: urlOut, thumb, w, h };
+}
+
+/**
  * Rota una data URL `deg` grados (múltiplos de 90) con canvas puro.
  * El lab devuelve también miniatura/w/h para su carrusel; e14 solo consume
  * `url` (los demás campos se conservan por fidelidad de la copia).

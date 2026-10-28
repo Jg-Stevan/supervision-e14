@@ -20,6 +20,12 @@
  *     (masiva/cola) y la expone en `actaActual` — MasivaView la muestra
  *     en SU modal de revisión (aquí no existe la vista REVISIÓN del
  *     digitalizador: el escaneo individual vive en su propio repo).
+ *   · `editarActaActual(patch)` → KIT editor-masiva-v1: el modal de
+ *     revisión hornea RECORTAR/ROTAR sobre la foto y parchea `actaActual`
+ *     EN VIVO (el modal re-pinta al instante). La PERSISTENCIA ya existe:
+ *     al cerrar, `sincronizarAlVolver` re-persiste el acta editada en IDB
+ *     + thumb fresco + fila de la bandeja (identidad acta.id intacta —
+ *     el spread preserva el id en TODAS las ediciones).
  *   · `publicaciones` → desenlace de la publicación por acta.id (ok/bloqueada
  *     + motivo D25) — el modal de revisión muestra "VER EN MONITOR" solo
  *     cuando el acta aterrizó en el catálogo.
@@ -62,6 +68,10 @@ interface EstadoE14 {
   contarMotivoNoEnvioActa: (acta: Acta) => void;
   abrirActaMasiva: (id: string) => Promise<void>;
   cerrarActaMasiva: () => void;
+  /** KIT editor-masiva-v1: parchea el acta abierta (foto recortada/rotada).
+   * NUNCA incluye `id` — la identidad sobrevive a las ediciones (el cierre
+   * del modal persiste vía sincronizarAlVolver del store masiva). */
+  editarActaActual: (patch: Partial<Omit<Acta, "id">>) => void;
 }
 
 const contadosNoEnvio = new Set<string>();
@@ -244,6 +254,17 @@ export const useE14Store = create<EstadoE14>()((set, get) => ({
   },
 
   cerrarActaMasiva: () => set({ actaActual: null }),
+
+  // KIT editor-masiva-v1 — parche INMUTABLE del acta abierta: el modal de
+  // revisión hornea recorte/rotación (canvas) y llama aquí; el modal
+  // re-pinta al instante y el cierre persiste (sincronizarAlVolver → IDB
+  // + thumb + fila). `id` jamás viaja en el patch (Omit en la firma).
+  editarActaActual: (patch) =>
+    set((prev) =>
+      prev.actaActual
+        ? { actaActual: { ...prev.actaActual, ...patch } }
+        : prev,
+    ),
 }));
 
 // Listeners de red (client-only — el prerender del export estático no los
