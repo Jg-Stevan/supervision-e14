@@ -29,6 +29,8 @@ import {
   // KIT e73-sondeo-qr-precoz-v1 (§C) — índice histórico por payload del sondeo
   actualizarIndicePayload,
   indiceEnviadasPorPayload,
+  // D33 — reiniciar-envios: reset del índice de sesión por payload
+  resetearIndicePayload,
   type EntradaHistorica,
 } from "./historico";
 // SPLIT C1 (refactor/runner-logger-v1): hacerThumb vive en runner-thumbs.ts
@@ -160,6 +162,11 @@ interface MasivaStore {
   sincronizarAlVolver: () => Promise<void>;
   quitar: (id: string) => Promise<void>;
   vaciar: () => Promise<void>;
+  /** D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO de envíos (cola +
+   *  ledger del histórico + índices de sesión). El corte explícito que pide
+   *  el dueño para re-probar el MISMO lote — botón de 2 toques (MasivaView);
+   *  vaciar() queda byte a byte (RL-e65b-5 intacto). */
+  reiniciarEnvios: () => Promise<void>;
   /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
    *  DUPLICADA (→ PENDIENTE, dupOf fuera) para que el runner la reprocese
    *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
@@ -1472,6 +1479,33 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         /* conservador — el índice ya no lo verá en esta sesión */
       }
     }
+    indiceEnviadas = null;
+    set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
+  },
+
+  // D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO del ciclo de vida de
+  // envíos, a pedido literal del dueño (2026-10-28): «un botón para reiniciar
+  // los envíos… para poder probar las mismas imágenes y hacer las medidas».
+  // La MISMA higiene del C-2 (modo pruebas) pero como ACCIÓN EXPLÍCITA de UI
+  // en producción: cola + ledger del histórico + TODA la memoria de dedup
+  // (capa 0 QR / bytes / visual / payload del sondeo). Re-subir el mismo
+  // lote nace PENDIENTE y se procesa de cero. El botón es de 2 toques
+  // (MasivaView) — el borrado NUNCA es accidental. vaciar() queda byte a
+  // byte (RL-e65b-5 intacto — VACIAR sigue respetando el ledger).
+  reiniciarEnvios: async () => {
+    if (get().corriendo) return; // el botón está deshabilitado — doble guard
+    try {
+      await vaciarCola();
+    } catch {
+      /* las filas mueren igual en la bandeja */
+    }
+    mapaQrPayload.clear();
+    try {
+      await borrarHistorico();
+    } catch {
+      /* conservador — IDB caída: los índices de sesión ya no la verán */
+    }
+    resetearIndicePayload();
     indiceEnviadas = null;
     set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
   },

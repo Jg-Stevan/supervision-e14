@@ -406,6 +406,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
     abrirActa,
     quitar,
     vaciar,
+    reiniciarEnvios, // D33 — KIT e14-reiniciar-envios-v1
     enviarLote,
     setFiltro,
     procesarIgual,
@@ -416,6 +417,9 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
   const dragCounterRef = useRef(0);
   const [vaciarArmado, setVaciarArmado] = useState(false);
+  // D33 — KIT e14-reiniciar-envios-v1: armado del botón REINICIAR ENVÍOS
+  // (2 toques — el borrado del ledger NUNCA es accidental).
+  const [resetArmado, setResetArmado] = useState(false);
 
   // ── D27 — modal de revisión (ABRIR): el adaptador carga el acta de IDB
   // (abrirActaMasiva) y esta vista la muestra. Al cerrar, sincronizarAlVolver
@@ -457,11 +461,15 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   }, []);
 
   // Confirmación inline de 2 toques — se desarma sola (kit §6, sin window.confirm).
+  // D33: el desarme cubre AMBOS armados (VACIAR y REINICIAR ENVÍOS).
   useEffect(() => {
-    if (!vaciarArmado) return;
-    const t = window.setTimeout(() => setVaciarArmado(false), 3000);
+    if (!vaciarArmado && !resetArmado) return;
+    const t = window.setTimeout(() => {
+      setVaciarArmado(false);
+      setResetArmado(false);
+    }, 3000);
     return () => window.clearTimeout(t);
-  }, [vaciarArmado]);
+  }, [vaciarArmado, resetArmado]);
 
   // Listener global de drag & drop (estilo DeepSeek / Slack):
   // Permite arrastrar archivos desde el explorador y soltarlos en cualquier
@@ -786,6 +794,37 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
               }`}
             >
               {vaciarArmado ? "¿SEGURO?" : "VACIAR"}
+            </button>
+
+            {/* D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO (cola + ledger
+                de enviadas). El VACIAR de arriba respeta el ledger POR DISEÑO
+                (RL-e65b-5) — este es el corte explícito que pidió el dueño
+                para re-probar el MISMO lote y medir. 2 toques — nunca
+                accidental; disabled si la cola corre (doble guard en store). */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!resetArmado) {
+                  setResetArmado(true);
+                  return;
+                }
+                setResetArmado(false);
+                void reiniciarEnvios();
+              }}
+              disabled={corriendo}
+              aria-label={
+                resetArmado
+                  ? "Confirmar reiniciar envíos: borra la cola y el historial de enviadas"
+                  : "Reiniciar envíos: borra la cola y el historial de enviadas"
+              }
+              title="Borra la cola y el historial de enviadas — re-procesa el mismo lote desde cero"
+              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                resetArmado
+                  ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
+                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
+              }`}
+            >
+              {resetArmado ? "¿SEGURO?" : "REINICIAR ENVÍOS"}
             </button>
 
             {/* KIT e107-prescan-qr-cola-v1 (§D.3): banner del pre-scan —

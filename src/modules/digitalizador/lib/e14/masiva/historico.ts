@@ -156,8 +156,16 @@ export function actualizarIndicePayload(e: EntradaHistorica): void {
   if (e.payloadQr != null && e.payloadQr !== "") indicePayload.set(e.payloadQr, e);
 }
 
-/** Prueba interna (tests): reset del índice por payload. */
-export function __resetIndicePayloadParaTest(): void {
+/** Reset del índice por payload (D33 — reiniciar-envios): la memoria de
+ *  sesión del índice muere JUNTO al ledger (borrarHistorico) — el próximo
+ *  índiceEnviadasPorPayload() se reconstruye de cero (vacío si el ledger
+ *  fue borrado). Nombres de producción: el alias de tests delega aquí. */
+export function resetearIndicePayload(): void {
   indicePayload = null;
   indicePayloadListo = false;
+}
+
+/** Prueba interna (tests): reset del índice por payload. */
+export function __resetIndicePayloadParaTest(): void {
+  resetearIndicePayload();
 }

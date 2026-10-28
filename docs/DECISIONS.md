@@ -705,3 +705,53 @@ se descarta — pasa al OCR (regla de oro 4).
 default), el watchdog, el precalor/prefetch, el filtro `objetivoPrescan`, la UI del
 banner (overlay — coexiste con el progreso de la corrida sin mover layout) y el
 camino OCR completo (totales `pipeline total=` estables en ambas corridas).
+
+## D33 — REINICIAR ENVÍOS: reset EXPLÍCITO del ciclo de vida de envíos (kit e14-reiniciar-envios-v1)
+
+**Pedido literal del dueño (2026-10-28):** «agregremos un botón para reiniciar los
+envíos, porque cada vez que paso el mismo lote me aparece ya enviada… para que se
+reinicie y poder probar las mismas imágenes y hacer las medidas». El dueño NO tiene
+más imágenes — necesita re-procesar el MISMO lote para medir tiempos por acta.
+
+**Causa raíz (por diseño, no bug):** el ledger e65b (historico.ts — IDB
+`e14-masiva-historico-v1`, store `llaves`) sobrevive a `vaciar()` y recargas
+(D-e65b-1, RL-e65b-5: «la cola es el taller; el envío es el hecho»). Re-subir lo ya
+enviado nace YA-ENVIADA por payload EXACTO (sondeo §C, store.ts cadenaDedup) — el
+comportamiento correcto para producción y el bloqueo exacto para re-probar.
+
+**Implementación (3 ediciones, cero borrado):**
+
+1. `historico.ts` — `resetearIndicePayload()` NUEVO (nombre de producción): mata el
+   índice de sesión por payload (`indicePayload`/`indicePayloadListo` a nulo). El
+   alias de tests `__resetIndicePayloadParaTest()` delega aquí (byte-idéntico).
+2. `store.ts` — acción `reiniciarEnvios()` NUEVA junto a `vaciar()`: `vaciarCola()`
+   + `mapaQrPayload.clear()` (capa 0 QR) + `borrarHistorico()` (ledger completo) +
+   `resetearIndicePayload()` + `indiceEnviadas = null` + reset de la bandeja. Doble
+   guard `corriendo`. Es la MISMA higiene del C-2 (modo pruebas e64p) promovida a
+   acción EXPLÍCITA de UI en producción.
+3. `MasivaView.tsx` — botón «REINICIAR ENVÍOS» en la barra de acciones (hermano del
+   VACIAR): armado en 2 toques («¿SEGURO?» rojo pulsante, desarme a 3 s — mismo
+   patrón del kit §6, sin window.confirm), `disabled` si `corriendo`, `title`/`aria`
+   que dicen exactamente qué borra.
+
+**Contrato:** `vaciar()` queda BYTE A BYTE (RL-e65b-5 intacto — el VACIAR de siempre
+sigue respetando el ledger). El reinicio es el corte EXPLÍCITO y CONSCIENTE del
+dueño: borra cola + ledger + TODA la memoria de dedup (capa 0 QR / payload / bytes /
+visual). Re-subir el mismo lote tras reiniciar nace PENDIENTE y se procesa de cero.
+
+**Verificación E2E (sandbox 2 hilos, agent-browser, tsc 0 · lint 0/0):** acta
+sintética con QR controlado (`E14-PRUEBA-RESET-D33|…`): (1) ledger sembrado con ese
+payload → re-subir el archivo nace YA-ENVIADA instantánea (sondeo 1/1, conteo «ya
+enviadas 1» — dolor del dueño reproducido); (2) REINICIAR ENVÍOS ×2 → ledger IDB
+verificado en **0 llaves** (getAll por eval), bandeja limpia; (3) RE-subir el MISMO
+archivo → «1 pendientes, 0 ya enviadas» → PROCESAR → pipeline COMPLETO (sondeo 1/1
+→ OCR → clasificación «ROMA - CONSULADO - TRANSMISION - MESA 012», score 8.5, 100%,
+QR ✓ → REVISIÓN HUMANA — honesto: acta sintética al detector de reales). Sin
+errores JS; sondeo hard-kill/respawn = watchdog preexistente del sandbox (hambruna
+de CPU por burst, no zombi).
+
+**Nota de contexto:** el trabajo «D32» de la sesión 2026-10-27 (badge gama-baja +
+pulso) quedó committeado SOLO local y nunca pushed — PERDIDO con el reinicio del
+sandbox (fc9318f no existe en origin). Lo esencial sobrevivió (D30/D31 pushed; gama/
+dedup base llegaron con D27). El número D32 se considera RESERVADO-perdido; esta
+decisión continúa en D33. Lección institucional: push SIEMPRE al cerrar cada tarea.

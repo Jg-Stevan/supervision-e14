@@ -104,3 +104,26 @@ Stage Summary:
 - El masiva queda ordenado como pidió el dueño: UNA acta paga OCR completa a la vez (CPU completo, UI fluida) y en paralelo el carril QR va leyendo el resto del lote — las gemelas/ya-enviadas se marcan ANTES de que el pool las alcance (jamás pagan OCR) y el arranque de la corrida ya no espera el prescan.
 - Los hallazgos del carril quedan demostrados con trazas: hereda-payload en plena corrida (cero re-decode) y reutilización de duplicado en 19 ms.
 - Límite honesto: en este sandbox (tier BAJO) el plan gama ya forzaba pool 1 — el default D31 gobierna en los equipos ALTO/MEDIO del dueño; el ahorro del carril escala con lotes grandes y QR-duros (los que el sondeo no leyó en ingesta).
+
+---
+Task ID: 6
+Agent: Z.ai Code (orquestador principal)
+Task: Tanda del dueño 2026-10-28 — (a) RECUPERACIÓN del proyecto tras reinicio de sandbox; (b) BOTÓN «REINICIAR ENVÍOS» (prerrequisito de las mediciones); (c) métricas por acta + informe en Carga Masiva; (d) auditoría de reglas de negocio; (e) optimización de recursos (miniaturas y más).
+
+Contexto de recuperación (leer PRIMERO si la sesión muere):
+- El reinicio de sandbox restauró /home/z/my-project al template Z.ai: borró el clon supervision-e14 y el worklog interno. Este worklog (COMMITTEADO al repo) es la única memoria durable → actualizar SIEMPRE aquí.
+- El trabajo «D32 gama-baja + dedup» de la sesión 2026-10-27 quedó COMMITTEADO SOLO LOCAL y NUNCA pushed → PERDIDO (fc9318f no existe en origin). Pérdida real: badge «GAMA BAJO · ADAPTADO» y pulido fino. NO crítico: D30/D31 (optimizaciones grandes) SÍ están; gama.ts/dedup.ts/runner-dedup.ts llegaron con D27 y siguen intactos. Lección: push SIEMPRE al cerrar cada tarea.
+- Patrón de arranque persistente del dev server (el sandbox mata el árbol de cada llamada Bash — probado empíricamente):
+  `bash -c 'cd /home/z/my-project/supervision-e14 && setsid nohup bun run dev > /home/z/my-project/repo-dev.log 2>&1 < /dev/null &'`
+- Verificación de recuperación: HTTP 200 en :3000, título «Sistema de Monitoreo Electoral E-14», monitor renderiza (captura tool-results/recovery-01-home.png en /home/z/my-project — NO committear).
+
+Plan de la tanda (estado):
+- (b) BOTÓN REINICIAR ENVÍOS → docs/DECISIONS.md D33. Causa raíz del «ya enviada»: el ledger e65b (historico.ts, IDB e14-masiva-historico-v1) sobrevive a vaciar() POR DISEÑO (D-e65b-1, RL-e65b-5: «la cola es el taller; el envío es el hecho») — el dueño lo confirma funcionando pero necesita re-probar el MISMO lote para medir. Implementación: acción nueva reiniciarEnvios() en store.ts (vaciarCola + borrarHistorico + limpiar mapaQrPayload + índices de sesión a null) + botón de 2 toques en la barra de acciones de MasivaView (mismo patrón VACIAR→¿SEGURO?, desarme a 3 s, disabled si corriendo).
+- (c) métricas por acta/etapa + informe UI → siguiente (usar obs/ existente).
+- (d) auditoría reglas de negocio → después de (c), con datos reales de las mediciones.
+- (e) recursos/miniaturas → al final.
+
+Task ID: 6 (cont.) — RESULTADO
+- (b) BOTÓN REINICIAR ENVÍOS: COMPLETADO y verificado E2E (ver D33 en docs/DECISIONS.md). 3 ediciones: historico.ts (resetearIndicePayload), store.ts (reiniciarEnvios), MasivaView.tsx (botón 2 toques). Prueba: YA-ENVIADA reproducida → reinicio → ledger 0 → mismo archivo nace PENDIENTE → pipeline completo (score 8.5). Commit + PUSH (lección D32).
+- NOTA: badge «GAMA BAJO · ADAPTADO» SÍ existe (chip D74 en MasivaView) — la pérdida real del D32 no-pushed era menor a lo estimado.
+- SIGUIENTE (c): métricas por acta/etapa + informe en Carga Masiva — usar obs/ existente; con el reset ya se puede re-pasar el lote real del dueño para medir.
