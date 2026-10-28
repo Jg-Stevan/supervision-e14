@@ -225,3 +225,47 @@ Task ID: 10 — RESULTADO
 - Verificación: build 0 · lint 0/0 · download/verifica-d38.ts 7/7 · E2E tarjeta AUTO en
   sandbox (BAJO: pool 1, OCR 2 hilos, warp 1920) · 0 errores consola.
 - Commit + PUSH (auto-deploy a Cloudflare Pages activo).
+
+---
+Task ID: 11
+Agent: Z.ai Code (orquestador principal)
+Task: Dos ajustes del Monitor Global pedidos por el dueño: (1) filtro por DÍA de la
+semana electoral (semana antes de la segunda vuelta, elecciones domingo 21 de
+junio de 2026) para no mezclar puestos de días distintos, y (2) quitar el botón
+NOTIFICAR («en el momento no se está utilizando»).
+
+Task ID: 11 — RESULTADO (KIT monitor-jornada-v1)
+- Hallazgo clave: el catálogo DIVIPOLA exterior YA trae el día EN el nombre del
+  puesto («LUNES ACCRA…», «SABADO LISBOA…») — 116 puestos por día lun-sáb y 253
+  puestos base SIN prefijo = jornada de cierre del domingo (2.181 mesas vs 1.489
+  lun-sáb: números EXACTOS del README del vault «Mesas y volumen electoral 2026»).
+  El filtro es 100% data-driven, nada inventado.
+- NUEVO domain/jornada.ts: DiaJornada (LUNES…DOMINGO), DIAS_JORNADA con el
+  calendario real de la 2ª vuelta 2026 (lun 15 → dom 21 de junio, domingo marcado
+  esCierre), diaDeNombrePuesto() (prefijo → día; base sin prefijo → DOMINGO;
+  «Santo Domingo» jamás cuenta como prefijo) y diaCalendario().
+- domain/types.ts: Puesto.diaJornada (derivado del catálogo) y
+  FiltrosPuestos.fecha: DiaJornada (era un select mock de una sola opción
+  «Domingo, 14 Jun»).
+- mock-repository.ts: puestoDeRegistro deriva diaJornada del nombre real;
+  coincide() aplica el filtro por fecha (contrato del repo coherente).
+- filtros-bar.tsx: el select FECHA deja de ser mock — lista los 7 días de la
+  semana electoral con conteo real de puestos por día («Lunes 15 de junio (116)»,
+  «Domingo 21 de junio — cierre (253)») + opción «Fecha: todos los días».
+- monitor-global.tsx: el día seleccionado filtra la matriz Y los KPIs
+  (puestosDelDia + resumenDelDia con la MISMA regla resumenDePuestos del store,
+  ahora exportada); los demás filtros siguen afectando solo la matriz.
+- Retiro NOTIFICAR: mesas-subtable.tsx solo pinta el botón de acción cuando
+  accionSugerida === "reinspeccionar" (columna Acción = REINSPECCIONAR o VER
+  ACTA); onNotificar sale de MesasSubtable/PuestosTable/VistaMonitor;
+  datos-provider pierde la acción notificar; mock-repository y
+  supervision-repository pierden notificarMesa. El dominio AccionMesa queda
+  intacto (dato, no UI) — reactivar el botón cuando exista el canal real.
+- Verificación: tsc 0 · eslint 0/0 · E2E agent-browser (:3000): KPIs 949
+  (232/44/199/474, invariante exacta); dropdown con 116×6 + 253; LUNES → 116
+  puestos (38/5/20/53) todos con prefijo LUNES; DOMINGO → 253 (63/5/63/122) con
+  ancla Roma accesible; «todos los días» → 949; cero «NOTIFICAR» en el DOM;
+  REINSPECCIONAR e2e (spinner → rescaneo resuelto → mesa COMPLETO → toast);
+  móvil 375px OK; vista anomalías OK (provider compartido); 0 errores consola.
+- Artefactos para el dueño en /home/z/my-project/download/:
+  supervision-e14-monitor-jornada-v1.bundle + patches 0001/0002 + capturas.

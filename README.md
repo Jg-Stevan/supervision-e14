@@ -32,6 +32,7 @@ madure; ningún archivo externo importa nada del módulo.
 src/modules/supervision/
 ├── domain/types.ts                  # contrato de dominio (sin dependencias)
 ├── domain/divipola.ts               # tipos canónicos + validación DIVIPOLA (SUP-5)
+├── domain/jornada.ts                # calendario de la jornada electoral (días de votación — monitor-jornada-v1)
 ├── data/supervision-repository.ts   # interfaz SupervisionRepository
 ├── data/divipola-puestos.json       # catálogo MAESTRO (solo datos del join futuro — NUNCA importado)
 ├── data/divipola-exterior.json      # derivado exterior canónico (única fuente que importa el código)
@@ -56,8 +57,12 @@ src/modules/supervision/
 
 - Todo dato en pantalla viene del mock (`mock-repository.ts`), hoy sobre
   el catálogo DIVIPOLA exterior (ver «Fuente de datos» abajo).
-- Los botones de acción muestran el toast
-  “Función de demostración — sin backend”.
+- La acción REINSPECCIONAR resuelve el rescaneo de la mesa en el mock
+  (spinner ~2.5 s → alerta resuelta + toast); el botón NOTIFICAR fue
+  retirado de la UI (kit monitor-jornada-v1 — sin canal real todavía).
+- El filtro FECHA lista la semana electoral real de la segunda vuelta
+  2026 (lun 15 → dom 21 de junio): elegir un día aísla su jornada —
+  116 puestos por día lun-sáb, 253 el domingo de cierre (2.181 mesas).
 
 ## Fuente de datos (DIVIPOLA)
 
