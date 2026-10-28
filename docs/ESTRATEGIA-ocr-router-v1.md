@@ -125,3 +125,30 @@ Notas de integración:
 Con esto ningún dispositivo descarga más de ~27 MB y el fallback a
 Tesseract existe SIEMPRE (v5 cargando lento ⇒ el primer OCR ya puede
 correr con Tesseract mientras v5 se calienta).
+
+---
+
+## Fase 3 — el motor consume el router (wire-in, este PR)
+
+El motor de producción de este repo es **RapidOCR/PP-OCR** (el experimento
+Tesseract fue retirado en su día). El router de la fase 1 mapea así:
+
+| Resolución del router | Modelos en producción |
+|---|---|
+| `tesseract-best-psm4` (motor base del benchmark) | **PP-OCRv4** det+rec (byte-idéntico a hoy) |
+| `ppocrv5` (ALTO+SIMD u override manual) | **PP-OCRv5 mobile** det + rec latin (assets nuevos, ~12.7 MB) |
+
+Cadena completa en `initReal()` (rapidocr.ts): `leerFlags()` → `resolverMotor(perfil headless)` → set de modelos → **sonda de carga real** (inferencia de prueba 320×120, timeout 8 s) como gate de v5 → si falla, v4 + castigo 7 días (localStorage).
+
+Redes de seguridad (todas activas):
+
+1. **Flag `ocrMotorAdaptativo=false`** ⇒ v4 byte-idéntico en TODOS los dispositivos.
+2. **Override manual `ocrMotor`** del dueño manda (la sonda sigue verificando viabilidad: el contrato del router exige sonda para ppocrv5).
+3. **Sonda de carga real**: el deviceMemory no garantiza los buffers del detector — se PRUEBA el ONNX antes de adoptarlo; fallo ⇒ castigo 7 días.
+4. **Gobernador reactivo**: `rapidOcrReiniciar()` (watchdog) reporta presión si el runtime muerto era v5; 2 fallos/OOM en 3 min ⇒ degradación a v4 por el resto de la sesión.
+5. **`perfil headless` honesto**: tier §4.4 de `obs/dispositivo` (la MISMA fuente que gama.ts) + probe SIMD + probe GPU. El `benchmark.score` del kit NO viaja al motor (null honesto) — la sonda de carga es la señal real, no la sonda sintética.
+
+Pendiente honesto (siguiente fase): la tarjeta «Activar OCR de precisión» de la
+fase 2 (hoy el dueño puede forzar v5 vía `e14-flags-overrides:
+{"ocrMotor":"ppocrv5"}`) y que el `benchmark.score` viaje del provider al
+arranque del motor para refinar el origen `medio-elegible-upgrade`.

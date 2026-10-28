@@ -305,3 +305,85 @@ Task ID: 13 — RESULTADO
   ocr-escalonado.ts ni workers — la integración del consumidor queda como
   siguiente kit (registrar `ocrMotorAdaptativo` en FlagsApp + resolver motor en
   el arranque del worker OCR).
+
+---
+Task ID: 14
+Agent: Z.ai Code (orquestador principal)
+Task: El dueño aprueba conectar el ROUTER (KIT ocr-router-v1, PR #10) al informe
+del diagnóstico — que cada JSON traiga motor + motivo + origen para auditar por
+qué cada dispositivo corre lo que corre.
+
+Task ID: 14 — RESULTADO
+- FlagsApp (obs/tipos.ts) + FLAGS_DEFAULT/sanearFlags (flags.ts) + whitelist de
+  leerOverridesFlags (politica.ts): `ocrMotorAdaptativo` (default true —
+  kill-switch único) y `ocrMotor` ("ppocrv5" | "tesseract-best-psm4" | null —
+  default null = el router decide). Ambos ADITIVOS AL FINAL (D57) con DOBLE
+  whitelist (cada puerta su línea): el kill-switch y el override MANUAL del
+  dueño ya son reales vía e14-flags-overrides.
+- panel-perfil.tsx: el informe «COPIAR JSON» (diagnosticoJson) trae el campo
+  ADITIVO AL FINAL `motorOcr: { motor, motivo, origen, requiereSondaCarga,
+  condicionesUpgrade }` resuelto con la cadena COMPLETA del router (flag ←
+  override manual ← gobernador ← sonda de carga cacheada ← sonda de CPU ←
+  tier). Informes previos no cambian de forma (mismo patrón
+  hangResumen/enviosDetalle). Ausente = sin señales aún (honesto, jamás
+  inventar).
+- Adaptador perfilMinimoDe (PerfilRecursos → PerfilMinimo del router:
+  runtime/sync/async a la raíz) + resolverMotorDelDispositivo (jamás lanza;
+  se resuelve EN MONTAJE como el resto del bloque autonomía — hydration-safe).
+- La tarjeta AUTONOMÍA muestra la fila «Motor OCR» (etiqueta legible + origen,
+  tooltip con el motivo) y, si aplican, la fila «Upgrade a v5» con las
+  condiciones pendientes del upgrade a PP-OCRv5.
+- Verificación: tsc --noEmit → los 9 errores TS2307 de assets son
+  PRE-EXISTENTES en main (9 = 9, verificado con stash — archivos que este PR
+  no toca); eslint → 0 errores / 0 warnings.
+- PENDIENTE (siguiente kit): consumir resolverMotor en el ARRANQUE del worker
+  OCR (ocr-escalonado.ts / rapidocr.ts) — hoy el router decide, el informe
+  audita y los flags existen, pero el worker aún no cambia de motor.
+
+---
+Task ID: 15
+Agent: Z.ai Code (orquestador principal)
+Task: El dueño aprueba el wire-in completo (que el worker OCR consuma
+resolverMotor en su arranque) y comparte A/B real: mismas 6 actas en laptop
+MEDIO (2C/4T Skylake) y celular ALTO (Samsung Xclipse 540, 8 núcleos) — cuello
+«ocr» en 12/12, scores idénticos 8.6/10/8.5/10/10/10 en ambos, corrida 151.8 s
+vs 55.0 s → KIT ocr-router-v1 fase 3: PP-OCRv5 como motor de gama ALTO.
+
+Task ID: 15 — RESULTADO
+- Assets: public/models/rapidocr/ + det_v5_mobile.onnx (4.8 MB) +
+  rec_v5_latin.onnx (7.9 MB) + latin_dict.txt — los MISMOS archivos que el
+  benchmark midió al 100 % de dígitos impresos (validados además con la
+  corrida real del dueño vía RapidOCR python).
+- rapidocr.ts (motor de producción): initReal() ahora resuelve el set de
+  modelos con el router ANTES de crear sesiones — v4 (byte-idéntico) o v5.
+  Mapping honesto: «tesseract-best-psm4» del benchmark = el motor base de
+  siempre (aquí v4); solo «ppocrv5» cambia modelos. Sesiones extraídas a
+  crearSesiones() (los nombres de entrada se leen de inputNames[0] — el swap
+  es transparente; el cls v2.0 es común a v4/v5).
+- Sonda de carga REAL como gate de v5 (ejecutarSondaCarga del router):
+  crear sesiones v5 + inferir «E14 SONDA 1234» en canvas 320×120 (timeout
+  8 s) → OK ⇒ v5; fallo ⇒ v4 + castigo 7 días en localStorage. Limpieza de
+  sesiones huérfanas si el timeout abandona la sonda (abandonada + soltar).
+- Gobernador reactivo: rapidOcrReiniciar() (D65, la llaman el watchdog y el
+  recovery) reporta presión si el runtime muerto era v5 (motorModelosActual)
+  → 2 fallos/OOM en 3 min ⇒ la próxima init resuelve v4 por el resto de la
+  sesión (origen «gobernador-presion» del router).
+- Perfil headless del motor (sin React): tier §4.4 de obs/dispositivo (la
+  MISMA fuente que gama.ts) + probe WASM SIMD (módulo de bytes fijo) + probe
+  GPU renderer — paridad con perfil-dispositivo/senales.ts sin importar el
+  kit (el módulo masiva ESPEJA señales, D74). benchmark.score null HONESTO:
+  no viaja del provider al motor — la sonda de carga es el gate real.
+- Telemetría: logger.info [ocr-router] con motor/modelos/origen/motivo en el
+  arranque y en cada evento de sonda/gobernador — auditable en consola.
+- El informe de corrida (D34) NO cambia de forma; el informe del diagnóstico
+  ya audita el motor desde la fase 2 (motorOcr).
+- Verificación: tsc --noEmit → 9 errores TS2307 de assets PRE-EXISTENTES
+  (9 = 9 baseline con stash — fuera de alcance); eslint → 0/0.
+- Evidencia A/B del dueño (informes D34 19:56 y 20:05): el celular ALTO
+  (pool/hilos WASM activos) procesó 6 actas en 55.0 s vs 151.8 s de la laptop
+  MEDIO (2.8×), OCR medio 5.5 s vs 6.6 s, sin un solo hard-kill y con scores
+  IDÉNTICOS — el pipeline es determinista entre dispositivos y el OCR es el
+  cuello 12/12: exactamente lo que ataca esta fase (v5 en ALTO: 100 % vs
+  v4; y el A/B confirma que el motor base v4 es sólido en MEDIO/BAJO).
+- PENDIENTE (fase 4): tarjeta «Activar OCR de precisión» en el panel
+  (escribe el override ocrMotor) + viaje del benchmark.score al motor.

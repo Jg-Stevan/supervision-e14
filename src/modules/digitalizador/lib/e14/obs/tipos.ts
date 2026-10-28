@@ -147,6 +147,9 @@ export interface FlagsApp {
   masivaAdaptativoGama: boolean; // default true — capa adaptativa de GAMA para masiva+OCR: el tier detectado (obs/dispositivo §4.4) aplica SOLO presupuestos de recursos (pool/threads/warp/watchdog/master/QR/dhash — tabla en gama.ts) en BAJO/MEDIO; el override MANUAL del dueño manda clave a clave (D6) y false = byte-idéntico a hoy en TODOS los dispositivos (D74)
   // ─── KIT e14-capa0-qr-worker-v1 (D40) — campo ADITIVO AL FINAL (D57) ───
   capa0QrWorker: boolean; // default true — la CAPA 0 QR (decode+ladder+barridos jsQR) corre en WORKER dedicado (capa0-qr.worker.js) y el hilo UI deja de comerse los ~15-17 s SYNC del peor caso sin QR; el tier zxing queda en main como rescate único (cobertura EXACTA); false = camino de hoy byte-idéntico (cadena completa en main)
+  // ─── KIT ocr-router-v1 — campos ADITIVOS AL FINAL (D57) ───
+  ocrMotorAdaptativo: boolean; // default true — ROUTER de motor OCR por dispositivo (docs/ESTRATEGIA-ocr-router-v1.md): BAJO/MEDIO = Tesseract best+psm4 (94,4 %, ~67 MB) · ALTO+SIMD = PP-OCRv5 (100 %, ~487 MB, sonda de carga + gobernador reactivo); false = Tesseract en TODOS los dispositivos (byte-idéntico a hoy)
+  ocrMotor: "ppocrv5" | "tesseract-best-psm4" | null; // default null = el ROUTER decide; no-null = override MANUAL del dueño (D6 — el router NO decide)
 }
 
 export interface ReporteSesion {

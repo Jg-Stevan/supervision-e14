@@ -48,6 +48,15 @@ import {
   planGamaActual,
 } from "@/modules/digitalizador/lib/e14/gama";
 import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
+// KIT ocr-router-v1 — el ROUTER de motor OCR por dispositivo (PR #10). El
+// informe reporta QUÉ motor corre en este equipo y el porqué auditable.
+import {
+  presionReciente,
+  resolverMotor,
+  type MotorOcr,
+  type PerfilMinimo,
+  type ResolucionMotor,
+} from "@/modules/digitalizador/lib/e14/ocr/router-ocr";
 import type { PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 
 // ─── piezas locales (mismo lenguaje visual del kit) ────────────────────────
@@ -156,9 +165,56 @@ function fmtN(v: number | null, sufijo: string): string {
   return v === null ? "no informado" : `${v} ${sufijo}`;
 }
 
+// ─── ocr-router-v1 — resolución del motor para el informe ───────────────────
+
+const ETIQUETA_MOTOR: Record<MotorOcr, string> = {
+  "tesseract-best-psm4": "Tesseract best + psm 4",
+  ppocrv5: "PP-OCRv5 (ONNX)",
+};
+
+/** Adapta el `PerfilRecursos` del kit a la estructura mínima que espera el
+ *  router (`PerfilMinimo` — runtime/sync/async en la raíz). null = sin
+ *  señales aún (SSR / primer pase): el informe sale SIN bloque de motor —
+ *  honesto, jamás inventar. */
+function perfilMinimoDe(perfil: PerfilRecursos): PerfilMinimo | null {
+  const s = perfil.senales;
+  if (!s) return null;
+  return {
+    tier: perfil.tier,
+    benchmark: perfil.benchmark,
+    runtime: s.runtime,
+    sync: s.sync,
+    async: s.async,
+    gpu: s.gpu,
+    forma: s.forma,
+  };
+}
+
+/** Resuelve el motor con la cadena COMPLETA de prioridad del router:
+ *  flag kill-switch ← override manual ← gobernador ← sonda de carga ←
+ *  sonda de CPU ← tier. Jamás lanza (null si aún no hay señales). */
+function resolverMotorDelDispositivo(perfil: PerfilRecursos): ResolucionMotor | null {
+  try {
+    const p = perfilMinimoDe(perfil);
+    if (!p) return null;
+    const flags = leerFlags();
+    return resolverMotor(p, {
+      flagOn: flags.ocrMotorAdaptativo !== false,
+      overrideManual: flags.ocrMotor ?? null,
+      presionReciente: presionReciente(),
+    });
+  } catch {
+    return null;
+  }
+}
+
 // ─── copia del diagnóstico ──────────────────────────────────────────────────
 
-function diagnosticoJson(perfil: PerfilRecursos, plan: PlanRecursos): string {
+function diagnosticoJson(
+  perfil: PerfilRecursos,
+  plan: PlanRecursos,
+  motor: ResolucionMotor | null,
+): string {
   try {
     return JSON.stringify(
       {
@@ -171,6 +227,22 @@ function diagnosticoJson(perfil: PerfilRecursos, plan: PlanRecursos): string {
         senales: perfil.senales,
         benchmark: perfil.benchmark,
         planRecomendado: plan,
+        // KIT ocr-router-v1 — qué motor OCR corre en este dispositivo y el
+        // porqué auditable (origen: flag-off | override-manual |
+        // gobernador-presion | sonda-cpu | sonda-carga-previa | tier |
+        // medio-elegible-upgrade). Aditivo AL FINAL (mismo patrón
+        // hangResumen/enviosDetalle): informes previos no cambian de forma.
+        // Ausente = sin señales aún (no debería ocurrir en una copia hecha
+        // desde el panel).
+        ...(motor && {
+          motorOcr: {
+            motor: motor.motor,
+            motivo: motor.motivo,
+            origen: motor.origen,
+            requiereSondaCarga: motor.requiereSondaCarga,
+            condicionesUpgrade: motor.condicionesUpgrade,
+          },
+        }),
       },
       null,
       2,
@@ -193,7 +265,14 @@ export function VistaPerfil() {
   // se re-resuelve cuando el perfil se re-detecta.
   const [auto, setAuto] = useState<
     | null
-    | { planGama: PlanGama; poolOcr: number; hilosOcr: number; flagAuto: boolean }
+    | {
+        planGama: PlanGama;
+        poolOcr: number;
+        hilosOcr: number;
+        flagAuto: boolean;
+        /** KIT ocr-router-v1 — motor resuelto para el informe y la tarjeta. */
+        motor: ResolucionMotor | null;
+      }
   >(null);
   useEffect(() => {
     try {
@@ -202,6 +281,7 @@ export function VistaPerfil() {
         poolOcr: flagsMasivaEfectivos().poolWorkers,
         hilosOcr: flagsMasivaEfectivos().ocrThreadsTope,
         flagAuto: leerFlags().masivaAdaptativoGama !== false,
+        motor: resolverMotorDelDispositivo(perfil),
       });
     } catch {
       setAuto(null); // jamás tumba el panel
@@ -213,7 +293,9 @@ export function VistaPerfil() {
       // El rechazo de clipboard es ASYNC — se maneja en .catch (el
       // try/catch solo protege la llamada síncrona).
       navigator.clipboard
-        .writeText(diagnosticoJson(perfil, plan))
+        .writeText(
+          diagnosticoJson(perfil, plan, resolverMotorDelDispositivo(perfil)),
+        )
         .then(() => toast.success("Diagnóstico copiado al portapapeles (JSON)"))
         .catch(() => toast.error("El navegador denegó el portapapeles — usa RE-DETECTAR y revisa aquí"));
     } catch {
@@ -435,6 +517,18 @@ export function VistaPerfil() {
               />
               <Fila k="Pool OCR efectivo" v={`${auto.poolOcr} worker(s)`} />
               <Fila k="Hilos OCR efectivos" v={String(auto.hilosOcr)} />
+              {/* KIT ocr-router-v1 — el motor que correría HOY en este equipo
+                  y el porqué (auditable también en el JSON del informe: campo
+                  motorOcr). */}
+              <Fila
+                k="Motor OCR"
+                v={
+                  auto.motor
+                    ? `${ETIQUETA_MOTOR[auto.motor.motor]} · ${auto.motor.origen}`
+                    : "—"
+                }
+                titulo={auto.motor?.motivo}
+              />
               <Fila
                 k="Ajustes activos"
                 v={
@@ -444,6 +538,13 @@ export function VistaPerfil() {
                 }
                 titulo={auto.planGama.activo ? auto.planGama.ajustes.join(" · ") : undefined}
               />
+              {auto.motor && auto.motor.condicionesUpgrade.length > 0 && (
+                <Fila
+                  k="Upgrade a v5"
+                  v={auto.motor.condicionesUpgrade.join(" · ")}
+                  titulo={auto.motor.condicionesUpgrade.join(" · ")}
+                />
+              )}
             </div>
             <p className="body-md mt-3 text-muted-foreground">
               La app administra los recursos sola: detecta el equipo, aplica presupuestos

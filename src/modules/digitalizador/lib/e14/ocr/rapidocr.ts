@@ -27,6 +27,22 @@
 // hilo UI); el override manual del dueño manda y el flag adaptativo OFF
 // devuelve el flag puro de siempre.
 import { flagsMasivaEfectivos } from "../gama";
+// KIT ocr-router-v1 fase 3 — el motor CONSUME el router (PR #10/#11): resuelve
+// QUÉ modelos corren (v4 = motor de siempre byte-idéntico · v5 = PP-OCRv5 del
+// benchmark, 100 % dígitos impresos) con la cadena flag ← override ←
+// gobernador ← sonda de carga ← sonda de CPU ← tier. El flag y el override
+// ya están registrados en FlagsApp (fase 2).
+import {
+  DIAS_NO_REINTENTAR,
+  ejecutarSondaCarga,
+  presionReciente,
+  reportarPresionMotor,
+  resolverMotor,
+  type MotorOcr,
+  type PerfilMinimo,
+} from "./router-ocr";
+import { leerFlags } from "../flags";
+import { obtenerDispositivo } from "../obs/dispositivo";
 
 const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -79,6 +95,195 @@ interface RapidRuntime {
   cls: OrtSession;
   rec: OrtSession;
   dict: string[];
+}
+
+// ─── KIT ocr-router-v1 fase 3 — sets de modelos por motor ───────────────
+// v4 = el motor de producción de siempre (PROD-2) — TODO lo que el router
+// resuelva como motor base usa estos modelos byte-idénticos a hoy.
+// v5 = PP-OCRv5 mobile del benchmark (results/metrics.json: 100 % de dígitos
+// impresos, 97,6 % solo-impreso > VLM cloud 94,4; inmune a rotación 1,5°;
+// ~487 MB pico) — SOLO cuando el router lo habilita (ALTO+SIMD u override
+// manual del dueño) Y la sonda de carga real pasa. El cls v2.0 mobile es
+// COMÚN (misma pieza en RapidOCR 1.4.4 para v4 y v5).
+const MODELOS = {
+  v4: {
+    det: "/models/rapidocr/ch_PP-OCRv4_det_infer.onnx",
+    cls: "/models/rapidocr/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    rec: "/models/rapidocr/ch_PP-OCRv4_rec_infer.onnx",
+    dict: "/models/rapidocr/ppocr_keys.txt",
+  },
+  v5: {
+    det: "/models/rapidocr/det_v5_mobile.onnx",
+    cls: "/models/rapidocr/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    rec: "/models/rapidocr/rec_v5_latin.onnx",
+    dict: "/models/rapidocr/latin_dict.txt",
+  },
+} as const;
+
+type MotorModelos = keyof typeof MODELOS; // "v4" | "v5"
+
+/** El motor de producción de este repo es RapidOCR/PP-OCR: el
+ *  «tesseract-best-psm4» del benchmark (94,4 %, ~67 MB) representa al MOTOR
+ *  BASE de siempre — aquí, los modelos v4. Solo «ppocrv5» cambia modelos. */
+function motorADeModelos(m: MotorOcr): MotorModelos {
+  return m === "ppocrv5" ? "v5" : "v4";
+}
+
+/** Set de modelos de la sesión ACTUAL (el gobernador lo reporta al morir). */
+let motorModelosActual: MotorModelos = "v4";
+
+// ─── sonda WASM SIMD (módulo de bytes fijo — PARIDAD con perfil-dispositivo/
+// senales.ts; el módulo masiva ESPEJA señales, no importa el kit — D74) ───
+function wasmSimdDisponible(): boolean {
+  try {
+    return WebAssembly.validate(
+      new Uint8Array([
+        0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0,
+        253, 15, 253, 98, 11,
+      ]),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Renderer GPU (WEBGL_debug_renderer_info — paridad con senales.ts; solo
+ *  alimenta la ruta iOS del router: renderer Apple + RAM no informada). */
+function gpuRenderer(): string | null {
+  try {
+    if (typeof document === "undefined") return null;
+    const c = document.createElement("canvas");
+    const gl = (c.getContext("webgl2") ?? c.getContext("webgl")) as WebGLRenderingContext | null;
+    if (!gl) return null;
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const r = ext
+      ? (gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string | null)
+      : (gl.getParameter(gl.RENDERER) as string | null);
+    return r ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Perfil MÍNIMO del router, headless (sin React): tier §4.4 de
+ *  obs/dispositivo (la MISMA fuente que gama.ts — nunca discrepen) + probes
+ *  locales. benchmark.score = null HONESTO: el score del kit vive en el
+ *  provider React y NO viaja al motor — por eso la sonda de carga real
+ *  (inferencia de prueba) es el gate de v5 (protocolo v2 del router). */
+async function perfilMinimoHeadless(): Promise<PerfilMinimo> {
+  let tier: PerfilMinimo["tier"] = "MEDIO";
+  let memoriaGB: number | null = null;
+  let saveData: boolean | null = null;
+  let redTipo: string | null = null;
+  let storageLibreMB: number | null = null;
+  try {
+    const d = await obtenerDispositivo();
+    tier = d.tier;
+    memoriaGB = d.memoriaGB;
+    saveData = d.red.saveData;
+    redTipo = d.red.tipo;
+    storageLibreMB = d.storageLibreMB;
+  } catch {
+    /* señales default — resolverMotor jamás lanza y cae al motor seguro */
+  }
+  return {
+    tier,
+    benchmark: { ejecutado: false, score: null },
+    runtime: { wasmSimd: wasmSimdDisponible() },
+    sync: { memoriaGB, saveData, redTipo },
+    async: { storageLibreMB },
+    gpu: { renderer: gpuRenderer() },
+  };
+}
+
+async function crearSesiones(
+  ort: OrtModule,
+  opts: { executionProviders: string[] },
+  m: MotorModelos,
+): Promise<RapidRuntime> {
+  const M = MODELOS[m];
+  const [det, cls, rec, dictResp] = await Promise.all([
+    ort.InferenceSession.create(`${PUBLIC_BASE}${M.det}`, opts),
+    ort.InferenceSession.create(`${PUBLIC_BASE}${M.cls}`, opts),
+    ort.InferenceSession.create(`${PUBLIC_BASE}${M.rec}`, opts),
+    fetch(`${PUBLIC_BASE}${M.dict}`),
+  ]);
+  if (!dictResp.ok) throw new Error(`${M.dict} HTTP ${dictResp.status}`);
+  const dict = (await dictResp.text()).split("\n").filter((l) => l.length > 0);
+  return { ort, det, cls, rec, dict };
+}
+
+/** Soltar sesiones (extraído de rapidOcrReiniciar — reutilizado por la sonda
+ *  para NO dejar sesiones v5 huérfanas si el timeout la abandona). */
+async function soltarRuntime(rt: RapidRuntime): Promise<void> {
+  const sesiones = [rt.det, rt.cls, rt.rec] as Array<
+    OrtSession & { release?: () => unknown }
+  >;
+  for (const s of sesiones) {
+    try {
+      await s.release?.();
+    } catch {
+      /* sesión ya muerta — seguir con la siguiente */
+    }
+  }
+}
+
+/** Resuelve el set de modelos con el router + sonda de carga real para v5.
+ *  JAMÁS lanza: cualquier imprevisto ⇒ v4 (el motor de siempre). El flag
+ *  `ocrMotorAdaptativo=false` y el override manual del dueño viajan por la
+ *  cadena del router (fase 2 los registró en FlagsApp). */
+async function resolverModeloDeArranque(
+  ort: OrtModule,
+  opts: { executionProviders: string[] },
+): Promise<MotorModelos> {
+  try {
+    const flags = leerFlags();
+    const res = resolverMotor(await perfilMinimoHeadless(), {
+      flagOn: flags.ocrMotorAdaptativo !== false,
+      overrideManual: flags.ocrMotor ?? null,
+      presionReciente: presionReciente(),
+    });
+    const m = motorADeModelos(res.motor);
+    logger.info(
+      `[ocr-router] motor=${res.motor} modelos=${m} origen=${res.origen} — ${res.motivo}`,
+    );
+    if (m !== "v5") return m;
+    // La sonda de carga real es el gate de v5 — el deviceMemory NO garantiza
+    // los buffers del detector (protocolo v2; también cubre el override
+    // manual: el contrato del router exige sonda para ppocrv5).
+    let abandonada = false;
+    const sonda = await ejecutarSondaCarga(async () => {
+      const rt = await crearSesiones(ort, opts, "v5");
+      if (abandonada) {
+        void soltarRuntime(rt); // timeout nos dejó huérfanos — limpiar
+        return false;
+      }
+      const c = canvasCon(320, 120);
+      const ctx = ctxDe(c);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, 320, 120);
+      ctx.fillStyle = "#000000";
+      ctx.font = "bold 28px monospace";
+      ctx.fillText("E14 SONDA 1234", 12, 70);
+      const r = await rapidOcrReconocer(rt, c.toDataURL("image/png"));
+      void soltarRuntime(rt); // la sonda NO es el runtime de producción
+      return r.lineas.length > 0 && r.confMedia >= 0.4;
+    }, 8000);
+    abandonada = true;
+    if (sonda.ok) {
+      logger.info(`[ocr-router] sonda de carga v5 OK (${sonda.ms} ms) — modelos PP-OCRv5 activos`);
+      return "v5";
+    }
+    logger.info(
+      `[ocr-router] sonda de carga v5 FALLO (${sonda.ms} ms) — v4 y castigo ${DIAS_NO_REINTENTAR} días (localStorage)`,
+    );
+    return "v4";
+  } catch (e) {
+    logger.info(
+      `[ocr-router] fallo resolviendo motor (v4 por seguridad): ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return "v4";
+  }
 }
 
 // ─── Init (singleton — el 2.º informe no re-descarga nada) ──────────────────
@@ -148,19 +353,19 @@ export function rapidOcrPrecalentar(): Promise<boolean> {
 export async function rapidOcrReiniciar(): Promise<void> {
   if (!rtSingleton) return;
   try {
-    const rt = await rtSingleton;
-    const sesiones = [rt.det, rt.cls, rt.rec] as Array<
-      OrtSession & { release?: () => unknown }
-    >;
-    for (const s of sesiones) {
-      try {
-        await s.release?.();
-      } catch {
-        /* sesión ya muerta — seguir con la siguiente */
-      }
-    }
+    await soltarRuntime(await rtSingleton);
   } catch {
     /* el singleton ya estaba roto — nada que soltar */
+  }
+  // KIT ocr-router-v1 fase 3 — gobernador reactivo: si el runtime que murió
+  // era v5, el kill/OOM del watchdog cuenta como presión (patrón
+  // reportarPresionGama): 2 fallos en 3 min ⇒ la PRÓXIMA init degrada a v4
+  // por el resto de la sesión (resolverMotor paso 2, origen
+  // «gobernador-presion»).
+  if (motorModelosActual === "v5" && reportarPresionMotor("ppocrv5")) {
+    logger.info(
+      "[ocr-router] gobernador: 2 fallos de v5 en 3 min — la próxima init degrada a v4 (resto de la sesión)",
+    );
   }
   rtSingleton = null;
   prewarmHecho = null;
@@ -190,18 +395,12 @@ async function initReal(): Promise<RapidRuntime> {
   ort.env.wasm.proxy = true;
 
   const opts = { executionProviders: ["wasm"] };
-  const [det, cls, rec, dictResp] = await Promise.all([
-    ort.InferenceSession.create(`${PUBLIC_BASE}/models/rapidocr/ch_PP-OCRv4_det_infer.onnx`, opts),
-    ort.InferenceSession.create(
-      `${PUBLIC_BASE}/models/rapidocr/ch_ppocr_mobile_v2.0_cls_infer.onnx`,
-      opts,
-    ),
-    ort.InferenceSession.create(`${PUBLIC_BASE}/models/rapidocr/ch_PP-OCRv4_rec_infer.onnx`, opts),
-    fetch(`${PUBLIC_BASE}/models/rapidocr/ppocr_keys.txt`),
-  ]);
-  if (!dictResp.ok) throw new Error(`ppocr_keys.txt HTTP ${dictResp.status}`);
-  const dict = (await dictResp.text()).split("\n").filter((l) => l.length > 0);
-  return { ort, det, cls, rec, dict };
+  // KIT ocr-router-v1 fase 3 — resolver el set de modelos ANTES de crear
+  // sesiones: v4 byte-idéntico a hoy (flag OFF / motor base) o v5 (ALTO+SIMD
+  // u override) con sonda de carga real como gate. Jamás lanza.
+  const modelo = await resolverModeloDeArranque(ort, opts);
+  motorModelosActual = modelo;
+  return crearSesiones(ort, opts, modelo);
 }
 
 // ─── Utilidades de imagen ───────────────────────────────────────────────────

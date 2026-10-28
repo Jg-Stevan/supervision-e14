@@ -160,6 +160,12 @@ export function leerOverridesFlags(): Partial<FlagsApp> {
     // de capa 0 en main byte-idéntica a hoy) sería inalcanzable (DOBLE
     // whitelist — cada puerta su línea).
     if (typeof o.capa0QrWorker === "boolean") limpio.capa0QrWorker = o.capa0QrWorker;
+    // KIT ocr-router-v1 — mismo criterio: sin estas líneas los overrides
+    // localStorage del kill-switch `ocrMotorAdaptativo` y del motor manual
+    // `ocrMotor` serían inalcanzables (DOBLE whitelist — cada puerta su
+    // línea).
+    if (typeof o.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = o.ocrMotorAdaptativo;
+    if (o.ocrMotor === "ppocrv5" || o.ocrMotor === "tesseract-best-psm4") limpio.ocrMotor = o.ocrMotor;
     return limpio;
   } catch {
     return {};
