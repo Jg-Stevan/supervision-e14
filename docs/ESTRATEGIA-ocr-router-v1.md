@@ -193,3 +193,41 @@ de corrida se auto-identifica.
 Pendiente honesto: que el `benchmark.score` viaje del provider al perfil
 headless del motor (hoy null honesto — la sonda de carga real es el gate;
 el score solo refinaría el origen `medio-elegible-upgrade` del arranque).
+
+## Fase 5 — selector-motor-v1: el dueño elige el modelo (auto por defecto)
+
+Pedida con datos (informe-masiva 21:26, laptop MEDIO): la tarjeta de fase 4
+solo aparecía en `medio-elegible-upgrade` o con override vigente — un
+dispositivo NO elegible no tenía forma de probar v5 sin consola. Además el
+`benchmark.score` no viaja al perfil headless del motor, así que la ruta de
+elegibilidad ni siquiera evaluaba en el arranque real (informe con motivo
+«Gama MEDIO … base segura», origen `tier`).
+
+1. **Selector «Motor OCR — elige el modelo»** (`panel-perfil.tsx`): tres
+   opciones — Automático (el router decide, DEFAULT), Motor base
+   (`tesseract-best-psm4`) y PP-OCRv5 — visible en TODOS los tiers. Escribe
+   el override por la puerta oficial (`guardarOverridesFlags`, DOBLE
+   whitelist); `null` = retirar (el router recupera la decisión).
+2. **La decisión del dueño se RESPETA**: ya estaba en el paso 1 de la cadena
+   (`override-manual` manda sobre gobernador, castigos y tier — PR #10); el
+   selector la hace alcanzable desde la UI para CUALQUIER dispositivo (p. ej.
+   probar v5 en BAJO/MEDIO).
+3. **Sonda de carga con ventana honesta** (`rapidocr.ts`): 8 s en modo
+   automático (protocolo v2 intacto) → 30 s cuando el origen es
+   `override-manual` (el dueño pidió esperar explícitamente; la valla de 8 s
+   es la sospecha #1 del «se canceló por mucho tiempo» del A/B 21:26).
+4. **Castigo visible y administrable** (`router-ocr.ts`): `infoCastigoV5()`
+   expone el estado (falló hace X · reintenta en Y) y `limpiarCastigoV5()`
+   lo limpia a petición del dueño — el castigo es una política del modo
+   automático, NO una valla para el dueño (D6). Un override manual jamás lo
+   consulta (paso 1 de la cadena manda).
+5. **APLICAR AHORA sin recargar** (`rapidocr.ts`):
+   `reiniciarMotorOcrSiInactivo()` suelta el singleton SOLO si no hay
+   inferencia en vuelo (contador en `rapidOcrReconocer`; los probes de ~ms
+   quedan fuera a propósito: una carrera ahí se auto-repara, una corrida no).
+   El panel importa rapidocr DINÁMICAMENTE al hacer clic (el módulo del motor
+   pre-calienta al importarse — nunca por visitar el perfil).
+
+Pendiente honesto (igual que fase 4): que el `benchmark.score` viaje del
+provider al perfil headless — con el selector ya no bloquea al dueño (puede
+fijar el motor a mano); solo refinaría el origen `medio-elegible-upgrade`.

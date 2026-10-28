@@ -444,3 +444,29 @@ Task ID: 16 — RESULTADO
   de carga real es el gate real).
 - Verificación: tsc --noEmit → 9 errores TS2307 de assets PRE-EXISTENTES
   (9 = 9 baseline con stash — fuera de alcance); eslint → 0/0.
+
+Task ID: 17 — selector-motor-v1 (fase 5): el dueño elige el modelo OCR
+- Pedido con datos (informe 21:26, laptop MEDIO): la tarjeta de fase 4 era
+  condicional (medio-elegible-upgrade / override vigente) y el informe real
+  vino con origen «tier» + motivo del fallback plano de MEDIO — sin override
+  en la init y SIN tarjeta visible: no había forma de probar v5 sin consola.
+- panel-perfil.tsx: la tarjeta fase 4 se convierte en SELECTOR de motor
+  (radiogroup, todos los tiers): Automático (default, el router decide) /
+  Motor base / PP-OCRv5. fijarMotor() escribe el override vía
+  guardarOverridesFlags (null = retirar); descripción honesta por opción +
+  ADVERTENCIA cuando el dueño fuerza v5 que el router no elegiría (resolución
+  SIN override nueva: resolverRecomendacionRouter) + castigo v5 visible con
+  LIMPIAR CASTIGO (infoCastigoV5/limpiarCastigoV5 nuevas en router-ocr.ts) +
+  APLICAR AHORA (reinicia el motor sin recargar).
+- rapidocr.ts: reiniciarMotorOcrSiInactivo() — suelta el singleton SOLO si no
+  hay inferencia en vuelo (contador en rapidOcrReconocer via wrapper
+  rapidOcrReconocerInterno; probes fuera del conteo: auto-reparables). La
+  sonda de carga sube 8 s → 30 s cuando origen=override-manual (el dueño
+  pidió esperar; sospecha #1 del «se canceló por mucho tiempo» del A/B).
+  El panel importa rapidocr dinámicamente en el click (el módulo pre-calienta
+  al importarse — nunca por visitar el perfil).
+- D6 íntegro: auto por defecto; la decisión del dueño se respeta (paso 1 de
+  la cadena manda sobre gobernador/castigos/tier); la sonda de carga sigue
+  siendo el gate técnico (fallo ⇒ v4 honesto, la corrida jamás se tumba).
+- Verificación: tsc --noEmit → 9 errores TS2307 de assets PRE-EXISTENTES
+  (baseline 9 = 9); eslint → 0/0.
