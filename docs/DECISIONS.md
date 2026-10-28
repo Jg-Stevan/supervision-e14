@@ -907,3 +907,46 @@ avanzando (5→50/58), cola persistente restauró 48/58 tras recarga Y tras crá
 sandbox**: el sondeo worker nunca superó 833 ms (kill a 1500/3500 ms) — la hambruna real del
 dueño (12 MP × lotes grandes + REVISIÓN abierta) es el disparador; el CB se arma solo con su
 señal ya medida. tsc 0 · lint 0/0 · 0 errores de consola de la app.
+
+---
+
+## D37 — Despliegue en CLOUDFLARE PAGES: `_headers` COOP/COEP + CI/CD desde GitHub (kit e14-cloudflare-pages-v1)
+
+**Fecha:** 2026-10-28 · **Origen:** el dueño migra el hosting (GitHub Pages → Cloudflare
+Pages) y entrega tokens de GitHub + Cloudflare para subir y dejar el pipeline completo.
+
+**Por qué Cloudflare Pages.** GitHub Pages no permite cabeceras HTTP → el perfil del
+dispositivo (kit perfil-recursos-v1) reporta «Hilos WASM inactivos» porque falta
+crossOriginIsolated. Cloudflare Pages SÍ: un archivo `_headers` en la raíz del export activa
+COOP/COEP → SharedArrayBuffer → los workers OCR (onnxruntime-web) y QR (zxing-wasm) usan
+HILOS REALES + SIMD en paralelo. El OCR es el 98 % del cuello del pipeline (D34) — esta es
+la palanca grande que GitHub Pages nunca pudo dar.
+
+**Qué se hizo.**
+1. `public/_headers` global: `Cross-Origin-Opener-Policy: same-origin` +
+   `Cross-Origin-Embedder-Policy: require-corp` en `/*`. Seguro: el sitio es 100 % same-origin
+   (sin CDNs, sin iframes — verificado por grep; pdf.js/OCR/QR/wasm viajan en /public).
+2. Correcciones del kit perfil-recursos-v1 que impedían compilar (el commit dd3e6db se hizo
+   sin build de verificación — lección): panel-perfil.tsx línea del DPR (guard que no
+   estrechaba `s` → `s && s.sync.dpr !== null`) y clasificador.ts comparación muerta
+   `s.sync.saveData !== true` (TS ya estrecha tras el `else if saveData===true` de §4.4).
+3. basePath VACÍO en Cloudflare (sirve en raíz) vs `/supervision-e14` en GitHub Pages.
+   El build para CF NO define NEXT_PUBLIC_BASE_PATH — next.config.ts ya lo resuelve por env.
+4. CI/CD: workflow `.github/workflows/cloudflare-pages.yml` (push a main → build →
+   `wrangler pages deploy out --project-name=supervision-e14`) con secrets
+   CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID en GitHub. El workflow de GitHub Pages
+   (pages.yml) queda intacto y sigue desplegando — ambos despliegues conviven.
+5. Deploy inicial directo (wrangler desde sandbox) + verificación E2E contra la URL de
+   producción: crossOriginIsolated=true, panel con las 5 capacidades en verde, monitor y
+   perfil íntegros en móvil 375px.
+
+**Contratos:** sin cambios de lógica de negocio. `_headers` es infraestructura de hosting
+(Next lo copia de public/ a out/ tal cual). El modo GitHub Pages sigue intacto (mismo
+export, basePath por env) — ambos despliegues conviven mientras el dueño corta el DNS.
+
+**Verificación E2E (agente-browser contra out/ con cabeceras simuladas y contra la URL
+de producción):** título «Sistema de Monitoreo Electoral E-14» · chip «GAMA BAJO · TABLET»
+en header · vista Perfil del dispositivo con GAMA/FORMA/CONFIANZA 100 %/BENCHMARK ·
+Capacidades del runtime: WASM SIMD ✓ Hilos WASM ✓ COOP/COEP ✓ (crossOriginIsolated=true) ·
+Plan de recursos recomendado y Evidencia del tier íntegros · responsive 375 px OK ·
+0 errores de consola. `tsc 0 · lint 0/0`.

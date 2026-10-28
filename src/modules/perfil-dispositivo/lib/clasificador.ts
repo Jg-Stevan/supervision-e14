@@ -200,7 +200,8 @@ export function clasificar(
     else if (bateriaDebil) tier = "BAJO";
     else if (storageDebil) tier = "BAJO";
     else if (s.sync.memoriaGB !== null) {
-      if (s.sync.memoriaGB >= 4 && nucOk && redOk && s.sync.saveData !== true) tier = "ALTO";
+      // saveData===true ya cortó a BAJO más arriba (§4.4) — TS lo estrecha aquí.
+      if (s.sync.memoriaGB >= 4 && nucOk && redOk) tier = "ALTO";
       else tier = "MEDIO";
     } else if (nucOk && heapOk) {
       tier = "ALTO";

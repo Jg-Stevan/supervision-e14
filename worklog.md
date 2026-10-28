@@ -176,3 +176,33 @@ Task ID: 8 (cont.) — D36 AUDITORÍA DE REGLAS + CORTOCIRCUITO SONDEO
 - R2 CB del sondeo implementado (flags.sondeoQrCortocircuito, default true): ≥3 kills/min → pausa 30 s self-healing. Flag plumbing probado EN VIVO (override 500 ms → aborts a ~500 ms). Disparo real no reproducible en sandbox (sondeos máx 833 ms vs kill 1500/3500) — se arma con la señal real del dueño.
 - R3 capas dedup en orden correcto VERIFICADO EN VIVO (dup byte-exacto vetadas pre-sondeo). R4 dhash ya fuera en gama BAJO (D74). R5 watchdog/rescate/relectura acotados (D65 existe — P0 del reporte no aplica). R6 cuello = OCR 98%; palancas restantes: precalor (ya) + persistencia whole-record (P2, decisión del dueño).
 - Estrés E2E: 58 archivos (únicas/dup/12MP) + recarga + cráter del navegador → cola restauró 48/58 (prevención de reinicios OK), runner re-armado, 0 errores de app. tsc 0 · lint 0/0.
+
+---
+Task ID: 9
+Agent: Z.ai Code (orquestador principal)
+Task: El dueño entrega tokens (GitHub + Cloudflare) y pide «ayudame a subirlo» — subir el
+commit pendiente dd3e6db (perfil-recursos-v1) y desplegar a Cloudflare Pages (D37).
+
+Plan (leer si la sesión muere):
+1. Build de verificación ANTES de push (el commit dd3e6db se hizo sin build — encontrar
+   errores de TS si los hay, corregir, documentar).
+2. public/_headers (COOP/COEP) → hilos WASM reales en Cloudflare (la palanca OCR del D34) — decisión documentada como D37 (su D36 ya existía en origin: auditoría).
+3. Deploy wrangler → proyecto supervision-e14 → verificación E2E contra producción.
+4. Commit + PUSH INMEDIATO (lección D32) + secrets de GitHub para CI/CD.
+
+Task ID: 9 — RESULTADO
+- Build inicial FALLÓ: 2 errores TS del kit perfil-recursos-v1 (panel-perfil.tsx DPR guard
+  sin estrechar; clasificador.ts `saveData !== true` muerta por estrechamiento §4.4).
+  Corregidos — lógica intacta, solo tipos/guards.
+- public/_headers: COOP same-origin + COEP require-corp en /*. Sitio 100 % same-origin
+  (grep: sin CDNs ni iframes) → require-corp seguro. Next lo copia a out/ automáticamente.
+- Cloudflare Pages: proyecto `supervision-e14` creado (account d6515fed) y DEPLOYADO →
+  **https://supervision-e14.pages.dev** (79 archivos, _headers reconocido).
+- Verificación PRODUCCIÓN (agent-browser): título OK · crossOriginIsolated=true /
+  SharedArrayBuffer OK · Perfil del dispositivo completo con las 5 capacidades del runtime
+  en VERDE (la nota «Hilos WASM inactivos» ya NO aparece) · chip GAMA BAJO · TABLET ·
+  assets críticos 200 (onnx OCR, zxing wasm, _next) · responsive 375 px OK · 0 errores.
+- CI/CD: .github/workflows/cloudflare-pages.yml (push main → build sin basePath →
+  wrangler pages deploy) + secrets CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID en GitHub.
+- GitHub Pages (pages.yml) intacto y conviviendo — basePath /supervision-e14 solo ahí.
+- Detalle completo en docs/DECISIONS.md D37.

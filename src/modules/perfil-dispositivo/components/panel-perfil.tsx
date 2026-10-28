@@ -328,7 +328,7 @@ export function VistaPerfil() {
             k="Resolución física"
             v={s ? `${Math.round((s.sync.pantallaW ?? 0) * (s.sync.dpr ?? 1))} × ${Math.round((s.sync.pantallaH ?? 0) * (s.sync.dpr ?? 1))}` : "—"}
           />
-          <Fila k="DPR" v={s?.sync.dpr !== null && s !== undefined ? String(s.sync.dpr) : "—"} />
+          <Fila k="DPR" v={s && s.sync.dpr !== null ? String(s.sync.dpr) : "—"} />
           <Fila k="Puntos táctiles" v={fmtN(s?.sync.touchMax ?? null, "máx")} />
         </Tarjeta>
 

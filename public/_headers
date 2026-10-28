@@ -1,0 +1,8 @@
+# Cloudflare Pages — cabeceras globales (ver docs/DECISIONS.md D37)
+# COOP/COEP activan crossOriginIsolated → SharedArrayBuffer → hilos WASM
+# reales en los workers OCR/QR (onnxruntime-web / zxing-wasm). Todo el sitio
+# es same-origin (sin CDNs ni iframes externos), require-corp es seguro.
+# El panel «Perfil del dispositivo» muestra el estado en pantalla.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
