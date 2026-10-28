@@ -3,14 +3,9 @@
 import { AlertTriangle, Check, Clock, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
-import type { AccionMesa, EstadoDelegado, Mesa } from "../domain/types";
+import type { EstadoDelegado, Mesa } from "../domain/types";
 import { StatusBadge } from "./status-badge";
 import { useDatos } from "./datos-provider";
-
-const ETIQUETAS_ACCION: Record<AccionMesa, string> = {
-  reinspeccionar: "Reinspeccionar",
-  notificar: "Notificar",
-};
 
 function ChipParte({
   etiqueta,
@@ -53,11 +48,17 @@ function ChipParte({
  * Sub-tabla de mesas de un puesto expandido (kit SUP-1 §2.4).
  * Fondo hundido (surface-lowest).
  *
- * KIT SUP-3 T4: las acciones ahora tienen ESTADO real (mock):
- * - REINSPECCIONAR: spinner ~2.5 s → resuelve el alerta "Rescaneo",
- *   recalcula mesa y puesto, agrega notificación + toast (el store lo
- *   hace; aquí solo se desencadena y se muestra el estado de carga).
- * - NOTIFICAR: agrega notificación + toast; la mesa NO cambia.
+ * KIT SUP-3 T4: la acción REINSPECCIONAR tiene ESTADO real (mock):
+ * spinner ~2.5 s → resuelve el alerta "Rescaneo", recalcula mesa y
+ * puesto, agrega notificación + toast (el store lo hace; aquí solo se
+ * desencadena y se muestra el estado de carga).
+ *
+ * KIT monitor-jornada-v1 — retiro del botón NOTIFICAR (pedido del dueño:
+ * «en el momento no se está utilizando»): la única acción de mesa es
+ * REINSPECCIONAR, y SOLO se pinta cuando `accionSugerida ===
+ * "reinspeccionar"` (mesas con alerta de rescaneo). Para el resto de
+ * mesas la columna Acción muestra únicamente el botón fantasma VER ACTA.
+ * El campo `accionSugerida` del dominio queda intacto (dato, no UI).
  *
  * KIT SUP-4 T3.4: botón fantasma VER ACTA (FileText) por fila — abre el
  * visor en TRANSMISIÓN página 1; deshabilitado en mesas sin transmisión
@@ -68,14 +69,12 @@ export function MesasSubtable({
   puestoId,
   mesaEnAccionId,
   onReinspeccionar,
-  onNotificar,
 }: {
   mesas: Mesa[];
   puestoId: string;
   /** Mesa con acción en curso (spinner en SU botón). */
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
-  onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }) {
   const { abrirVisor } = useDatos();
   if (mesas.length === 0) {
@@ -148,31 +147,26 @@ export function MesasSubtable({
                 </td>
                 <td className="py-2.5">
                   <span className="flex items-center gap-1.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={enAccion || mesaEnAccionId !== null}
-                      className={cn(
-                        "label-caps h-11 w-36 border px-3 shadow-none hover:bg-transparent disabled:opacity-70",
-                        esReinspeccion
-                          ? "border-(--danger) text-(--danger) hover:bg-(--danger)/10"
-                          : "border-(--warning) text-(--warning) hover:bg-(--warning)/10"
-                      )}
-                      onClick={() =>
-                        esReinspeccion
-                          ? void onReinspeccionar(puestoId, mesa.id)
-                          : void onNotificar(puestoId, mesa.id)
-                      }
-                    >
-                      {enAccion ? (
-                        <>
-                          <Loader2 className="size-4 animate-spin" aria-hidden />
-                          Procesando…
-                        </>
-                      ) : (
-                        ETIQUETAS_ACCION[mesa.accionSugerida]
-                      )}
-                    </Button>
+                    {/* Retiro NOTIFICAR (kit monitor-jornada-v1): la acción
+                        de mesa SOLO existe para rescaneos pendientes. */}
+                    {esReinspeccion && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={enAccion || mesaEnAccionId !== null}
+                        className="label-caps h-11 w-36 border border-(--danger) px-3 text-(--danger) shadow-none hover:bg-(--danger)/10 disabled:opacity-70"
+                        onClick={() => void onReinspeccionar(puestoId, mesa.id)}
+                      >
+                        {enAccion ? (
+                          <>
+                            <Loader2 className="size-4 animate-spin" aria-hidden />
+                            Procesando…
+                          </>
+                        ) : (
+                          "Reinspeccionar"
+                        )}
+                      </Button>
+                    )}
                     {/* KIT SUP-4 — VER ACTA (punto de entrada 1/3). */}
                     <Button
                       variant="ghost"

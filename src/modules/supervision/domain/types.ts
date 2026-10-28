@@ -5,6 +5,8 @@
  * el contrato de dominio y no dependen de ninguna librería externa.
  */
 
+import type { DiaJornada } from "./jornada";
+
 /** Estado global de un puesto de votación. */
 export type EstadoGlobal = "COMPLETO" | "CRITICO" | "PENDIENTE" | "NO_INICIADO";
 
@@ -60,6 +62,13 @@ export interface Puesto {
   /** Porcentaje de transmisión completada (0-100). */
   pctTransmision: number;
   estadoGlobal: EstadoGlobal;
+  /**
+   * Día de la jornada electoral en el que VOTA el puesto (kit
+   * monitor-jornada-v1). Derivado del prefijo real del catálogo DIVIPOLA
+   * («LUNES LISBOA…», «SABADO LISBOA…»); los puestos base sin prefijo son
+   * la jornada de cierre del DOMINGO (día de elecciones en Colombia).
+   */
+  diaJornada: DiaJornada;
 }
 
 /** Parte (P1 o P2) de la transmisión de una mesa, con alerta opcional. */
@@ -101,8 +110,11 @@ export interface Supervisor {
 export interface FiltrosPuestos {
   /** Código de país exacto (p. ej. "499"). */
   pais?: string;
-  /** Fecha del calendario electoral (select mock). */
-  fecha?: string;
+  /**
+   * Día de la jornada electoral seleccionado (kit monitor-jornada-v1).
+   * undefined = todos los días (sin filtro).
+   */
+  fecha?: DiaJornada;
   /** Identificador de zona exacto. */
   zona?: string;
   /** Puesto exacto (p. ej. "02 - Roma"). */

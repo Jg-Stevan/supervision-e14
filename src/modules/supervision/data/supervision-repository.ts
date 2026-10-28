@@ -36,9 +36,6 @@ export interface SupervisionRepository {
     puestoId: string,
     mesaId: string
   ): Promise<{ mesa: Mesa; notificacion: Notificacion } | null>;
-  /** T4 — NOTIFICAR: registra "Supervisor notificó a la mesa N (Puesto)".
-   * El estado de la mesa NO cambia. */
-  notificarMesa(puestoId: string, mesaId: string): Promise<Notificacion>;
   /** T3 — una transición de vida (mesa EN_PROCESO → COMPLETO), con
    * preferencia por la que COMPLETA su puesto (KPIs en vivo). */
   aplicarTransicionVida(): Promise<TransicionVida | null>;

@@ -74,7 +74,6 @@ interface PuestosTableProps {
   expandidoInicialId?: string;
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
-  onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }
 
 export function PuestosTable({
@@ -83,7 +82,6 @@ export function PuestosTable({
   expandidoInicialId,
   mesaEnAccionId,
   onReinspeccionar,
-  onNotificar,
 }: PuestosTableProps) {
   const [expandidos, setExpandidos] = useState<Set<string>>(
     () => new Set(expandidoInicialId ? [expandidoInicialId] : [])
@@ -148,7 +146,6 @@ export function PuestosTable({
             onToggle={toggle}
             mesaEnAccionId={mesaEnAccionId}
             onReinspeccionar={onReinspeccionar}
-            onNotificar={onNotificar}
           />
         ))}
       </table>
@@ -168,7 +165,6 @@ const PuestoRow = memo(function PuestoRow({
   onToggle,
   mesaEnAccionId,
   onReinspeccionar,
-  onNotificar,
 }: {
   puesto: Puesto;
   mesas: Mesa[];
@@ -176,7 +172,6 @@ const PuestoRow = memo(function PuestoRow({
   onToggle: (id: string) => void;
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
-  onNotificar: (puestoId: string, mesaId: string) => Promise<void>;
 }) {
   const acento = colorDeEstado(puesto.estadoGlobal);
   const { abrirVisorDePuesto } = useDatos();
@@ -263,7 +258,6 @@ const PuestoRow = memo(function PuestoRow({
                 puestoId={puesto.id}
                 mesaEnAccionId={mesaEnAccionId}
                 onReinspeccionar={onReinspeccionar}
-                onNotificar={onNotificar}
               />
             </TableCell>
           </TableRow>

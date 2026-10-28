@@ -6,7 +6,7 @@ import { KpiCard, type TonoKpi } from "./kpi-card";
 import { PuestosTable } from "./puestos-table";
 import { ResumenChips } from "./resumen-chips";
 import { EsqueletoMonitor } from "./esqueleto";
-import { useDatos, useDatosTicker } from "./datos-provider";
+import { useDatos, useDatosTicker, resumenDePuestos } from "./datos-provider";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
 /**
@@ -15,16 +15,20 @@ import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
  * primera carga, ticker de sincronización, KPI cards clickeables (filtro
  * de estado toggle) y tabla con transiciones en vivo. El estado inicial
  * (D6) NUNCA muta: 20/5/1/4/10 exactos al cargar.
+ *
+ * KIT monitor-jornada-v1: el select FECHA lista la semana electoral real
+ * (lun 15 → dom 21 de junio de 2026). Elegir un día filtra la matriz Y
+ * los KPIs — cada jornada se supervisa aislada, sin mezclar puestos de
+ * días distintos (pedido del dueño). La regla de resumen es la MISMA
+ * derivación del store (resumenDePuestos) sobre el conjunto del día.
  */
 export function VistaMonitor() {
   const {
     cargando,
     puestos,
     mesasPorPuesto,
-    resumen,
     mesaEnAccionId,
     reinspeccionar,
-    notificar,
   } = useDatos();
   // D42 — KIT e14-monitor-memo-v1: los segundos del ticker viven en su
   // contexto hoja — este componente (y las 949 filas) ya NO re-renderiza
@@ -32,9 +36,24 @@ export function VistaMonitor() {
   const { segundos: segundosDesdeSync } = useDatosTicker();
   const [filtros, setFiltros] = useState<FiltrosPuestos>({});
 
+  // Conjunto del DÍA (solo filtro de fecha): alimenta KPIs y resumen —
+  // los otros filtros (país/zona/puesto/búsqueda/estado toggle) siguen
+  // afectando SOLO la matriz, como hoy.
+  const puestosDelDia = useMemo(
+    () =>
+      filtros.fecha
+        ? puestos.filter((puesto) => puesto.diaJornada === filtros.fecha)
+        : puestos,
+    [puestos, filtros.fecha]
+  );
+  const resumenDelDia = useMemo(
+    () => resumenDePuestos(puestosDelDia),
+    [puestosDelDia]
+  );
+
   const filtrados = useMemo(() => {
     const q = filtros.busqueda?.trim().toLowerCase() ?? "";
-    return puestos.filter((puesto) => {
+    return puestosDelDia.filter((puesto) => {
       if (filtros.pais && puesto.codigoPais !== filtros.pais) return false;
       if (filtros.zona && puesto.zonaId !== filtros.zona) return false;
       if (filtros.puesto && puesto.puesto !== filtros.puesto) return false;
@@ -53,7 +72,7 @@ export function VistaMonitor() {
       }
       return true;
     });
-  }, [puestos, filtros]);
+  }, [puestosDelDia, filtros]);
 
   /** T3 — clic en KPI de estado = toggle del filtro equivalente. */
   const alternarFiltroEstado = (estado: EstadoGlobal) =>
@@ -76,23 +95,23 @@ export function VistaMonitor() {
     tono: TonoKpi;
     estado?: EstadoGlobal;
   }[] = [
-    { titulo: "Total puestos", valor: resumen.total, tono: "neutral" },
+    { titulo: "Total puestos", valor: resumenDelDia.total, tono: "neutral" },
     {
       titulo: "Completo",
-      valor: resumen.completo,
+      valor: resumenDelDia.completo,
       tono: "success",
       estado: "COMPLETO",
     },
-    { titulo: "Crítico", valor: resumen.critico, tono: "danger", estado: "CRITICO" },
+    { titulo: "Crítico", valor: resumenDelDia.critico, tono: "danger", estado: "CRITICO" },
     {
       titulo: "Pendiente",
-      valor: resumen.pendiente,
+      valor: resumenDelDia.pendiente,
       tono: "warning",
       estado: "PENDIENTE",
     },
     {
       titulo: "No iniciado",
-      valor: resumen.noIniciado,
+      valor: resumenDelDia.noIniciado,
       tono: "neutral",
       estado: "NO_INICIADO",
     },
@@ -119,7 +138,7 @@ export function VistaMonitor() {
       <section className="space-y-4" aria-label="Monitor global">
         <FiltrosBar puestos={puestos} filtros={filtros} onFiltros={setFiltros} />
         <ResumenChips
-          resumen={resumen}
+          resumen={resumenDelDia}
           sincronizadoHace={`Sincronizado hace ${segundosDesdeSync}s`}
         />
         <PuestosTable
@@ -128,7 +147,6 @@ export function VistaMonitor() {
           expandidoInicialId={filtrados[0]?.id}
           mesaEnAccionId={mesaEnAccionId}
           onReinspeccionar={reinspeccionar}
-          onNotificar={notificar}
         />
       </section>
     </div>

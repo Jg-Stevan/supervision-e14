@@ -41,6 +41,7 @@ import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
 import { consultarActaRuntime } from "./actas-runtime";
 import { ID_ENLACE_ROMA, CARGAR_CATALOGO } from "./divipola-adapter";
 import { crearRandomDeterministico } from "../domain/acta";
+import { diaDeNombrePuesto } from "../domain/jornada";
 import type { SupervisionRepository } from "./supervision-repository";
 import {
   aprobarActaMock,
@@ -137,7 +138,9 @@ const HORARIO_ROMA = {
 /** Registro canónico → fila de la tabla (`Puesto`). El `id` ES el
  * `idEnlace` divipola (D22): re-ancla mesas, actas, anomalías y el join
  * futuro con el digitalizador. Códigos reales del catálogo, sin
- * transformar (§2.3). */
+ * transformar (§2.3). KIT monitor-jornada-v1: el día de la jornada se
+ * DERIVA del nombre real del catálogo (prefijo LUNES…SABADO; puestos
+ * base sin prefijo = DOMINGO — jornada de cierre, 2.181 mesas). */
 function puestoDeRegistro(registro: PuestoDivipola): Puesto {
   const esAncla = registro.idEnlace === ID_ENLACE_ROMA;
   // D26: ancla de práctica El Cairo — se FUERZA a COMPLETO (mismo
@@ -162,6 +165,7 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
     pctDelegado: 0,
     pctTransmision: 0,
     estadoGlobal: esAncla ? "CRITICO" : esAnclaCairo ? "COMPLETO" : estadoPorSeed(random()),
+    diaJornada: diaDeNombrePuesto(registro.nombre),
   };
 }
 
@@ -626,6 +630,8 @@ function fusionarActaRuntime(
 function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   if (!f) return true;
   if (f.pais && puesto.codigoPais !== f.pais) return false;
+  // KIT monitor-jornada-v1: filtro por día de la jornada electoral.
+  if (f.fecha && puesto.diaJornada !== f.fecha) return false;
   if (f.zona && puesto.zonaId !== f.zona) return false;
   if (f.puesto && puesto.puesto !== f.puesto) return false;
   if (f.estado && puesto.estadoGlobal !== f.estado) return false;
@@ -698,23 +704,6 @@ export const mockSupervisionRepository: SupervisionRepository = {
     );
     NOTIFICACIONES.unshift(notificacion);
     return { mesa: { ...mesa }, notificacion: { ...notificacion } };
-  },
-
-  async notificarMesa(puestoId, mesaId) {
-    await conLatencia(true);
-    const puesto = puestoPorId(puestoId);
-    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
-    if (!puesto || !mesa) {
-      // Sin puesto/mesa no hay notificación posible (jamás inventar).
-      return crearNotificacion("sistema", "Supervisor notificó a la mesa (dato no encontrado)");
-    }
-    // T4: el estado de la mesa NO cambia — solo se registra la notificación.
-    const notificacion = crearNotificacion(
-      "sistema",
-      `Supervisor notificó a la mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
-    );
-    NOTIFICACIONES.unshift(notificacion);
-    return { ...notificacion };
   },
 
   async aplicarTransicionVida() {

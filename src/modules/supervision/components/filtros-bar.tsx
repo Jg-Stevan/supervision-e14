@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { EstadoGlobal, FiltrosPuestos, Puesto } from "../domain/types";
+import { DIAS_JORNADA, type DiaJornada } from "../domain/jornada";
 
 const ESTADOS: { valor: EstadoGlobal; etiqueta: string }[] = [
   { valor: "COMPLETO", etiqueta: "COMPLETO" },
@@ -18,9 +19,6 @@ const ESTADOS: { valor: EstadoGlobal; etiqueta: string }[] = [
   { valor: "PENDIENTE", etiqueta: "PENDIENTE" },
   { valor: "NO_INICIADO", etiqueta: "NO INICIADO" },
 ];
-
-/** Select mock con una sola opción (kit §2.4). */
-const OPCION_FECHA = "Domingo, 14 Jun";
 
 const VALOR_TODOS = "TODOS";
 
@@ -65,6 +63,15 @@ export function FiltrosBar({ puestos, filtros, onFiltros }: FiltrosBarProps) {
     () => Array.from(new Set(puestos.map((p) => p.puesto))).sort(),
     [puestos]
   );
+  // KIT monitor-jornada-v1 — puestos por día de la jornada (conteo real
+  // del catálogo: 116 por día lun-sáb · 253 el domingo de cierre).
+  const puestosPorDia = useMemo(() => {
+    const conteo = new Map<DiaJornada, number>();
+    for (const puesto of puestos) {
+      conteo.set(puesto.diaJornada, (conteo.get(puesto.diaJornada) ?? 0) + 1);
+    }
+    return conteo;
+  }, [puestos]);
 
   const set = (parcial: Partial<FiltrosPuestos>) =>
     onFiltros({ ...filtros, ...parcial });
@@ -90,13 +97,30 @@ export function FiltrosBar({ puestos, filtros, onFiltros }: FiltrosBarProps) {
         </SelectContent>
       </Select>
 
+      {/* KIT monitor-jornada-v1 — el select de FECHA deja de ser mock:
+          lista la semana electoral real de la segunda vuelta 2026 (lun 15
+          → dom 21 de junio) con el conteo de puestos por día. Elegir un
+          día filtra la matriz: no se mezclan puestos de días distintos. */}
       <Select
-        value={filtros.fecha ?? OPCION_FECHA}
-        onValueChange={(v) => set({ fecha: v })}
+        value={filtros.fecha ?? VALOR_TODOS}
+        onValueChange={(v) =>
+          set({ fecha: v === VALOR_TODOS ? undefined : (v as DiaJornada) })
+        }
       >
-        <Trigger etiqueta="Fecha" label="Filtrar por fecha" />
+        <Trigger etiqueta="Fecha" label="Filtrar por día de la jornada electoral" />
         <SelectContent className="border-border bg-popover">
-          <SelectItem value={OPCION_FECHA} className="h-11">{OPCION_FECHA}</SelectItem>
+          <SelectItem value={VALOR_TODOS} className="h-11">
+            Fecha: todos los días
+          </SelectItem>
+          {DIAS_JORNADA.map((dia) => {
+            const conteo = puestosPorDia.get(dia.id) ?? 0;
+            return (
+              <SelectItem key={dia.id} value={dia.id} className="h-11">
+                {dia.etiqueta}
+                {dia.esCierre ? " — cierre" : ""} ({conteo})
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
 

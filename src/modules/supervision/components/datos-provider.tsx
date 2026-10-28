@@ -66,7 +66,6 @@ interface EstadoDatos {
 
 interface AccionesDatos {
   reinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
-  notificar: (puestoId: string, mesaId: string) => Promise<void>;
   marcarNotificacionLeida: (id: string) => void;
   marcarTodasLeidas: () => void;
   marcarAnomaliaRevisada: (id: string) => void;
@@ -114,7 +113,11 @@ const Contexto = createContext<DatosContexto | null>(null);
 const ContextoTicker = createContext<{ segundos: number }>({ segundos: 0 });
 
 
-function resumenDePuestos(puestos: Puesto[]): ResumenGlobal {
+/** Resumen (KPIs) derivado de una lista de puestos — invariante
+ *  `total = completo + crítico + pendiente + no_iniciado` exacta. Exportado
+ *  para que el monitor derive el resumen del DÍA seleccionado (kit
+ *  monitor-jornada-v1) con la MISMA regla del store. */
+export function resumenDePuestos(puestos: Puesto[]): ResumenGlobal {
   const resumen: ResumenGlobal = {
     total: puestos.length,
     completo: 0,
@@ -257,21 +260,11 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── T4 — NOTIFICAR (el estado de la mesa no cambia) ────────────────────
-  const notificar = useCallback(async (puestoId: string, mesaId: string) => {
-    const notificacion = await mockSupervisionRepository.notificarMesa(puestoId, mesaId);
-    setEstado((prev) => ({
-      ...prev,
-      notificaciones: [notificacion, ...prev.notificaciones],
-    }));
-    toast.success(notificacion.texto);
-  }, []);
-
   // ── KIT carga-masiva-supervision-v1 (D27) — publicaciones del
   // digitalizador: cada acta que la CARGA MASIVA envía aterriza aquí → el
   // repo actualiza la mesa (partes + KPIs derivados) y el monitor la refleja
   // en vivo, junto con la notificación del evento. Patrón idéntico a
-  // reinspeccionar/notificar (el store del shell manda — kit SUP-3 T4).
+  // reinspeccionar (el store del shell manda — kit SUP-3 T4).
   useEffect(() => {
     const repo = mockSupervisionRepository;
     const desuscribir = suscribirseActasRuntime(async (evento) => {
@@ -514,7 +507,6 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       notificacionesNoLeidas,
       anomaliasAbiertas,
       reinspeccionar,
-      notificar,
       marcarNotificacionLeida,
       marcarTodasLeidas,
       marcarAnomaliaRevisada,
@@ -539,7 +531,6 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       notificacionesNoLeidas,
       anomaliasAbiertas,
       reinspeccionar,
-      notificar,
       marcarNotificacionLeida,
       marcarTodasLeidas,
       marcarAnomaliaRevisada,
