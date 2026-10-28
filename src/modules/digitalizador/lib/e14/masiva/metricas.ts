@@ -52,6 +52,10 @@ export interface EtapasMetrica {
   envioMs?: number;
   /** Sondeo QR de ingesta (worker e73 — fila.sondeoQrMs). */
   sondeoQrMs?: number;
+  /** D35 — miniatura de la bandeja (post-pipeline, cosmético — runner.ts
+   *  cronometra hacerThumb). Medido para decidir su destino con datos
+   *  reales; NO compite por «cuello» (igual que el sondeo). */
+  thumbMs?: number;
 }
 
 /** Una fila terminada — la unidad del informe por acta. */
@@ -155,13 +159,14 @@ function notificar(): void {
 // ─── Cuello (PURO — exportado para QA/UI) ────────────────────────────────────
 
 /** Etapa dominante de TRABAJO: máx de decode/detect/ocr/persist/envio.
- *  La espera de cola y el sondeo NO compiten por «cuello» (no son el
- *  pipeline pesado). null = sin etapas de trabajo medidas. */
+ *  La espera de cola, el sondeo y el thumb NO compiten por «cuello» (el
+ *  sondeo es paralelo a la ingesta; el thumb es post-pipeline cosmético).
+ *  null = sin etapas de trabajo medidas. */
 export function cuelloDeEtapas(e: EtapasMetrica): string | null {
   let mejor: string | null = null;
   let maxMs = 0;
   for (const [k, v] of Object.entries(e)) {
-    if (k === "sondeoQrMs") continue;
+    if (k === "sondeoQrMs" || k === "thumbMs") continue;
     if (typeof v === "number" && v > maxMs) {
       maxMs = v;
       mejor = k.replace(/Ms$/, "");
@@ -225,6 +230,9 @@ export function registrarMetricaDesenlace(args: {
     } | null;
   };
   sondeoQrMs?: number;
+  /** D35 — ms de hacerThumb del desenlace LISTA (runner mide el await).
+   *  Ausente = sin medición (rutas DUPLICADA/ERROR temprano). */
+  thumbMs?: number;
   dedup?: string;
 }): void {
   void (async () => {
@@ -238,6 +246,7 @@ export function registrarMetricaDesenlace(args: {
       if (typeof t?.persistMs === "number") etapas.persistMs = t.persistMs;
       if (typeof t?.envioMs === "number") etapas.envioMs = t.envioMs;
       if (typeof args.sondeoQrMs === "number") etapas.sondeoQrMs = args.sondeoQrMs;
+      if (typeof args.thumbMs === "number") etapas.thumbMs = args.thumbMs;
       const m: MetricaActa = {
         id: args.filaId,
         corridaId: corridaIdViva,

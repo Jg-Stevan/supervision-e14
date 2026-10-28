@@ -153,6 +153,8 @@ export default function InformeCorrida() {
     let trabajoTotal = 0;
     let sondeoSum = 0;
     let sondeoN = 0;
+    let thumbSum = 0;
+    let thumbN = 0;
     let esperaSum = 0;
     let esperaN = 0;
     const totales: number[] = [];
@@ -163,6 +165,11 @@ export default function InformeCorrida() {
           sondeoSum += v;
           sondeoN += 1;
           continue; // ingesta paralela — NO compite por el trabajo del pipeline
+        }
+        if (k === "thumbMs") {
+          thumbSum += v;
+          thumbN += 1;
+          continue; // D35 — cosmético post-pipeline: línea propia, no barra
         }
         sumas.set(k as EtapaKey, (sumas.get(k as EtapaKey) ?? 0) + v);
         trabajoTotal += v;
@@ -186,6 +193,8 @@ export default function InformeCorrida() {
       trabajoTotal,
       sondeoSum,
       sondeoN,
+      thumbSum,
+      thumbN,
       esperaSum,
       esperaN,
       p50Total: percentil(totales, 50),
@@ -328,6 +337,11 @@ export default function InformeCorrida() {
             {agg.esperaN > 0 && (
               <p className="font-mono text-[10px] text-slate-500">
                 + ESPERA EN COLA: {fmtMs(agg.esperaSum)} en {agg.esperaN} acta(s) (no es trabajo — es turno)
+              </p>
+            )}
+            {agg.thumbN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + THUMBS DE BANDEJA (post-pipeline): {fmtMs(agg.thumbSum)} en {agg.thumbN} acta(s)
               </p>
             )}
             {agg.trabajoTotal === 0 && (

@@ -300,16 +300,31 @@ export async function extraerPdf(archivo: File): Promise<ResultadoExtraccion> {
     throw new Error("PDF_WORKER_NO_CARGO");
   }
 
-  // getDocument: contraseña (PasswordException) o parse/corrupción → el
-  // motivo ya es conocido por la bandeja (fila ERROR corta) — ídem zip/rar.
+  // D35 (UX-1 — REPORTE línea digielect14): el catch único traga tres
+  // motivos DISTINTOS y todos acababan en PROTEGIDO_O_CORRUPTO en falso —
+  // el dueño perseguía «corruptos» que eran archivos ilegibles del disco.
+  // Orden de diagnóstico honesto:
+  //  · arrayBuffer() falla (NotReadableError) → ARCHIVO_ILEGIBLE (bloqueado
+  //    por otro proceso, permisos, USB extraído — el contenido ni se vio).
+  //  · PasswordException de pdf.js → PDF_PROTEGIDO (tiene contraseña).
+  //  · parse/corrupción → PROTEGIDO_O_CORRUPTO (motivo de siempre).
   // ADAPTACIÓN v6 (REPORTE §desviaciones): el destroy vive en el LOADING
   // TASK (PDFDocumentProxy ya no lo expone) — memoria disciplinada ídem.
+  let bytesPdf: ArrayBuffer;
+  try {
+    bytesPdf = await archivo.arrayBuffer();
+  } catch {
+    throw new Error("ARCHIVO_ILEGIBLE");
+  }
   let carga: ReturnType<typeof pdfjs.getDocument>;
   let doc: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
   try {
-    carga = pdfjs.getDocument({ data: await archivo.arrayBuffer() });
+    carga = pdfjs.getDocument({ data: bytesPdf });
     doc = await carga.promise;
-  } catch {
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "PasswordException") {
+      throw new Error("PDF_PROTEGIDO");
+    }
     throw new Error("PROTEGIDO_O_CORRUPTO");
   }
 
@@ -365,9 +380,16 @@ export async function extraerPdf(archivo: File): Promise<ResultadoExtraccion> {
  *  el guard del kit convierte en fila ERROR PROTEGIDO_O_CORRUPTO. */
 async function extraerZip(archivo: File): Promise<ResultadoExtraccion> {
   const { unzipSync } = await import("fflate");
+  // D35 (UX-1): lectura de disco ≠ corrupción del zip (ver extraerPdf).
+  let bytesZip: ArrayBuffer;
+  try {
+    bytesZip = await archivo.arrayBuffer();
+  } catch {
+    throw new Error("ARCHIVO_ILEGIBLE");
+  }
   let entradas: Record<string, Uint8Array>;
   try {
-    entradas = unzipSync(new Uint8Array(await archivo.arrayBuffer()));
+    entradas = unzipSync(new Uint8Array(bytesZip));
   } catch {
     // fflate no descifra: zip protegido/corrupto/truncado cae aquí.
     throw new Error("PROTEGIDO_O_CORRUPTO");
@@ -401,11 +423,18 @@ async function extraerRar(archivo: File): Promise<ResultadoExtraccion> {
     import("node-unrar-js"),
     fetchWasmUnrar(),
   ]);
+  // D35 (UX-1): lectura de disco ≠ corrupción del rar (ver extraerPdf).
+  let bytesRar: ArrayBuffer;
+  try {
+    bytesRar = await archivo.arrayBuffer();
+  } catch {
+    throw new Error("ARCHIVO_ILEGIBLE");
+  }
   let extractor: Awaited<ReturnType<typeof createExtractorFromData>>;
   try {
     extractor = await createExtractorFromData({
       wasmBinary: wasmBinario,
-      data: await archivo.arrayBuffer(),
+      data: bytesRar,
     });
   } catch {
     throw new Error("PROTEGIDO_O_CORRUPTO");

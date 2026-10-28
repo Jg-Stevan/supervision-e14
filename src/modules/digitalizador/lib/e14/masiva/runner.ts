@@ -1460,7 +1460,12 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       };
     }
 
+    // D35 — thumbMs: la miniatura de la bandeja es TRABAJO REAL del main
+    // thread post-pipeline (decode completo + canvas + JPEG). Cronometrado
+    // para decidir su destino (quitar/degradar) con datos del INFORME.
+    const tThumb0 = performance.now();
     const thumb = await hacerThumb(acta.fotoProcesada ?? acta.fotoOriginal);
+    const thumbMs = performance.now() - tThumb0;
     const registroListo: RegistroMasiva = {
       ...registro,
       estado: "LISTA",
@@ -1587,6 +1592,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       nombre: fila.nombre,
       acta: actaFinal,
       sondeoQrMs: fila.sondeoQrMs,
+      thumbMs,
       dedup: registro?.dedup,
     });
   } catch (err) {

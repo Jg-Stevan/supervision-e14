@@ -149,3 +149,23 @@ Task ID: 7 — RESULTADO
 - (c) MÉTRICAS + INFORME: COMPLETADO y verificado E2E (ver D34 en docs/DECISIONS.md). metricas.ts (IDB e14-masiva-metricas-v1 + 4 hooks fire-and-forget en runner) + InformeCorrida.tsx (panel: KPIs, barras por etapa, actas más lentas con cuello, fallos, historial de corridas, export JSON, limpiar). Dato real del sandbox: OCR = 98% del trabajo pipeline (2.0s de 2.1s) — la palanca sigue siendo el OCR.
 - Contrato verificado: REINICIAR ENVÍOS (D33) NO toca las métricas (IDBs separadas) → el dueño compara corridas antes/después del reset.
 - Commit + PUSH inmediato (lección D32/D33).
+
+---
+Task ID: 8
+Agent: Z.ai Code (orquestador principal)
+Task: Tanda del dueño 2026-10-28 (ronda 2) — (e) optimización de recursos empezando por miniaturas + UX-1 del REPORTE digielect14 + cierre del P0. Prevención de contexto: este worklog + DECISIONS.md + push inmediato.
+
+Plan (leer si la sesión muere):
+1. Cruzar REPORTE-que-esta-bien-y-que-falta.md (línea digielect14, base 3f1cc17 + PRs #104/#105 — VERIFICADO: ese commit/PRs NO existen en este repo) contra este código antes de implementar nada.
+2. (e) miniaturas: medir primero (thumbMs en métricas D34), decidir después.
+3. UX-1: motivo real de lectura en archivos.ts (NotReadableError vs PasswordException vs corrupción).
+4. P0 del reporte (watchdog OCR): verificar si ya existe aquí (D65) antes de duplicar.
+5. (d) auditoría de reglas de negocio: SIGUIENTE — con datos del INFORME + JSON exportable.
+6. Commit + PUSH por cada tarea cerrada (lección D32).
+
+Task ID: 8 — RESULTADO (D35)
+- UX-1: archivos.ts PDF/ZIP/RAR distinguen ARCHIVO_ILEGIBLE (lectura de disco) / PDF_PROTEGIDO (PasswordException) / PROTEGIDO_O_CORRUPTO (corrupción — intacto). E2E: PDF cifrado → fila ERROR «PDF_PROTEGIDO» en ingesta.
+- thumbMs: etapa nueva en metricas.ts (no compite por cuello, línea propia en INFORME «+ THUMBS DE BANDEJA»). VEREDICTO MEDIDO: 3 ms/acta vs OCR 2.0 s (666×) → las miniaturas NO se quitan (costo ruido, valor bandeja). Palanca manual: flags.thumbsOn:false. Cuello real de recursos: persistencia whole-record (P2, decisión del dueño).
+- P0 reporte: YA EXISTE aquí (D65 runner-watchdog: carrera 75s por gama + matarYRecrearWorkers). Sin duplicación. Opcional pendiente: telemetría de hangs de esa línea.
+- Verificación: tsc 0 · lint 0/0 · E2E agent-browser (REINICIAR ENVÍOS → lote acta+pdf-protegido → PDF_PROTEGIDO + COMPLETADA 6.4 s + INFORME con «+ THUMBS: 3 ms en 1 acta(s)» + EXPORTAR OK) · 0 errores consola.
+- SIGUIENTE: (d) auditoría de reglas de negocio con datos del INFORME (BUG-5 AUTO-sin-QR del reporte, orden de capas dedup, presupuesto del sondeo con hard-kills bajo hambruna).

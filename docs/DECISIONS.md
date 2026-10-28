@@ -812,3 +812,49 @@ errores JS/dev.log.
 **Qué NO se hizo (consciente):** no se estampa por-fila en la bandeja (el informe
 lo cubre; el acta detallada ya trae tiempos en REVISIÓN); no hay agregados
 trans-corrida en la UI (van en el export); no se toca obs/ ni telemetría.
+
+---
+
+## D35 — Motivos honestos de lectura (UX-1) + thumbMs medido: veredicto sobre las miniaturas
+
+**Fecha:** 2026-10-28 · **Origen:** tanda del dueño (e: optimizar recursos «tal vez quitando
+las miniaturas») + cruce con el REPORTE de la línea digielect14 (base 3f1cc17, PRs #104/#105
+— repo DISTINTO: sin PRs ni ese commit aquí; hallazgos cruzados uno por uno contra este código).
+
+**Parte 1 — UX-1 (motivo real de lectura de archivos).** `archivos.ts` tenía un catch único
+en PDF/ZIP/RAR que convertía TRES motivos distintos en «PROTEGIDO_O_CORRUPTO» en falso: el
+dueño perseguía corruptos fantasmas que eran archivos ilegibles del disco (bloqueados por otro
+proceso, permisos, USB extraído). Ahora: `arrayBuffer()` falla → **ARCHIVO_ILEGIBLE** (el
+contenido ni se leyó); pdf.js `PasswordException` → **PDF_PROTEGIDO**; parse/corrupción →
+PROTEGIDO_O_CORRUPTO (motivo de siempre, intacto). `motivoCorto` deja pasar códigos nuevos sin
+cambios. Verificado E2E: PDF cifrado (pypdf, clave) → fila ERROR «PDF_PROTEGIDO» en ingesta.
+
+**Parte 2 — thumbMs (la decisión de las miniaturas con DATOS, no con corazonadas).**
+`hacerThumb` (runner-thumbs.ts: canvas 320px, JPEG 0.7) NO estaba medido. D35 agrega la etapa
+`thumbMs` a metricas.ts (EtapasMetrica + hook desenlace + args) — cronometrada en runner.ts
+en el desenlace LISTA (DUPLICADA/ERROR temprano no la pagan). En el INFORME: línea propia
+«+ THUMBS DE BANDEJA (post-pipeline)» al lado de sondeo/espera; NO compite por «cuello» ni
+entra a las barras (es cosmético post-pipeline — igual doctrina que el sondeo).
+
+**Veredicto medido (sandbox, acta sintética, INFORME en vivo):** THUMBS = **3 ms** por acta
+frente a OCR 2.0 s (666×). **Las miniaturas NO se quitan:** el costo es ruido y la bandeja
+pierde valor UX. Palanca existente si el dueño la quiere en gama BAJO: `flags.thumbsOn:false`
+(D6: la app nunca se auto-configura — decisión manual del dueño). El cuello REAL de recursos
+sigue siendo la persistencia whole-record (fotoOriginal+fotoProcesada ~MBs por acta en IDB) —
+candidato P2 con decisión del dueño (impacta REVISIÓN).
+
+**P0 del reporte (watchdog OCR): YA EXISTE aquí como D65** — runner-watchdog.ts:
+carrera WATCHDOG_MS 75s (calibrado por gama: planGamaActual().watchdogMs) + 2 intentos +
+`matarYRecrearWorkers()` (dispose OpenCV + rapidOcrReiniciar + re-warm D74). La otra línea
+no lo tiene; no se duplica nada. Pendiente opcional de esa línea: telemetría de hangs
+(heartbeat WAL) — post-mortem, no bloqueante aquí.
+
+**Contratos:** solo-additive (D57): thumbMs viaja AUSENTE si no se midió — jamás 0 inventado.
+Barras/aggregate del INFORME intocados (thumbMs con `continue` propio). UX-1 no toca la
+política de errores del pipeline (motivoCorto/rutas de siempre).
+
+**Verificación E2E (agent-browser, tsc 0 · lint 0/0):** REINICIAR ENVÍOS (D33) → cola 0 →
+lote {acta sintética, pdf-protegido.pdf}: PDF fila ERROR **PDF_PROTEGIDO** en ingesta (antes
+PROTEGIDO_O_CORRUPTO en falso) + acta LISTA pipeline completo (COMPLETADA · 6.4 s, OCR
+p50/p95 2.2 s, EN_REVISION_HUMANA 1); INFORME: «+ THUMBS DE BANDEJA: 3 ms en 1 acta(s)»;
+EXPORTAR JSON OK; 0 errores de consola/dev.log.
