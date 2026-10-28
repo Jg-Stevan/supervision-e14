@@ -32,6 +32,9 @@
 import type { FormularioTipo, FotoActa, ImpresionActa } from "../domain/acta";
 import type { ActaRealLista } from "./actas-reales/actas-reales";
 import { CARGAR_CATALOGO } from "./divipola-adapter";
+// KIT recepcion-actas-v1 (D28): toda publicación deja su entrada en el
+// log de RECEPCIÓN (PUBLICADA/BLOQUEADA) — el embudo es este módulo.
+import { registrarRecepcion } from "./recepcion-log";
 
 /** Entrada de publicación que envía el adaptador del digitalizador
  * (store-e14.ts) tras un envío de la cola masiva. */
@@ -123,11 +126,26 @@ export async function publicarActaMasiva(
   // (a) idEnlace existe en el catálogo (solo-lectura — D25).
   const registro = CARGAR_CATALOGO().find((r) => r.idEnlace === entrada.idEnlace);
   if (!registro) {
-    return {
-      ok: false,
+    const motivo = `(a) idEnlace "${entrada.idEnlace}" ausente en el catálogo DIVIPOLA`;
+    registrarRecepcion({
+      fecha: Date.now(),
+      origen: "carga-masiva",
+      estado: "BLOQUEADA",
+      idEnlace: entrada.idEnlace,
+      mesa: entrada.mesa,
+      formulario: entrada.formulario,
+      paginaIndex: entrada.paginaIndex,
+      paginaTotal: entrada.paginaTotal,
+      srcFoto: entrada.srcFoto,
+      pais: entrada.impresion.pais,
+      lugar: entrada.impresion.lugar,
+      motivo,
+      score: entrada.score,
+      statusActa: entrada.statusActa,
+      nombreArchivo: entrada.nombreArchivo,
       clave,
-      motivo: `(a) idEnlace "${entrada.idEnlace}" ausente en el catálogo DIVIPOLA`,
-    };
+    });
+    return { ok: false, clave, motivo };
   }
 
   // (b) mesa ≤ totalMesas del puesto.
@@ -137,11 +155,26 @@ export async function publicarActaMasiva(
     numeroMesa < 1 ||
     numeroMesa > registro.totalMesas
   ) {
-    return {
-      ok: false,
+    const motivo = `(b) mesa ${entrada.mesa} fuera de rango (totalMesas: ${registro.totalMesas})`;
+    registrarRecepcion({
+      fecha: Date.now(),
+      origen: "carga-masiva",
+      estado: "BLOQUEADA",
+      idEnlace: entrada.idEnlace,
+      mesa: entrada.mesa,
+      formulario: entrada.formulario,
+      paginaIndex: entrada.paginaIndex,
+      paginaTotal: entrada.paginaTotal,
+      srcFoto: entrada.srcFoto,
+      pais: entrada.impresion.pais,
+      lugar: entrada.impresion.lugar,
+      motivo,
+      score: entrada.score,
+      statusActa: entrada.statusActa,
+      nombreArchivo: entrada.nombreArchivo,
       clave,
-      motivo: `(b) mesa ${entrada.mesa} fuera de rango (totalMesas: ${registro.totalMesas})`,
-    };
+    });
+    return { ok: false, clave, motivo };
   }
 
   // (d) página dentro de rango del formulario.
@@ -150,11 +183,26 @@ export async function publicarActaMasiva(
     entrada.paginaIndex < 1 ||
     (entrada.paginaTotal > 0 && entrada.paginaIndex > entrada.paginaTotal)
   ) {
-    return {
-      ok: false,
+    const motivo = `(d) página ${entrada.paginaIndex} fuera de rango (total: ${entrada.paginaTotal})`;
+    registrarRecepcion({
+      fecha: Date.now(),
+      origen: "carga-masiva",
+      estado: "BLOQUEADA",
+      idEnlace: entrada.idEnlace,
+      mesa: entrada.mesa,
+      formulario: entrada.formulario,
+      paginaIndex: entrada.paginaIndex,
+      paginaTotal: entrada.paginaTotal,
+      srcFoto: entrada.srcFoto,
+      pais: entrada.impresion.pais,
+      lugar: entrada.impresion.lugar,
+      motivo,
+      score: entrada.score,
+      statusActa: entrada.statusActa,
+      nombreArchivo: entrada.nombreArchivo,
       clave,
-      motivo: `(d) página ${entrada.paginaIndex} fuera de rango (total: ${entrada.paginaTotal})`,
-    };
+    });
+    return { ok: false, clave, motivo };
   }
 
   // Foto real → FotoActa (null → la página cae al sintético D18).
@@ -209,5 +257,24 @@ export async function publicarActaMasiva(
       /* un oyente caído jamás rompe la publicación */
     }
   }
+  // D28 — recepción: la página PUBLICADA también deja su entrada (la
+  // vista Recepción y el badge del sidebar se alimentan de aquí).
+  registrarRecepcion({
+    fecha: Date.now(),
+    origen: "carga-masiva",
+    estado: "PUBLICADA",
+    idEnlace: entrada.idEnlace,
+    mesa: entrada.mesa,
+    formulario: entrada.formulario,
+    paginaIndex: entrada.paginaIndex,
+    paginaTotal: entrada.paginaTotal,
+    srcFoto: entrada.srcFoto,
+    pais: entrada.impresion.pais,
+    lugar: entrada.impresion.lugar,
+    score: entrada.score,
+    statusActa: entrada.statusActa,
+    nombreArchivo: entrada.nombreArchivo,
+    clave,
+  });
   return { ok: true, clave };
 }

@@ -33,6 +33,9 @@
 
 import { create } from "zustand";
 import { publicarActaMasiva, type ResultadoPublicacion } from "@/modules/supervision/data/actas-runtime";
+// KIT recepcion-actas-v1 (D28): el desenlace SIN_JOIN nunca llega a
+// publicarActaMasiva — se registra aquí, donde se decide (log de recepción).
+import { registrarRecepcion } from "@/modules/supervision/data/recepcion-log";
 import { leerRegistro } from "../lib/e14/masiva/cola";
 import type { Acta } from "../lib/e14/types";
 import { logger } from "../lib/logger";
@@ -103,6 +106,24 @@ async function publicarDesdeActa(
   if (!join) {
     // Sin clasificación AUTO no hay join confiable — SOLO registro local
     // (el acta ya quedó ENVIADA en la cola; honestidad ante todo).
+    // D28 — recepción: la llegada SÍ se registra (SIN_JOIN) para que la
+    // vista Recepción la muestre; sin inventar idEnlace/mesa/formulario.
+    registrarRecepcion({
+      fecha: Date.now(),
+      origen: "carga-masiva",
+      estado: "SIN_JOIN",
+      idEnlace: "—",
+      mesa: "—",
+      formulario: null,
+      paginaIndex: null,
+      paginaTotal: null,
+      srcFoto: acta.fotoProcesada ?? acta.fotoOriginal ?? null,
+      pais: null,
+      lugar: null,
+      motivo: "sin clasificación AUTO — sin join confiable (solo registro local)",
+      score: acta.score,
+      statusActa: acta.status,
+    });
     marcar({ estado: "sin-join" });
     return;
   }

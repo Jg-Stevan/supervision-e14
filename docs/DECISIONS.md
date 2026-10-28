@@ -535,3 +535,36 @@ Ajuste aplicado (opción ofrecida por el kit):
   `NEXT_PUBLIC_BASE_PATH` del repo origen. `reactStrictMode: false` se
   conserva (premisa del motor: pre-warm idempotente por diseño de su
   repo origen).
+
+## D28 — MÓDULO RECEPCIÓN DE ACTAS: log en vivo de lo que va llegando (kit recepcion-actas-v1)
+
+**Qué se pidió:** un módulo de RECEPCIÓN para saber las actas que van llegando al
+monitor (el supervisor hoy solo ve el desenlace disperso: toasts del masiva,
+consola de cuarentena y la bandeja del módulo).
+
+**Decisión:** log runtime único `src/modules/supervision/data/recepcion-log.ts`
+con grano de PÁGINA (1 foto = 1 entrada — el grano del pipeline masiva) y los
+MISMOS tres desenlaces del kit D27: `PUBLICADA` (aterrizó en el monitor),
+`BLOQUEADA` (cuarentena D25 con motivo) y `SIN_JOIN` (sin clasificación AUTO —
+solo registro local, sin inventar ubicación).
+
+- **Punto único de escritura:** `actas-runtime.publicarActaMasiva()` registra
+  PUBLICADA/BLOQUEADA (es el embudo de toda publicación) y
+  `store-e14.publicarDesdeActa()` registra SIN_JOIN (ese desenlace nunca llega a
+  publicar — se registra donde se decide). Sin ciclos de import: recepcion-log
+  no importa actas-runtime.
+- **Semilla determinística (`ingesta-inicial`):** el ancla estático SUP-6
+  (manifest actas-reales) se siembra 1 vez perezosa como llegadas de inicio de
+  sesión con desfases FIJOS (§0-7: nada aleatorio) — la vista abre con
+  contenido y la ingesta queda auditable.
+- **Memoria de sesión (D8/§0-5):** sin persistencia ni backend; recargar
+  restablece. Suscripción por oyentes (patrón actas-runtime, sin libs nuevas).
+- **Vista `vista-recepcion.tsx`:** KPIs clickeables (Recibidas/Publicadas/
+  Cuarentena/Sin join — mismo gesto del monitor T3), filtro por formulario,
+  búsqueda (idEnlace/mesa/país/archivo), miniatura real recibida, hora exacta +
+  relativa, y VER EN MONITOR por props (`onVerEnMonitor`, seam D27) — solo
+  filas PUBLICADAS aterrizan en el visor. Log con alto tope + scroll fino.
+- **Badge en vivo:** el sidebar cuenta las llegadas `carga-masiva` que ocurren
+  fuera de la vista (se anula al abrirla). La semilla no cuenta.
+- **CSS:** utilidades `scroll-panel` (scrollbar fina webkit/Firefox) y
+  `fila-llegada` (destello 1.6 s de llegada nueva) en globals.css.

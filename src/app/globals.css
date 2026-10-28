@@ -156,4 +156,43 @@
       line-height: 28px;
     }
   }
+
+  /* ============================================================
+     KIT recepcion-actas-v1 (D28) — utilidades del log de recepción
+     ============================================================ */
+
+  /* Scroll fino para paneles con desplazamiento (log de recepción).
+     8px thumb sobre pista transparente + Firefox scrollbar-width. */
+  .scroll-panel {
+    scrollbar-width: thin;
+    scrollbar-color: var(--outline-strong) transparent;
+  }
+  .scroll-panel::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-panel::-webkit-scrollbar-thumb {
+    background: var(--outline-strong);
+    border-radius: 4px;
+  }
+  .scroll-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  /* Destello de LLEGADA: la fila nueva entra con fondo acento que se
+     disuelve (1.6s) — feedback inmediato de "está llegando en vivo". */
+  @keyframes recepcion-llegada {
+    0% {
+      background-color: var(--surface-high);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+  .fila-llegada {
+    animation: recepcion-llegada 1.6s ease-out 1;
+  }
 }

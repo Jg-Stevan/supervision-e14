@@ -11,6 +11,7 @@ import {
   Bell,
   FileText,
   Flag,
+  Inbox,
   LogOut,
   Menu,
   Upload,
@@ -26,10 +27,14 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "cn";
 import { SUPERVISOR } from "../data/mock-repository";
+// KIT recepcion-actas-v1 (D28): el badge del sidebar cuenta las llegadas
+// EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
+import { suscribirseRecepcion } from "../data/recepcion-log";
 import { StatusDot } from "./status-dot";
 import { DatosProvider, useDatos } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
+import { VistaRecepcion } from "./vista-recepcion";
 // KIT carga-masiva-supervision-v1 (D27) — la vista CARGA MASIVA es el módulo
 // digitalizador trasplantado (src/modules/digitalizador/**). ÚNICO seam de
 // UI supervision→digitalizador: la vista recibe `onVerEnMonitor` para
@@ -44,6 +49,7 @@ import { MasivaView as VistaCargaMasiva } from "@/modules/digitalizador/componen
  * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista. */
 type VistaId =
   | "monitor"
+  | "recepcion"
   | "carga-masiva"
   | "notificaciones"
   | "anomalias"
@@ -67,8 +73,9 @@ interface ItemNav {
   /** Ítem deshabilitado con tooltip (Carga Masiva — fuera de alcance). */
   deshabilitado?: boolean;
   tooltip?: string;
-  /** Clave del badge dinámico (contadores del store, kit T4/T5/T6). */
-  badgeDe?: "notificaciones" | "anomalias";
+  /** Clave del badge dinámico (contadores del store, kit T4/T5/T6).
+   * KIT recepcion-actas-v1 (D28): "recepcion" = llegadas fuera de la vista. */
+  badgeDe?: "notificaciones" | "anomalias" | "recepcion";
 }
 
 /** Ítems del sidebar. Los DORMIDOS (D20) siguen declarados aquí — se
@@ -76,6 +83,13 @@ interface ItemNav {
  * edición de la lista, no de la navegación. */
 const ITEMS_NAV: ItemNav[] = [
   { Icono: Activity, etiqueta: "Monitor global", vista: "monitor" },
+  {
+    Icono: Inbox,
+    etiqueta: "Recepción de actas",
+    // D28 — log EN VIVO de las actas que van llegando (masiva + ingesta).
+    vista: "recepcion",
+    badgeDe: "recepcion",
+  },
   {
     Icono: Upload,
     etiqueta: "Carga masiva",
@@ -174,7 +188,11 @@ function ContenidoNav({
 }: {
   vista: VistaId;
   onVista: (v: VistaId) => void;
-  badges: { notificaciones: number; anomalias: number };
+  badges: {
+    notificaciones: number;
+    anomalias: number;
+    recepcion: number;
+  };
 }) {
   // D20 — filtro del sidebar: fuera las entradas de módulos inactivos
   // (su badge dinámico desaparece con ellas; el de anomalías queda).
@@ -191,7 +209,9 @@ function ContenidoNav({
               ? badges.notificaciones
               : item.badgeDe === "anomalias"
                 ? badges.anomalias
-                : undefined;
+                : item.badgeDe === "recepcion"
+                  ? badges.recepcion
+                  : undefined;
           const boton = (
             <ItemNavBoton
               key={item.etiqueta}
@@ -248,6 +268,9 @@ function VistaActual({
   switch (vista) {
     case "anomalias":
       return <VistaAnomalias />;
+    case "recepcion":
+      // D28 — log de recepción: mismo seam por props del masiva (D27).
+      return <VistaRecepcion onVerEnMonitor={onVerEnMonitor} />;
     case "carga-masiva":
       return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
     default:
@@ -278,6 +301,22 @@ function ShellInterno() {
   const [vista, setVista] = useState<VistaId>("monitor");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  // D28 — llegadas mientras el supervisor NO está mirando la recepción
+  // (badge del sidebar; se anula al abrir la vista).
+  const [recepcionesNuevas, setRecepcionesNuevas] = useState(0);
+  const vistaRef = useRef<VistaId>(vista);
+
+  useEffect(() => {
+    vistaRef.current = vista;
+  }, [vista]);
+
+  useEffect(() => {
+    return suscribirseRecepcion((entrada) => {
+      if (entrada.origen !== "carga-masiva") return; // la semilla no cuenta
+      if (vistaRef.current === "recepcion") return;
+      setRecepcionesNuevas((n) => n + 1);
+    });
+  }, []);
 
   // Escape cierra el overlay (kit T1) + bloqueo de scroll de fondo.
   useEffect(() => {
@@ -297,6 +336,7 @@ function ShellInterno() {
 
   const elegirVista = (v: VistaId) => {
     setVista(v);
+    if (v === "recepcion") setRecepcionesNuevas(0); // D28 — leídas al abrir
     setMenuAbierto(false); // el overlay cede el paso a la vista elegida
   };
 
@@ -331,6 +371,7 @@ function ShellInterno() {
           badges={{
             notificaciones: notificacionesNoLeidas,
             anomalias: anomaliasAbiertas,
+            recepcion: recepcionesNuevas,
           }}
         />
       </div>
