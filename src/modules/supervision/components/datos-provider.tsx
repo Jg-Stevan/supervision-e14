@@ -200,6 +200,12 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (estado.cargando) return;
     const intervalo = setInterval(() => {
+      // D39 — pausa de la simulación con la pestaña oculta: cada tick sin
+      // espectador era un re-render completo de 949 filas (CPU/batería en
+      // gama baja, y ráfagas encoladas al volver). Al reabrir, el ticker
+      // sigue desde donde quedó — el navegador ya estrangula timers en
+      // background; esto elimina el trabajo residual que quedaba.
+      if (typeof document !== "undefined" && document.hidden) return;
       setEstado((prev) => {
         const segundos = prev.segundosDesdeSync + TICKER_SEGUNDOS;
         if (segundos >= TRANSICION_CADA_SEGUNDOS) {

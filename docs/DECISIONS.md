@@ -989,3 +989,47 @@ aislamiento; base honesta sin él; 1 kill no degrada; 2 kills ALTO→MEDIO con m
 MEDIO→BAJO; BAJO suelo sin reactivo) · E2E agent-browser: tarjeta AUTONOMÍA con badge
 AUTO, pool 1 worker · OCR 2 hilos · ajustes BAJO aplicándose en la tablet del sandbox ·
 0 errores de consola. CI/CD de D37 despliega este commit automáticamente a Cloudflare.
+---
+
+## D39 — PARCHE AUDITORÍA-v1: cache del motor + pausa del ticker oculto + higiene de repo
+
+**Fecha:** 2026-02-15 · **Origen:** auditoría externa del repo (prioridad declarada: gama
+baja; objetivo: enviar actas lo más rápido posible). Alcance: SOLO cambios quirúrgicos de
+bajo riesgo, sin tocar el pipeline del masiva (runner/cola/dedup intocados).
+
+**1. `public/_headers` — Cache-Control del motor.** El motor pesa ~40 MB (ORT wasm 14 MB ·
+OpenCV 8.6 MB · ONNX 16 MB) y el sitio no servía NINGUNA cabecera de caché: en red móvil
+inestable una recarga podía re-bajar el motor completo. Ahora: `/vendor/*`, `/models/*`,
+`/wasm/*`, `/scanner/*` y `/_next/static/*` → `public, max-age=31536000, immutable`
+(versionados por convención `?v=N` o hash de nombre); `/e14/*` (divipol.json es DATO) →
+`max-age=86400, must-revalidate`. COOP/COEP global intacto (D37). Palanca #1 para gama baja:
+descarga única del motor + recargas instantáneas.
+
+**2. Ticker del monitor pausado con `document.hidden`** (`datos-provider.tsx`): cada tick de
+5 s sin espectador reconciliaba ~949 filas (~14k componentes) y a los 45 s disparaba la
+transición + clon de 949 puestos — CPU/batería regalados en gama baja y ráfagas encoladas al
+volver. Ahora el callback sale temprano si `document.hidden`; al reabrir, el ticker sigue
+desde donde quedó. La simulación de vida NO cambia en primer plano.
+
+**3. Higiene de repo (purga del tracking, no del disco).** `git rm --cached` de: `skills/`
+(1.047 archivos — 61 MB de SKILLs/templates de un entorno AI, incluido un HTML de 20 MB),
+`tool-results/` (26), `.zscripts/` (11 — scripts del sandbox) y `dev.log`. ≈63 MB ≈ 36 % del
+worktree deja de viajar en el repo (clone ~3× más ligero). `.gitignore` extendido para que no
+regresen. `docs/capturas-*/` y `worklog.md` se CONSERVAN (evidencia citada por los REPORTEs).
+
+**4. `package.json` — campo muerto `ignoreScripts` eliminado.** No es campo estándar de
+npm/bun (es config de CLI) y contradecía a `trustedDependencies`, que lista los mismos
+paquetes. `trustedDependencies` se queda (convención bun válida).
+
+**Nota honesta de la auditoría:** el hallazgo «workflows con `branches: ain]`» quedó
+RETIRADO tras verificación byte a byte (`hex 5b6d61696e5d` = `[main]`): artefacto de
+renderizado del terminal de la herramienta de auditoría, NO un bug del repo. Ambos workflows
+son válidos y el doble pipeline (GH Pages + Cloudflare, D37) es transición DOCUMENTADA del
+dueño — recomendación registrada: cortar `pages.yml` cuando el DNS migre (GH Pages no sirve
+`_headers` → OCR 1-hilo en esa URL).
+
+**Pendientes conscientes (fuera de este parche, requieren decisión/medición del dueño):**
+modelos OCR cuantizados (int8/latin ~5 MB — −11 MB de red), capa 0 QR al worker (elimina el
+peor bloqueo de UI ~15-17 s), round-trip base64 en cola.ts (writes completos ×2 por
+desenlace), React.memo/virtualización del monitor (949 filas × re-renders), Service Worker
+de pre-cache, y backend real del ledger de envíos (el «envío» hoy es memoria de sesión).
