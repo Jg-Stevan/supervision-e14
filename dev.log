@@ -219,3 +219,16 @@ Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allow
  GET / 200 in 69ms (next.js: 1.3ms, application-code: 68ms)
  GET / 200 in 37ms (next.js: 0.8ms, application-code: 36ms)
  GET / 200 in 33ms (next.js: 0.9ms, application-code: 32ms)
+$ next dev
+▲ Next.js 16.4.2 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.21.203:3000
+- Environments: .env
+✓ Ready in 375ms
+✓ Running next.config.ts took 112ms
+
+○ Compiling / ...
+ GET / 200 in 48ms (next.js: 1.2ms, application-code: 47ms)
+ GET / 200 in 358ms (next.js: 113ms, application-code: 245ms)
+ GET / 200 in 35ms (next.js: 1.3ms, application-code: 33ms)
+ GET / 200 in 87ms (next.js: 1.9ms, application-code: 85ms)
