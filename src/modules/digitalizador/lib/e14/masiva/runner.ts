@@ -24,7 +24,7 @@ import { type OpcionesEscaneoConTimeout } from "../scanner-core-bridge";
 import { maestroDeImagen, type MaestroImagen } from "./archivos";
 import { asegurarMaestro, consumirMaestro, descartarMaestro } from "./precalor";
 import { useE14Store } from "@/modules/digitalizador/store/store-e14";
-import { guardarRegistro, leerRegistro } from "./cola";
+import { guardarRegistro, leerRegistroRaw } from "./cola";
 import {
   enviadaPorPayload, // e65b — KIT e65b-historico-enviadas-v1 (T-4): capa 0 contra el histórico
   marcarYaEnviada, // e65b (T-4): marca YA-ENVIADA vía "payload" (exportada en T-2d)
@@ -111,6 +111,8 @@ import {
 // el override manual del dueño manda y el flag masivaAdaptativoGama=false
 // vuelve todo byte-idéntico a hoy.
 import { flagsMasivaEfectivos, planGamaActual } from "../gama";
+import { leerFlags } from "../flags";
+import { decodificarQrCapa0Worker } from "./capa0-qr.client"; // D40 — KIT e14-capa0-qr-worker-v1
 
 // ─── D65 — KIT e14-progreso-watchdog-dedup-v1 (T1): WATCHDOG HUMANO ───
 // Antes (e14-masiva-ux-v1 T4): presupuesto ÚNICO de 120 s — un colgado moría
@@ -273,9 +275,13 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
   // el informe, no el del original (criterio del dueño e72).
   const tCopia = Date.now();
   try {
+    // D41 — lecturas RAW: la copia no consume dataURLs del acta (las fotos
+    // viajan como Blobs del original — abajo); el par materializar↔compactar
+    // (FileReader + atob de 2-16 MB por registro, main thread) se elimina de
+    // la marca de dedup MÁS frecuente del pipeline.
     const [registro, original] = await Promise.all([
-      leerRegistro(fila.id),
-      leerRegistro(fila.dupOf),
+      leerRegistroRaw(fila.id),
+      leerRegistroRaw(fila.dupOf),
     ]);
     const actaOrigen = original.acta;
     if (!actaOrigen) return false; // original sin desenlace (ERROR/en vuelo)
@@ -335,6 +341,18 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
       hashDedup: registro.hashDedup,
       dupOf: fila.dupOf,
       serie: serieCopia, // e63k — identidad de la copia (null = sin consenso, honesto)
+      // D41 — las fotos del original viajan como BLOBS (nunca dataURLs):
+      // hoy las dataURLs materializadas del acta original re-entraban a
+      // compactarRegistro (atob de 2-16 MB) para volver a ser Blobs. Neto
+      // byte-idéntico: compactarRegistro sigue aplicando el cleanup §3
+      // (DUPLICADA → fotoOriginalBlob fuera) y los registros legacy pre-e68
+      // (dataURLs dentro del actaOrigen) se compactan igual al guardar.
+      ...(original.fotoOriginalBlob
+        ? { fotoOriginalBlob: original.fotoOriginalBlob }
+        : {}),
+      ...(original.fotoProcesadaBlob
+        ? { fotoProcesadaBlob: original.fotoProcesadaBlob }
+        : {}),
     };
     await guardarRegistro(registroListo);
     // e66 (D-e66-2) — REVERSA de e65b T-3b (mandato del plan P2): la gemela
@@ -448,7 +466,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     fila = { ...fila, estado: "PENDIENTE", dupOf: null };
     marcarFila(fila.id, { estado: "PENDIENTE", dupOf: null });
     try {
-      const registro = await leerRegistro(fila.id);
+      // D41 — lectura RAW: solo spread base del re-save (sin dataURLs que
+      // materializar — la fila es PENDIENTE, sin acta/fotos).
+      const registro = await leerRegistroRaw(fila.id);
       await guardarRegistro({ ...registro, estado: "PENDIENTE", dupOf: undefined });
     } catch {
       /* IDB caído — la fila ya está PENDIENTE en memoria (honesto) */
@@ -499,7 +519,11 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   // Fuera del try — el catch del post-mortem TAMBIÉN la estampa.
   let rescateLanzado = false;
   try {
-    registro = await leerRegistro(fila.id);
+    // D41 — lectura RAW: el pipeline solo consume `archivo` y escribe el
+    // desenlace NUEVO encima (el acta vieja, si existiera, se reemplaza
+    // wholesale — jamás se lee su dataURL); materializar las fotos del
+    // registro era FileReader de 2-16 MB por fila en el hilo UI.
+    registro = await leerRegistroRaw(fila.id);
     const archivo = registro.archivo;
     // IDB clona el File original (sigue siendo File — structured clone de
     // File API). El guard honesto evita alimentar al bridge con un Blob
@@ -578,20 +602,58 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       );
     } else {
       try {
-        const captureQr = await fileToCaptureDataUrl(archivo);
-        // KIT e14-gama-adaptativa-v1 (D74) — la CAPA 0 recibe el plan de
-        // gama: flag OFF / ALTO ⇒ {2048, rescate ON, sin presupuesto} =
-        // llamada byte-idéntica a hoy. BAJO ⇒ 1600 + sin rescate 4096 +
-        // presupuesto 5 s; MEDIO ⇒ 2048 + rescate + presupuesto 8 s — el
-        // peor caso SIN QR (~15-17 s SYNC documentado en identidad-qr.ts)
-        // deja de congelar la UI en los dispositivos que menos lo aguantan.
         const planQr = planGamaActual();
-        const qrQr = await decodificarQrDeCapture(captureQr, {
-          ladoLargo: planQr.qrLadoLargo,
-          rescate4096: planQr.qrRescate4096,
-          presupuestoMs: planQr.qrPresupuestoMs,
-        });
-        qrPayload = qrQr?.payload ?? null;
+        // D40 — KIT e14-capa0-qr-worker-v1: el carril pesado de la capa 0
+        // (decode del blob + ladder + barridos + nitidez + binarizada +
+        // rotaciones + rescate) corre en WORKER dedicado jsQR-only
+        // (capa0-qr.worker.js — qr-pixeles.ts) — el peor caso SIN QR
+        // (~15-17 s SYNC documentado en identidad-qr.ts) deja de congelar
+        // el hilo UI en los dispositivos que menos lo aguantan. El tier
+        // zxing (wasm — RED LINE del worker e73) queda en MAIN como
+        // SOLO-rescate si el worker no leyó nada (cobertura EXACTA).
+        // Kill-switch capa0QrWorker=false / feature-detect fallida /
+        // hard-kill ⇒ camino de hoy byte-idéntico (decode main + cadena
+        // completa con SU presupuesto de gama).
+        let viaWorker = false;
+        if (leerFlags().capa0QrWorker) {
+          const rWorker = await decodificarQrCapa0Worker(archivo, {
+            ladoLargo: planQr.qrLadoLargo,
+            rescate4096: planQr.qrRescate4096,
+            presupuestoMs: planQr.qrPresupuestoMs,
+          });
+          if (rWorker) {
+            viaWorker = true;
+            qrPayload = rWorker.payload;
+            logger.info(
+              `[e14] capa0-qr worker fila=${fila.id} nombre=${fila.nombre} tier=${rWorker.tier ?? "null"} ms=${rWorker.ms} payload=${qrPayload ? qrCorto(qrPayload) : "-"}`,
+            );
+            if (!qrPayload) {
+              // Solo el tier que el worker no puede cargar (wasm) — sin
+              // re-pagar los barridos jsQR (ya corrieron en el worker).
+              const captureQr = await fileToCaptureDataUrl(archivo);
+              const qrQr = await decodificarQrDeCapture(captureQr, {
+                soloZxing: true,
+                ladoLargo: planQr.qrLadoLargo,
+              });
+              qrPayload = qrQr?.payload ?? null;
+            }
+          }
+        }
+        if (!viaWorker) {
+          const captureQr = await fileToCaptureDataUrl(archivo);
+          // KIT e14-gama-adaptativa-v1 (D74) — la CAPA 0 recibe el plan de
+          // gama: flag OFF / ALTO ⇒ {2048, rescate ON, sin presupuesto} =
+          // llamada byte-idéntica a hoy. BAJO ⇒ 1600 + sin rescate 4096 +
+          // presupuesto 5 s; MEDIO ⇒ 2048 + rescate + presupuesto 8 s — el
+          // peor caso SIN QR (~15-17 s SYNC documentado en identidad-qr.ts)
+          // deja de congelar la UI en los dispositivos que menos lo aguantan.
+          const qrQr = await decodificarQrDeCapture(captureQr, {
+            ladoLargo: planQr.qrLadoLargo,
+            rescate4096: planQr.qrRescate4096,
+            presupuestoMs: planQr.qrPresupuestoMs,
+          });
+          qrPayload = qrQr?.payload ?? null;
+        }
       } catch {
         qrPayload = null; // la capa 0 jamás tumba el pipeline (fallback limpio)
       }
@@ -623,7 +685,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         const filaGemela: FilaMasiva = { ...fila, estado: "DUPLICADA", dupOf: o.id };
         if (!(await reutilizarResultado(filaGemela, tQr))) return false;
         try {
-          const regQr = await leerRegistro(fila.id);
+          // D41 — lectura RAW: spread base del re-save (dedup/qrPayload/qrEstado
+          // son escalares — sin dataURLs que materializar).
+          const regQr = await leerRegistroRaw(fila.id);
           await guardarRegistro({
             ...regQr,
             dedup: "qr",
@@ -918,7 +982,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // el dueño (no re-encola nada nuevo — D45 intacto; criterios/score intactos).
       await matarYRecrearWorkers();
       try {
-        const fresco = await leerRegistro(fila.id);
+        // D41 — lectura RAW: solo se consumen `archivo` (File) para el
+        // reintento del watchdog — sin dataURLs que materializar.
+        const fresco = await leerRegistroRaw(fila.id);
         if (fresco.archivo instanceof File) {
           registro = fresco;
           archivoIntento = fresco.archivo;

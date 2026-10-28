@@ -83,12 +83,16 @@ import {
   BANDA_A,
   BANDAS_BASE,
   BARRIDO_VENTANAS,
+  binarizadaQrDePixeles, // D40 — movida al módulo puro (abajo re-exportada)
   CUADRANTES,
   intentoSobrePixeles,
   jsQrDeVentana,
+  ladderBaseDePixeles, // D40 — movida al módulo puro (abajo re-exportada)
   ladoDeVentana,
   limitesDeCuadrante,
+  nitidezQrDePixeles, // D40 — movida al módulo puro (abajo re-exportada)
   QR_RECORTE_LADO,
+  QR_ROTACIONES, // D40 — movida al módulo puro (abajo re-exportada)
   rotarPixeles,
   ventanaDePixeles,
   type PixelesQr,
@@ -102,12 +106,27 @@ export {
   QR_RECORTE_LADO,
   rotarPixeles,
 } from "./qr-pixeles";
+// D40 — KIT e14-capa0-qr-worker-v1: NITIDEZ/BINARIZADA se MOVIERON al módulo
+// puro (qr-pixeles.ts, byte a byte) para que el worker de capa 0 las importe
+// de forma ESTÁTICA sin arrastrar zxing/logger/DOM. Re-exportadas aquí —
+// cero diffs en consumidores (runner, qa-qr-identidad, tests).
+export {
+  binarizadaQrDePixeles,
+  BINARIZADA_DELTA,
+  BINARIZADA_VENTANA,
+  nitidezQrDePixeles,
+  NITIDEZ_K,
+} from "./qr-pixeles";
 export type { EspecieBanda, PixelesQr } from "./qr-pixeles";
 
 // ─── Constantes NUEVAS del kit e63m §1.1 (separadas de las existentes) ──────
 /** Lado largo MÁXIMO del canvas de trabajo (kit §1.1 — igual que el banco:
  *  el thumb 320 del dhash es DEMASIADO PEQUEÑO para el QR). */
 export const QR_LADO_LARGO = 2048;
+// D40 — KIT e14-capa0-qr-worker-v1: las ROTACIONES y el LADDER BASE son
+// puros (BANDAS_BASE + intentoSobrePixeles — cero DOM/zxing/logger): viven
+// en qr-pixeles.ts (byte a byte) y se re-exportan aquí — el worker de capa 0
+// los importa estáticamente sin arrastrar este módulo (misma doctrina e73).
 /** Ladder BASE en orden (kit §1.1 — byte-idéntico al banco): A imagen
  *  completa → B banda top-left → C banda ajustada → C×1.5 up-escalado. */
 export const QR_INTENTOS_BASE: readonly string[] = BANDAS_BASE.map((b) => b.id);
@@ -115,7 +134,7 @@ export const QR_INTENTOS_BASE: readonly string[] = BANDAS_BASE.map((b) => b.id);
  *  @90°→@180°→@270° (evidencia del banco: el QR CAMBIA de esquina al rotar
  *  — durazno1 solo decodifica con A@90°; repetir bandas finas sobre el
  *  rotado no sirve, la imagen completa sí). */
-export const QR_ROTACIONES: readonly number[] = [90, 180, 270];
+export { QR_ROTACIONES } from "./qr-pixeles"; // D40 — movida al módulo puro (byte a byte)
 /** Espera acotada del caso «original en vuelo» (kit §1.1/§1.2.4): intervalo
  *  × intentos = techo efectivo de 15 s. Re-chequeo SOLO-LECTURA del estado
  *  del original; sin timers globales. */
@@ -159,13 +178,7 @@ export type EstadoOriginalQr = EstadoEntrada | "AUSENTE";
  * completa decodificarQrDePixeles como ÚLTIMO tier, doc hermano §1).
  * Puro — testeable headless.
  */
-export function ladderBaseDePixeles(pix: PixelesQr): string | null {
-  for (const esp of BANDAS_BASE) {
-    const payload = intentoSobrePixeles(pix, esp);
-    if (payload != null) return payload; // early-exit al primer payload
-  }
-  return null;
-}
+export { ladderBaseDePixeles } from "./qr-pixeles"; // D40 — movida al módulo puro (byte a byte)
 
 /**
  * Ladder COMPLETO e63m sobre píxeles (kit §1.1): base A→B→C→C1.5 con
@@ -194,80 +207,12 @@ export function ladderQrDePixeles(pix: PixelesQr): string | null {
 // la celda filo en AMBOS barridos: el jsQR (qr-pixeles.ts) y el zxing
 // (este archivo).)
 
-// ─── e64-qr T-1.1 · NITIDEZ (unsharp 3×3) ──────────────────────────────
-/** Máscara de enfoque sobre RGBA: salida = clamp(orig + k·(orig − blur3×3)).
- *  Motivo (doc hermano R-1): el remuestreo a ≤2048 suaviza módulos de ~3-8 px
- *  — jsQR binariza mejor con filos (evidencia banco #77: motion blur en el
- *  filo del decode). Pura, sin DOM, sin throw: bordes intactos (y,x ∈
- *  [1,extremo-1] — el marco de 1 px no aporta al decode, el QR nunca vive
- *  pegado al filo ABSOLUTO de la foto). Uint8ClampedArray clampea solo. */
-export const NITIDEZ_K = 0.6;
+// ─── e64-qr T-1.1/T-1.2 · NITIDEZ + BINARIZADA: viven en qr-pixeles.ts ─────
+// (D40 — KIT e14-capa0-qr-worker-v1: movidas byte a byte al módulo puro
+// worker-safe con la MISMA doctrina del FIX DICTAMEN-e73 §3.1; re-exportadas
+// arriba — cero diffs en consumidores. Este módulo las importa del puro y
+// la cadena completa de abajo las consume igual que siempre.)
 
-export function nitidezQrDePixeles(pix: PixelesQr): PixelesQr {
-  const { data, width: w, height: h } = pix;
-  const out = new Uint8ClampedArray(data); // orig + delta acumulado
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = (y * w + x) * 4;
-      for (let c = 0; c < 4; c++) {
-        // blur 3×3 (sin separables — 9 lecturas, ventana local)
-        let suma = 0;
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) suma += data[i + (dy * w + dx) * 4 + c]!;
-        const blur = suma / 9;
-        out[i + c] = data[i + c]! + NITIDEZ_K * (data[i + c]! - blur);
-      }
-    }
-  }
-  return { data: out, width: w, height: h };
-}
-
-// ─── e64-qr T-1.2 · BINARIZADA (umbral local adaptativo) ───────────────────
-/** Blanco-negro puro con umbral LOCAL (ventana integral — patrón EXACTO del
- *  que ya usa marcasEsquina en src/lib/e14/integridad.ts:74-100, con luma
- *  8 bits + Float64 en vez de 6 bits + Uint32: aquí SÍ se necesita el rango
- *  completo para el delta): fotos con sombra o iluminación dura donde el
- *  binarizado interno de jsQR falla. Salida RGBA 0/255 — jsQR la consume
- *  igual (attemptBoth la invierte si hace falta). Pura, sin DOM, sin throw. */
-export const BINARIZADA_VENTANA = 0.025; // fracción del lado menor (mín 24 px)
-export const BINARIZADA_DELTA = 12;      // holgura sobre la media local
-
-export function binarizadaQrDePixeles(pix: PixelesQr): PixelesQr {
-  const { data, width: w, height: h } = pix;
-  // luma 8 bits (redondeo una vez)
-  const luma = new Uint8Array(w * h);
-  for (let i = 0, p = 0; i < data.length; i += 4, p++)
-    luma[p] = Math.round(0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!);
-  // imagen integral (W+1)×(H+1) Float64 — luma 8 bits no desborda
-  const iw = w + 1;
-  const integral = new Float64Array(iw * (h + 1));
-  for (let y = 0; y < h; y++) {
-    let fila = 0;
-    for (let x = 0; x < w; x++) {
-      fila += luma[y * w + x]!;
-      integral[(y + 1) * iw + x + 1] = integral[y * iw + x + 1]! + fila;
-    }
-  }
-  const lado = Math.max(24, Math.round(Math.min(w, h) * BINARIZADA_VENTANA));
-  const out = new Uint8ClampedArray(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    const y0 = Math.max(0, y - lado);
-    const y1 = Math.min(h - 1, y + lado);
-    for (let x = 0; x < w; x++) {
-      const x0 = Math.max(0, x - lado);
-      const x1 = Math.min(w - 1, x + lado);
-      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
-      const suma =
-        integral[(y1 + 1) * iw + x1 + 1]! - integral[y0 * iw + x1 + 1]! -
-        integral[(y1 + 1) * iw + x0]! + integral[y0 * iw + x0]!;
-      const media = suma / area;
-      const v = luma[y * w + x]! < media - BINARIZADA_DELTA ? 0 : 255;
-      const i = (y * w + x) * 4;
-      out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = 255;
-    }
-  }
-  return { data: out, width: w, height: h };
-}
 
 // ─── e63n (T-PRE) — tier ZXING (zxing-wasm 3.1.6, wasm LOCAL) ──────────────
 /** Módulo zxing-wasm/reader cacheado — undefined = aún no intentado ·
@@ -603,6 +548,12 @@ export async function decodificarQrDeCapture(
     rescate4096?: boolean;
     /** Presupuesto de la cadena completa (default null = sin reló). */
     presupuestoMs?: number | null;
+    // D40 — KIT e14-capa0-qr-worker-v1 (aditivo, default false = byte-idéntico):
+    // SOLO el tier zxing (recorte + barrido) — el rescate de main cuando el
+    // worker de capa 0 ya agotó TODOS los tiers jsQR (base/recorte/barridos/
+    // nitidez/binarizada/rotaciones/rescate) sin leer nada. Sin re-pagar
+    // trabajo: la cobertura queda EXACTA a la cadena de hoy.
+    soloZxing?: boolean;
   } = {},
 ): Promise<{ payload: string } | null> {
   const tiers = opciones.tiers ?? "completos";
@@ -611,12 +562,36 @@ export async function decodificarQrDeCapture(
       ? Math.round(opciones.ladoLargo)
       : QR_LADO_LARGO;
   const rescateOn = opciones.rescate4096 !== false;
+  const t0 = Date.now();
   try {
     const pix = await pixelesDeCapture(dataUrl, ladoLargo);
     if (!pix) return null;
     if (tiers === "base") {
       const baseRapida = ladderBaseDePixeles(pix);
       return baseRapida != null ? { payload: baseRapida } : null;
+    }
+    // D40 — modo soloZxing: el worker (jsQR-only) ya corrió la cadena
+    // completa sin leer nada. Aquí SOLO el tier que el worker no puede
+    // cargar (red line e73: zxing JAMÁS en el worker): recorte-600 con los
+    // DOS binarizadores + barrido zxing completo (presupuesto propio 4 s).
+    if (opciones.soloZxing) {
+      const recorteZ = ventanaDePixeles(pix, 0, 0, QR_RECORTE_LADO);
+      if (recorteZ) {
+        for (const binarizador of ZXING_BINARIZADORES) {
+          const payloadZ = await zxingDeVentana(recorteZ, binarizador);
+          if (payloadZ != null) {
+            trazaQr("recorte-600-zxing", payloadZ, t0);
+            return { payload: payloadZ };
+          }
+        }
+      }
+      const zxingZ = await barridoQrZxingDePixeles(pix);
+      if (zxingZ != null) {
+        trazaQr("zxing", zxingZ, t0);
+        return { payload: zxingZ };
+      }
+      logger.info(`[e14] qr-capa0 soloZxing tier=null ms=${Date.now() - t0}`);
+      return null;
     }
     const payload = await decodificarQrDePixeles(pix, {
       presupuestoMs: opciones.presupuestoMs ?? null,

@@ -40,3 +40,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 download/
+
+# D39 — higiene de repo: artefactos del entorno AI / sandbox (jamás producto)
+# NOTA: docs/capturas-*/ SÍ se conservan — son evidencia citada por los REPORTEs.
+/skills/
+/tool-results/
+/dev.log
+__pycache__/
+*.pyc
+.zscripts/
+mini-services/
+/agent-ctx/

@@ -145,6 +145,8 @@ export interface FlagsApp {
   prescanWarpLado: number; // default 4032 — maxWarpLongSide de la SALIDA del warp del pre-scan (el worker ya aceptaba msg.maxWarpLongSide sin consumidor); 1920 recorta ~4.5x el coste del warpPerspective y la QR se lee igual (el core lee QR a 1280/1920); clamp 256..4032
   // ─── KIT e14-gama-adaptativa-v1 — campo ADITIVO AL FINAL (D57) ───
   masivaAdaptativoGama: boolean; // default true — capa adaptativa de GAMA para masiva+OCR: el tier detectado (obs/dispositivo §4.4) aplica SOLO presupuestos de recursos (pool/threads/warp/watchdog/master/QR/dhash — tabla en gama.ts) en BAJO/MEDIO; el override MANUAL del dueño manda clave a clave (D6) y false = byte-idéntico a hoy en TODOS los dispositivos (D74)
+  // ─── KIT e14-capa0-qr-worker-v1 (D40) — campo ADITIVO AL FINAL (D57) ───
+  capa0QrWorker: boolean; // default true — la CAPA 0 QR (decode+ladder+barridos jsQR) corre en WORKER dedicado (capa0-qr.worker.js) y el hilo UI deja de comerse los ~15-17 s SYNC del peor caso sin QR; el tier zxing queda en main como rescate único (cobertura EXACTA); false = camino de hoy byte-idéntico (cadena completa en main)
 }
 
 export interface ReporteSesion {

@@ -136,6 +136,30 @@ export function rotarPixeles(src: PixelesQr, grados: number): PixelesQr {
   return actual;
 }
 
+// ─── D40 — KIT e14-capa0-qr-worker-v1 · QR_ROTACIONES + LADDER BASE ─────────
+// MOVIDOS byte a byte de identidad-qr.ts (misma doctrina del FIX
+// DICTAMEN-e73 §3.1: módulo puro worker-safe re-exportado — cero diffs en
+// consumidores): el worker de capa 0 los importa estáticamente y el grafo
+// del bundle queda jsQR-only (cero zxing/logger/DOM/process.env).
+
+/** Tier de rotación (kit e63m §1.1): SOLO si el ladder base falla — A
+ *  completa a 90/180/270, early-exit al primer payload. */
+export const QR_ROTACIONES: readonly number[] = [90, 180, 270];
+
+/** Ladder BASE en orden (kit §1.1 — byte-idéntico al banco): A imagen
+ *  completa → B banda top-left → C banda ajustada → C1.5 up-escalado,
+ *  early-exit al primer payload. El tier de ROTACIÓN NO está aquí (quedó en
+ *  ladderQrDePixeles — e63m/QA intacto — y en la cadena completa
+ *  decodificarQrDePixeles como ÚLTIMO tier, doc hermano §1). Puro —
+ *  testeable headless. */
+export function ladderBaseDePixeles(pix: PixelesQr): string | null {
+  for (const esp of BANDAS_BASE) {
+    const payload = intentoSobrePixeles(pix, esp);
+    if (payload != null) return payload; // early-exit al primer payload
+  }
+  return null;
+}
+
 // ─── FIX DICTAMEN-e73-implementacion-v1 §2/§3.1 — BARRIDO CEÑIDO movido ─────
 // El barrido jsQR (barridoQrDePixeles + sus helpers privados + BARRIDO_VENTANAS
 // + QR_RECORTE_LADO) se MOVIÓ de identidad-qr.ts SIN cambiar comportamiento
@@ -273,4 +297,89 @@ export function barridoQrDePixeles(pix: PixelesQr): string | null {
     }
   }
   return null;
+}
+
+// ─── D40 — KIT e14-capa0-qr-worker-v1 · NITIDEZ + BINARIZADA movidas aquí ───
+// MISMA doctrina del FIX DICTAMEN-e73 §3.1 (módulo puro worker-safe re-
+// exportado por identidad-qr — cero diffs en consumidores): los tiers
+// NITIDEZ/BINARIZADA de la cadena de capa 0 son puros (sin DOM, sin zxing,
+// sin logger) y el worker de capa 0 los necesita como import estático —
+// moverlos aquí mantiene el grafo del bundle jsQR-only. El contenido fue
+// MOVIDO byte a byte de identidad-qr.ts SIN cambiar comportamiento;
+// identidad-qr.ts re-exporta TODO (los consumidores existentes — runner,
+// qa-qr-identidad, tests — no cambian ni una línea).
+
+/** e64-qr T-1.1 · NITIDEZ (unsharp 3×3) — Máscara de enfoque sobre RGBA:
+ *  salida = clamp(orig + k·(orig − blur3×3)). Motivo (doc hermano R-1): el
+ *  remuestreo a ≤2048 suaviza módulos de ~3-8 px — jsQR binariza mejor con
+ *  filos (evidencia banco #77: motion blur en el filo del decode). Pura,
+ *  sin DOM, sin throw: bordes intactos (y,x ∈ [1,extremo-1] — el marco de
+ *  1 px no aporta al decode, el QR nunca vive pegado al filo ABSOLUTO de la
+ *  foto). Uint8ClampedArray clampea solo. */
+export const NITIDEZ_K = 0.6;
+
+export function nitidezQrDePixeles(pix: PixelesQr): PixelesQr {
+  const { data, width: w, height: h } = pix;
+  const out = new Uint8ClampedArray(data); // orig + delta acumulado
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        // blur 3×3 (sin separables — 9 lecturas, ventana local)
+        let suma = 0;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) suma += data[i + (dy * w + dx) * 4 + c]!;
+        const blur = suma / 9;
+        out[i + c] = data[i + c]! + NITIDEZ_K * (data[i + c]! - blur);
+      }
+    }
+  }
+  return { data: out, width: w, height: h };
+}
+
+/** e64-qr T-1.2 · BINARIZADA (umbral local adaptativo) — Blanco-negro puro
+ *  con umbral LOCAL (ventana integral — patrón EXACTO del que ya usa
+ *  marcasEsquina en src/lib/e14/integridad.ts:74-100, con luma 8 bits +
+ *  Float64 en vez de 6 bits + Uint32: aquí SÍ se necesita el rango completo
+ *  para el delta): fotos con sombra o iluminación dura donde el binarizado
+ *  interno de jsQR falla. Salida RGBA 0/255 — jsQR la consume igual
+ *  (attemptBoth la invierte si hace falta). Pura, sin DOM, sin throw. */
+export const BINARIZADA_VENTANA = 0.025; // fracción del lado menor (mín 24 px)
+export const BINARIZADA_DELTA = 12;      // holgura sobre la media local
+
+export function binarizadaQrDePixeles(pix: PixelesQr): PixelesQr {
+  const { data, width: w, height: h } = pix;
+  // luma 8 bits (redondeo una vez)
+  const luma = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++)
+    luma[p] = Math.round(0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!);
+  // imagen integral (W+1)×(H+1) Float64 — luma 8 bits no desborda
+  const iw = w + 1;
+  const integral = new Float64Array(iw * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let fila = 0;
+    for (let x = 0; x < w; x++) {
+      fila += luma[y * w + x]!;
+      integral[(y + 1) * iw + x + 1] = integral[y * iw + x + 1]! + fila;
+    }
+  }
+  const lado = Math.max(24, Math.round(Math.min(w, h) * BINARIZADA_VENTANA));
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - lado);
+    const y1 = Math.min(h - 1, y + lado);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - lado);
+      const x1 = Math.min(w - 1, x + lado);
+      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const suma =
+        integral[(y1 + 1) * iw + x1 + 1]! - integral[y0 * iw + x1 + 1]! -
+        integral[(y1 + 1) * iw + x0]! + integral[y0 * iw + x0]!;
+      const media = suma / area;
+      const v = luma[y * w + x]! < media - BINARIZADA_DELTA ? 0 : 255;
+      const i = (y * w + x) * 4;
+      out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = 255;
+    }
+  }
+  return { data: out, width: w, height: h };
 }

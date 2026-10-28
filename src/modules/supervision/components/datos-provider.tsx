@@ -60,8 +60,6 @@ interface EstadoDatos {
   mesasPorPuesto: Record<string, Mesa[]>;
   notificaciones: Notificacion[];
   anomalias: Anomalia[];
-  /** Ticker T3: segundos desde la última sincronización (avanza de 5 en 5). */
-  segundosDesdeSync: number;
   /** Mesa con REINSPECCIONAR en curso (spinner del botón). */
   mesaEnAccionId: string | null;
 }
@@ -109,6 +107,12 @@ interface DatosContexto extends EstadoDatos, AccionesDatos {
 
 const Contexto = createContext<DatosContexto | null>(null);
 
+/** D42 — KIT e14-monitor-memo-v1: contexto HOJA del ticker de vida. Único
+ *  consumidor: el chip «Sincronizado hace Xs» de la cabecera (ResumenChips
+ *  lo recibe por prop desde monitor-global). Cualquier otro consumidor de
+ *  `useDatos()` deja de re-renderizar cada 5 s. */
+const ContextoTicker = createContext<{ segundos: number }>({ segundos: 0 });
+
 
 function resumenDePuestos(puestos: Puesto[]): ResumenGlobal {
   const resumen: ResumenGlobal = {
@@ -134,9 +138,16 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     mesasPorPuesto: {},
     notificaciones: [],
     anomalias: [],
-    segundosDesdeSync: 0,
     mesaEnAccionId: null,
   });
+  // D42 — KIT e14-monitor-memo-v1: el ticker de vida vive en SU PROPIO
+  // contexto hoja. Antes `segundosDesdeSync` viajaba en el estado grande →
+  // cada tick de 5 s re-creaba el valor del contexto y re-reconciliaba las
+  // 949 filas (~14k componentes) SOLO para el texto «Sincronizado hace Xs».
+  // Ahora el único consumidor del segundo-contexto es el chip del ticker —
+  // el contexto de DATOS solo cambia con eventos REALES (transiciones,
+  // publicaciones, acciones) y el `valor` memoizado no invalida cada 5 s.
+  const [segundosTicker, setSegundosTicker] = useState(0);
 
   // ── KIT SUP-4 — estado del visor de actas (T3.2) ─────────────────────
   const [visorActa, setVisorActa] = useState<EstadoVisorActa | null>(null);
@@ -200,13 +211,18 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (estado.cargando) return;
     const intervalo = setInterval(() => {
-      setEstado((prev) => {
-        const segundos = prev.segundosDesdeSync + TICKER_SEGUNDOS;
-        if (segundos >= TRANSICION_CADA_SEGUNDOS) {
+      // D39 — pausa de la simulación con la pestaña oculta: cada tick sin
+      // espectador era un re-render completo de 949 filas (CPU/batería en
+      // gama baja, y ráfagas encoladas al volver). Al reabrir, el ticker
+      // sigue desde donde quedó — el navegador ya estrangula timers en
+      // background; esto elimina el trabajo residual que quedaba.
+      if (typeof document !== "undefined" && document.hidden) return;
+      setSegundosTicker((segundos) => {
+        if (segundos + TICKER_SEGUNDOS >= TRANSICION_CADA_SEGUNDOS) {
           void aplicarTransicion();
-          return { ...prev, segundosDesdeSync: 0 };
+          return 0;
         }
-        return { ...prev, segundosDesdeSync: segundos };
+        return segundos + TICKER_SEGUNDOS;
       });
     }, TICKER_SEGUNDOS * 1000);
     return () => clearInterval(intervalo);
@@ -486,38 +502,74 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     [estado.anomalias]
   );
 
-  const valor: DatosContexto = {
-    ...estado,
-    resumen,
-    notificacionesNoLeidas,
-    anomaliasAbiertas,
-    reinspeccionar,
-    notificar,
-    marcarNotificacionLeida,
-    marcarTodasLeidas,
-    marcarAnomaliaRevisada,
-    visorActa,
-    actaActual,
-    actaCargando,
-    accionActaEnCurso,
-    mesasConActaDelPuesto,
-    abrirVisor,
-    abrirVisorDePuesto,
-    abrirVisorDeAnomalia,
-    cerrarVisor,
-    navegarMesa,
-    cambiarTipo,
-    cambiarPagina,
-    aprobarActaVisor,
-    confirmarRescanVisor,
-  };
+  // D42 — KIT e14-monitor-memo-v1: el valor del contexto va MEMOIZADO — con
+  // el ticker fuera del estado grande y TODAS las acciones en useCallback
+  // estable, la identidad solo cambia con eventos REALES de datos (no cada
+  // tick de 5 s). Los consumidores (949 PuestoRow incluidos) re-renderizan
+  // solo cuando algo realmente cambió.
+  const valor: DatosContexto = useMemo(
+    () => ({
+      ...estado,
+      resumen,
+      notificacionesNoLeidas,
+      anomaliasAbiertas,
+      reinspeccionar,
+      notificar,
+      marcarNotificacionLeida,
+      marcarTodasLeidas,
+      marcarAnomaliaRevisada,
+      visorActa,
+      actaActual,
+      actaCargando,
+      accionActaEnCurso,
+      mesasConActaDelPuesto,
+      abrirVisor,
+      abrirVisorDePuesto,
+      abrirVisorDeAnomalia,
+      cerrarVisor,
+      navegarMesa,
+      cambiarTipo,
+      cambiarPagina,
+      aprobarActaVisor,
+      confirmarRescanVisor,
+    }),
+    [
+      estado,
+      resumen,
+      notificacionesNoLeidas,
+      anomaliasAbiertas,
+      reinspeccionar,
+      notificar,
+      marcarNotificacionLeida,
+      marcarTodasLeidas,
+      marcarAnomaliaRevisada,
+      visorActa,
+      actaActual,
+      actaCargando,
+      accionActaEnCurso,
+      mesasConActaDelPuesto,
+      abrirVisor,
+      abrirVisorDePuesto,
+      abrirVisorDeAnomalia,
+      cerrarVisor,
+      navegarMesa,
+      cambiarTipo,
+      cambiarPagina,
+      aprobarActaVisor,
+      confirmarRescanVisor,
+    ],
+  );
+
+  const valorTicker = useMemo(() => ({ segundos: segundosTicker }), [segundosTicker]);
 
   return (
     <Contexto.Provider value={valor}>
-      {children}
-      {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
-          monta desde el store del módulo (estado visorActa). */}
-      <ActaViewerModal />
+      <ContextoTicker.Provider value={valorTicker}>
+        {children}
+        {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
+            monta desde el store del módulo (estado visorActa). */}
+        <ActaViewerModal />
+      </ContextoTicker.Provider>
     </Contexto.Provider>
   );
 }
@@ -528,4 +580,10 @@ export function useDatos(): DatosContexto {
     throw new Error("useDatos debe usarse dentro de <DatosProvider>");
   }
   return ctx;
+}
+
+/** D42 — segundos del ticker de vida (contexto hoja): SOLO el chip de la
+ *  cabecera lo consume — nadie más re-renderiza cada 5 s. */
+export function useDatosTicker(): { segundos: number } {
+  return useContext(ContextoTicker);
 }

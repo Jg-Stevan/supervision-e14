@@ -6,3 +6,29 @@
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
+
+# D39 — CACHE DEL MOTOR (prioridad gama baja / red móvil inestable):
+# el motor pesa ~40 MB (ORT wasm 14 MB, OpenCV 8.6 MB, modelos ONNX 16 MB).
+# Sin cabeceras de caché una recarga en red móvil podía re-bajarlos. Los
+# assets de public/ son versionados por convención (?v=N en workers) o
+# inmutables de facto (modelos/binarios que solo cambian con un commit del
+# motor), así que max-age de 1 año es seguro. /_next/static/ ya lleva hash
+# en el nombre de archivo. divipol.json es DATO (puede re-publicarse) →
+# 1 día con revalidación, no immutable.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/models/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/wasm/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/scanner/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/e14/*
+  Cache-Control: public, max-age=86400, must-revalidate

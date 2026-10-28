@@ -259,6 +259,21 @@ export async function guardarRegistro(registro: RegistroMasiva): Promise<void> {
 }
 
 export async function leerRegistro(id: string): Promise<RegistroMasiva> {
+  return materializarFotos(await leerRegistroRaw(id));
+}
+
+/** D41 — KIT e14-lectura-raw-v1: leer el registro SIN materializar las fotos
+ *  (sin el FileReader blob→dataURL de materializarFotos). Para los callers
+ *  que NO consumen `acta.fotoOriginal/fotoProcesada` como dataURL (copias
+ *  de dedup, re-saves de estado/telemetría, resets de zombis): el ciclo
+ *  materializar↔compactar del par leer→escribir se paga UNA vez menos por
+ *  cada marca — hoy cada read materializaba 2-16 MB en dataURL que el write
+ *  re-convertía con `atob` byte-a-byte en el hilo principal.
+ *  CONTRATO: el acta del registro crudo trae las dataURLs AUSENTES cuando
+ *  duermen como Blobs (compactación e68) — los callers que SÍ muestran la
+ *  foto siguen en leerRegistro (REVISIÓN/bandeja). Registros legacy
+ *  pre-e68 (dataURLs dentro del acta) pasan tal cual (compatibilidad §2.1). */
+export async function leerRegistroRaw(id: string): Promise<RegistroMasiva> {
   const db = await abrirCola();
   const store = transaccion(db, "readonly");
   const registro = await pedir<RegistroMasiva | undefined>(
@@ -266,7 +281,7 @@ export async function leerRegistro(id: string): Promise<RegistroMasiva> {
     "IDB_LEER",
   );
   if (!registro) throw new Error("REGISTRO_FUERA_DE_LA_COLA");
-  return materializarFotos(registro);
+  return registro;
 }
 
 /** Listar SIN materializar todo de golpe: cursor uno-a-uno — cada registro

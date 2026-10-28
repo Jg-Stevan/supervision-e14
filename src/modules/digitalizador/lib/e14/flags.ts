@@ -84,6 +84,17 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // app jamás pisa una mano explícita) y `false` = byte-idéntico a hoy en
   // TODOS los dispositivos (kill-switch único).
   masivaAdaptativoGama: true,
+  // KIT e14-capa0-qr-worker-v1 (D40) — la CAPA 0 QR del runner (decode del
+  // blob + ladder + barridos jsQR + nitidez + binarizada + rotaciones +
+  // rescate) corre en WORKER dedicado jsQR-only (capa0-qr.worker.js): el
+  // peor caso SIN QR (~15-17 s SYNC en el hilo UI, documentado en
+  // identidad-qr.ts) deja de congelar la bandeja — justo en gama baja,
+  // donde el cortocircuito D36 pausa el sondeo y `qrPrevio` no llega. El
+  // tier zxing (wasm — red line del worker e73) queda en MAIN como
+  // SOLO-rescate si el worker no leyó nada (cobertura EXACTA a la cadena
+  // de hoy). Kill-switch del dueño: false = byte-idéntico a hoy (cadena
+  // completa en main con SU presupuesto de gama).
+  capa0QrWorker: true,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */
