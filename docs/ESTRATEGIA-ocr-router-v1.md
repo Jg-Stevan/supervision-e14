@@ -152,3 +152,44 @@ Pendiente honesto (siguiente fase): la tarjeta «Activar OCR de precisión» de 
 fase 2 (hoy el dueño puede forzar v5 vía `e14-flags-overrides:
 {"ocrMotor":"ppocrv5"}`) y que el `benchmark.score` viaje del provider al
 arranque del motor para refinar el origen `medio-elegible-upgrade`.
+
+---
+
+## Fase 4 — override con un clic + informe de corrida auto-identificado
+
+Cierre del ciclo: el router decide (fase 1), el worker obedece (fase 3), el
+diagnóstico audita (fase 2) y AHORA el dueño actúa sin consola y el informe
+de corrida se auto-identifica.
+
+1. **Tarjeta «OCR de precisión (PP-OCRv5)»** en el panel AUTONOMÍA
+   (`panel-perfil.tsx`): visible en la ruta `medio-elegible-upgrade` (MEDIO
+   con condiciones cumplidas) o con override vigente.
+   · **ACTIVAR PP-OCRV5** escribe `ocrMotor:"ppocrv5"` en
+   `e14-flags-overrides` vía `guardarOverridesFlags` (la puerta oficial —
+   DOBLE whitelist ya registrada en fase 2). El arranque del OCR lo lee en
+   la PRÓXIMA init: el singleton vigente no se toca (una corrida en curso
+   termina con el motor que arrancó).
+   · **QUITAR OVERRIDE** escribe `ocrMotor:null` — el null NO pasa el
+   whitelist ⇒ el flag vuelve al default y el router recupera la decisión.
+   · La **sonda de carga real sigue siendo el gate técnico** de v5: el botón
+   no la salta (fallo ⇒ v4 + castigo 7 días, igual que ALTO).
+   · D6 íntegro: la app muestra y escribe SOLO lo que el dueño pide.
+
+2. **Informe de corrida (D34) auto-identificado** (`metricas.ts →
+   exportarInformeMetricas`): dos campos ADITIVOS AL FINAL (patrón D57 — los
+   informes previos no cambian de forma):
+   · `gama: { tier, tierEfectivo }` — el tier §4.4 que la capa adaptativa
+   aplicó (y su efectivo si hubo degradación reactiva).
+   · `motorOcr: { motor, modelos, origen, motivo }` — la decisión del router
+   Y los modelos que REALMENTE cargaron (pueden diferir: sonda de v5 fallida
+   ⇒ `motor:"ppocrv5"` con `modelos:"v4"` — el informe muestra ambos, cero
+   maquillaje). Fuente: `motorOcrActual()` de rapidocr.ts (el MÓDULO del
+   motor, misma fuente que la telemetría `[ocr-router]`; null honesto si el
+   motor no inició).
+
+   Con esto el A/B del dueño deja de ser forense: cada `informe-masiva-*.json`
+   nuevo dice QUIÉN es (gama) y QUÉ corrió (motor+modelos+origen+motivo).
+
+Pendiente honesto: que el `benchmark.score` viaje del provider al perfil
+headless del motor (hoy null honesto — la sonda de carga real es el gate;
+el score solo refinaría el origen `medio-elegible-upgrade` del arranque).

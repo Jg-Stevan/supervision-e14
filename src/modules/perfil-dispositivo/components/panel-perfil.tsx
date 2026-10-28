@@ -12,7 +12,7 @@
  * Estilo del kit SUP-1: superficies oscuras, bordes 1px (sin sombras),
  * label-caps para títulos, font-data para datos, radius 4px.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   BatteryCharging,
   CheckCircle2,
@@ -30,6 +30,7 @@ import {
   RefreshCw,
   Sparkles,
   Wifi,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -48,6 +49,11 @@ import {
   planGamaActual,
 } from "@/modules/digitalizador/lib/e14/gama";
 import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
+// KIT ocr-router-v1 fase 4 — el override manual del dueño (D6) viaja por la
+// puerta OFICIAL de overrides (la misma de todos los kill-switches): escribe
+// en e14-flags-overrides; la lectura ya pasa por la DOBLE whitelist
+// (sanearFlags + leerOverridesFlags — registrada en fase 2).
+import { guardarOverridesFlags } from "@/modules/digitalizador/lib/e14/obs/politica";
 // KIT ocr-router-v1 — el ROUTER de motor OCR por dispositivo (PR #10). El
 // informe reporta QUÉ motor corre en este equipo y el porqué auditable.
 import {
@@ -272,21 +278,33 @@ export function VistaPerfil() {
         flagAuto: boolean;
         /** KIT ocr-router-v1 — motor resuelto para el informe y la tarjeta. */
         motor: ResolucionMotor | null;
+        /** fase 4 — override manual vigente en e14-flags-overrides (null =
+         *  el router decide; «ppocrv5» | «tesseract-best-psm4» = el dueño
+         *  fijó el motor a mano). */
+        overrideManual: MotorOcr | null;
       }
   >(null);
-  useEffect(() => {
+  // D38 — resolución EN MONTAJE (no en render) para hydration-safe con el
+  // export estático; se re-resuelve cuando el perfil se re-detecta y cuando
+  // el dueño cambia el override (fase 4 — resolverAuto vía los botones).
+  const resolverAuto = useCallback(() => {
     try {
+      const f = leerFlags();
       setAuto({
         planGama: planGamaActual(),
         poolOcr: flagsMasivaEfectivos().poolWorkers,
         hilosOcr: flagsMasivaEfectivos().ocrThreadsTope,
-        flagAuto: leerFlags().masivaAdaptativoGama !== false,
+        flagAuto: f.masivaAdaptativoGama !== false,
+        overrideManual: f.ocrMotor ?? null,
         motor: resolverMotorDelDispositivo(perfil),
       });
     } catch {
       setAuto(null); // jamás tumba el panel
     }
   }, [perfil]);
+  useEffect(() => {
+    resolverAuto();
+  }, [resolverAuto]);
 
   const copiar = () => {
     try {
@@ -300,6 +318,33 @@ export function VistaPerfil() {
         .catch(() => toast.error("El navegador denegó el portapapeles — usa RE-DETECTAR y revisa aquí"));
     } catch {
       toast.error("No se pudo copiar el diagnóstico");
+    }
+  };
+
+  // KIT ocr-router-v1 fase 4 — tarjeta «Activar OCR de precisión»: escribe el
+  // override MANUAL del dueño en e14-flags-overrides (D6: la app muestra y
+  // escribe SOLO lo que el dueño pide; el router nunca decide por él). El
+  // arranque del OCR lo lee en la PRÓXIMA init — el singleton vigente no se
+  // toca (una corrida en curso termina con el motor que arrancó).
+  const activarPrecision = () => {
+    try {
+      guardarOverridesFlags({ ocrMotor: "ppocrv5" });
+      resolverAuto(); // re-resuelve con el override vigente
+      toast.success("Override activo — el próximo arranque del OCR carga PP-OCRv5");
+    } catch {
+      toast.error("No se pudo escribir el override");
+    }
+  };
+
+  const quitarOverrideMotor = () => {
+    try {
+      // null NO pasa el whitelist de overrides (leerOverridesFlags) → el
+      // flag vuelve al default y el router recupera la decisión (D6).
+      guardarOverridesFlags({ ocrMotor: null });
+      resolverAuto();
+      toast.success("Override retirado — el router vuelve a decidir");
+    } catch {
+      toast.error("No se pudo retirar el override");
     }
   };
 
@@ -546,6 +591,57 @@ export function VistaPerfil() {
                 />
               )}
             </div>
+            {/* KIT ocr-router-v1 fase 4 — override MANUAL del motor (D6:
+                la app muestra y escribe SOLO lo que el dueño pide; el router
+                nunca decide por él). Visible en la ruta de upgrade elegible
+                (MEDIO con condiciones cumplidas) o con override vigente. La
+                sonda de carga real sigue siendo el gate técnico de v5 en el
+                arranque — el botón NO salta la sonda. */}
+            {auto.motor &&
+             (auto.motor.origen === "medio-elegible-upgrade" || auto.overrideManual) && (
+              <div className="mt-3 rounded-[4px] border border-(--outline-variant) bg-(--hover-row) p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Zap className="size-4 shrink-0 text-(--primary)" aria-hidden />
+                  <p className="label-caps text-foreground">OCR de precisión (PP-OCRv5)</p>
+                  {auto.overrideManual && (
+                    <span
+                      className="ml-auto inline-flex items-center gap-1 rounded-full border border-(--primary)/40 bg-(--primary)/10 px-2 py-0.5 font-data text-[10px] uppercase tracking-wider text-(--primary)"
+                      title="Override manual del dueño (e14-flags-overrides) — el router NO decide (D6)"
+                    >
+                      Override activo
+                    </span>
+                  )}
+                </div>
+                <p className="body-md mt-2 text-muted-foreground">
+                  {auto.overrideManual === "ppocrv5"
+                    ? "Fijado a mano: el próximo arranque del OCR descarga los modelos PP-OCRv5 (~13 MB) y corre la sonda de carga (≤ 8 s). Si la sonda falla: motor base + ventana de castigo de 7 días."
+                    : auto.overrideManual === "tesseract-best-psm4"
+                      ? "Motor base fijado a mano (D6) — el router no decide."
+                      : "Este dispositivo cumple las condiciones del upgrade: 100 % de campos impresos y robustez a rotación (benchmark ronda 1-2). El próximo arranque descarga ~13 MB y corre la sonda de carga; si falla, sigue el motor base — sin riesgo para la corrida."}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {auto.overrideManual !== "ppocrv5" && (
+                    <button
+                      type="button"
+                      onClick={activarPrecision}
+                      className="label-caps inline-flex h-10 items-center gap-2 rounded-[4px] border border-(--primary)/40 bg-card px-3 text-(--primary) hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+                    >
+                      <Zap className="size-4" aria-hidden />
+                      ACTIVAR PP-OCRV5
+                    </button>
+                  )}
+                  {auto.overrideManual && (
+                    <button
+                      type="button"
+                      onClick={quitarOverrideMotor}
+                      className="label-caps inline-flex h-10 items-center gap-2 rounded-[4px] border border-border bg-card px-3 text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)"
+                    >
+                      QUITAR OVERRIDE
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <p className="body-md mt-3 text-muted-foreground">
               La app administra los recursos sola: detecta el equipo, aplica presupuestos
               (CPU/memoria/reló) y se degrada preventivamente bajo presión observada (hard-kills).

@@ -40,6 +40,7 @@ import {
   resolverMotor,
   type MotorOcr,
   type PerfilMinimo,
+  type ResolucionMotor,
 } from "./router-ocr";
 import { leerFlags } from "../flags";
 import { obtenerDispositivo } from "../obs/dispositivo";
@@ -131,6 +132,26 @@ function motorADeModelos(m: MotorOcr): MotorModelos {
 
 /** Set de modelos de la sesión ACTUAL (el gobernador lo reporta al morir). */
 let motorModelosActual: MotorModelos = "v4";
+
+// ─── KIT ocr-router-v1 fase 4 — resolución EN VIVO del motor (auditoría) ────
+/** Lo que el informe de corrida (D34) estampa para AUTO-IDENTIFICAR cada
+ *  A/B (hueco real del dueño 2026-10-28: dos informes del mismo kit donde
+ *  era imposible saber qué motor corrió en cada uno): la decisión del router
+ *  + los modelos que REALMENTE cargaron (pueden diferir: sonda de carga de
+ *  v5 fallida ⇒ v4) + origen y motivo auditable. Vive en el MÓDULO del motor
+ *  (misma fuente que la telemetría [ocr-router]) — null = aún no inició. */
+export interface MotorOcrVivo {
+  motor: MotorOcr;
+  modelos: MotorModelos;
+  origen: ResolucionMotor["origen"];
+  motivo: string;
+}
+let motorOcrVivo: MotorOcrVivo | null = null;
+
+/** Getter puro para el informe (exportarInformeMetricas) — jamás lanza. */
+export function motorOcrActual(): MotorOcrVivo | null {
+  return motorOcrVivo;
+}
 
 // ─── sonda WASM SIMD (módulo de bytes fijo — PARIDAD con perfil-dispositivo/
 // senales.ts; el módulo masiva ESPEJA señales, no importa el kit — D74) ───
@@ -244,6 +265,9 @@ async function resolverModeloDeArranque(
       presionReciente: presionReciente(),
     });
     const m = motorADeModelos(res.motor);
+    // fase 4 — la resolución queda EN VIVO para el informe D34 (getters de
+    // módulo: observador pasivo, cero coste — mismo patrón del kit).
+    motorOcrVivo = { motor: res.motor, modelos: m, origen: res.origen, motivo: res.motivo };
     logger.info(
       `[ocr-router] motor=${res.motor} modelos=${m} origen=${res.origen} — ${res.motivo}`,
     );
@@ -272,16 +296,36 @@ async function resolverModeloDeArranque(
     abandonada = true;
     if (sonda.ok) {
       logger.info(`[ocr-router] sonda de carga v5 OK (${sonda.ms} ms) — modelos PP-OCRv5 activos`);
+      motorOcrVivo = {
+        motor: res.motor,
+        modelos: "v5",
+        origen: res.origen,
+        motivo: `${res.motivo} · sonda de carga OK (${sonda.ms} ms).`,
+      };
       return "v5";
     }
     logger.info(
       `[ocr-router] sonda de carga v5 FALLO (${sonda.ms} ms) — v4 y castigo ${DIAS_NO_REINTENTAR} días (localStorage)`,
     );
+    // fase 4 — honesto en el informe: la decisión fue v5 pero los modelos
+    // REALES que cargaron son v4 (el informe muestra AMBOS campos).
+    motorOcrVivo = {
+      motor: res.motor,
+      modelos: "v4",
+      origen: res.origen,
+      motivo: `${res.motivo} · sonda de carga FALLO (${sonda.ms} ms) — v4 + castigo ${DIAS_NO_REINTENTAR} días.`,
+    };
     return "v4";
   } catch (e) {
     logger.info(
       `[ocr-router] fallo resolviendo motor (v4 por seguridad): ${e instanceof Error ? e.message : String(e)}`,
     );
+    motorOcrVivo = {
+      motor: "tesseract-best-psm4",
+      modelos: "v4",
+      origen: "tier",
+      motivo: "Fallo resolviendo motor — v4 por seguridad.",
+    };
     return "v4";
   }
 }

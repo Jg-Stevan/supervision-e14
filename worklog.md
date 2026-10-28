@@ -407,3 +407,40 @@ Task ID: 15 — RESULTADO
   v4; y el A/B confirma que el motor base v4 es sólido en MEDIO/BAJO).
 - PENDIENTE (fase 4): tarjeta «Activar OCR de precisión» en el panel
   (escribe el override ocrMotor) + viaje del benchmark.score al motor.
+
+---
+Task ID: 16
+Agent: Z.ai Code (orquestador principal)
+Task: Fase 4 del KIT ocr-router-v1 (aprobada por el dueño tras el análisis de
+su A/B real 2026-10-28 — informe-masiva 20:41/20:47): (1) tarjeta «Activar
+OCR de precisión» en el panel, (2) informe de corrida D34 auto-identificado
+(gama + motorOcr aditivos).
+
+Task ID: 16 — RESULTADO
+- Hueco de evidencia cerrado por datos: los dos informes del A/B no traían
+  motor ni tier — el análisis mostró la laptop MEDIO como control estable
+  (153.0 s vs 151.8 s, OCR 6.82 vs 6.6 s) y el celular ALTO consistente con
+  PP-OCRv5 vivo (OCR medio 5.5→4.25 s, −23 %) pero el JSON no podía
+  confirmarlo → fase 4: cada informe NUEVO se auto-identifica.
+- rapidocr.ts: estado EN VIVO de la resolución (MotorOcrVivo: motor decidió
+  el router + modelos REALES cargados + origen + motivo) fijado en
+  resolverModeloDeArranque (incluye desenlace de la sonda de carga: decisión
+  v5 con modelos v4 queda visible, cero maquillaje; catch ⇒ v4 honesto) +
+  getter puro motorOcrActual() (misma fuente que la telemetría [ocr-router]).
+- metricas.ts (exportarInformeMetricas): campos ADITIVOS AL FINAL (D57) —
+  gama {tier, tierEfectivo} del plan aplicado + motorOcr {motor, modelos,
+  origen, motivo}. Informes previos no cambian de forma; ausencia = honesta.
+- panel-perfil.tsx: tarjeta «OCR de precisión (PP-OCRv5)» dentro de
+  AUTONOMÍA — visible en origen «medio-elegible-upgrade» o con override
+  vigente; ACTIVAR escribe el override vía guardarOverridesFlags (puerta
+  oficial, DOBLE whitelist de fase 2) y QUITAR OVERRIDE escribe null (el
+  whitelist lo descarta ⇒ router recupera la decisión). resolverAuto en
+  useCallback re-resuelve montaje + clicks (hydration-safe intacto). La
+  sonda de carga real sigue siendo el gate técnico del arranque (el botón
+  NO la salta; fallo ⇒ v4 + castigo 7 días).
+- docs/ESTRATEGIA-ocr-router-v1.md: sección Fase 4.
+- Pendiente honesto (fase 5 si el dueño lo quiere): viaje del
+  benchmark.score al perfil headless del motor (hoy null honesto; la sonda
+  de carga real es el gate real).
+- Verificación: tsc --noEmit → 9 errores TS2307 de assets PRE-EXISTENTES
+  (9 = 9 baseline con stash — fuera de alcance); eslint → 0/0.
