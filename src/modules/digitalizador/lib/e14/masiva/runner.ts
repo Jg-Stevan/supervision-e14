@@ -530,23 +530,43 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // · Fallback sagrado: reutilizarResultado→false → pipeline completo.
     //   Dedup JAMÁS inventa: falso-positivo = NO-GO. La capa 0 JAMÁS throw
     //   (cualquier falla → sin-payload → normal).
-    try {
-      const captureQr = await fileToCaptureDataUrl(archivo);
-      // KIT e14-gama-adaptativa-v1 (D74) — la CAPA 0 recibe el plan de
-      // gama: flag OFF / ALTO ⇒ {2048, rescate ON, sin presupuesto} =
-      // llamada byte-idéntica a hoy. BAJO ⇒ 1600 + sin rescate 4096 +
-      // presupuesto 5 s; MEDIO ⇒ 2048 + rescate + presupuesto 8 s — el
-      // peor caso SIN QR (~15-17 s SYNC documentado en identidad-qr.ts)
-      // deja de congelar la UI en los dispositivos que menos lo aguantan.
-      const planQr = planGamaActual();
-      const qrQr = await decodificarQrDeCapture(captureQr, {
-        ladoLargo: planQr.qrLadoLargo,
-        rescate4096: planQr.qrRescate4096,
-        presupuestoMs: planQr.qrPresupuestoMs,
-      });
-      qrPayload = qrQr?.payload ?? null;
-    } catch {
-      qrPayload = null; // la capa 0 jamás tumba el pipeline (fallback limpio)
+    // ─── D30 — KIT e14-qr-heredado-v1: HERENCIA del payload (punto ÚNICO) ───
+    // Si el SONDEO de ingesta (worker e73) o el PRE-SCAN de «PROCESAR COLA»
+    // (e107) ya leyeron el QR de ESTA fila, el payload viaja en fila.qrPrevio
+    // y la capa 0 lo HEREDA — sin fileToCaptureDataUrl (decode completo del
+    // original) ni ladder (peor caso documentado sin QR: ~15-17 s SYNC).
+    // Igualdad EXACTA del payload (Reed-Solomon — no hay «casi el mismo
+    // payload», RED LINE 10): el prescan YA confiaba en ese payload para
+    // marcar DUPLICADA/YA-ENVIADA, heredarlo para la identidad es
+    // estrictamente MENOS riesgo. Fallback sagrado: qrPrevio AUSENTE (flags
+    // OFF, abort honesto, recarga, fila sin lectura) ⇒ decode de hoy
+    // byte-idéntico. Todo el bloque de decisión de abajo
+    // (original/nuevo/ya-enviada/APLAZADA) consume qrPayload IGUAL que ayer.
+    const qrPrevio = fila.qrPrevio;
+    if (qrPrevio) {
+      qrPayload = qrPrevio;
+      logger.info(
+        `[e14] capa0-qr hereda-payload fila=${fila.id} nombre=${fila.nombre} (sondeo/prescan — sin re-decode)`,
+      );
+    } else {
+      try {
+        const captureQr = await fileToCaptureDataUrl(archivo);
+        // KIT e14-gama-adaptativa-v1 (D74) — la CAPA 0 recibe el plan de
+        // gama: flag OFF / ALTO ⇒ {2048, rescate ON, sin presupuesto} =
+        // llamada byte-idéntica a hoy. BAJO ⇒ 1600 + sin rescate 4096 +
+        // presupuesto 5 s; MEDIO ⇒ 2048 + rescate + presupuesto 8 s — el
+        // peor caso SIN QR (~15-17 s SYNC documentado en identidad-qr.ts)
+        // deja de congelar la UI en los dispositivos que menos lo aguantan.
+        const planQr = planGamaActual();
+        const qrQr = await decodificarQrDeCapture(captureQr, {
+          ladoLargo: planQr.qrLadoLargo,
+          rescate4096: planQr.qrRescate4096,
+          presupuestoMs: planQr.qrPresupuestoMs,
+        });
+        qrPayload = qrQr?.payload ?? null;
+      } catch {
+        qrPayload = null; // la capa 0 jamás tumba el pipeline (fallback limpio)
+      }
     }
     // e64-qr T-0.2 — estampar el estado en la fila viva (chip de la
     // bandeja — kit literal vía actualizarFila; el mutador real del store,

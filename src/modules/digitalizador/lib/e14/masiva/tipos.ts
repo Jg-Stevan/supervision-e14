@@ -152,6 +152,18 @@ export interface FilaMasiva {
    *  chip QR ✓/✗); cero OCR, cero envío. RAM del lote — NUNCA viaja a IDB
    *  (mismo trato que prescanOk: sobrevivir recarga no es requisito). */
   qrLeido?: boolean;
+  // ---------- KIT e14-qr-heredado-v1 (D30 — tiempos del masiva) — campo ADITIVO AL FINAL (contrato D57) ----------
+  /** (D30) Payload QR ya leído para ESTA fila por una capa temprana: el
+   *  SONDEO de ingesta (worker e73 — cadenaDedup) o el PRE-SCAN de
+   *  «PROCESAR COLA» (e107). La capa 0 del runner lo HEREDA (identidad
+   *  por igualdad EXACTA de payload — misma llave de siempre, RED LINE 10)
+   *  sin fileToCaptureDataUrl ni ladder (peor caso documentado sin QR:
+   *  ~15-17 s SYNC por fila). Solo se estampa CON lectura (jamás null
+   *  explícito); AUSENTE = sin lectura previa → decode de siempre
+   *  (kill-switches intactos: sondeo/prescan OFF ⇒ nunca se estampa).
+   *  RAM del lote — NUNCA viaja a IDB (el prescan vive en la misma sesión
+   *  que el runner; tras recargar la capa 0 re-decodifica como hoy). */
+  qrPrevio?: string;
 }
 
 /** Registro PERSISTENTE en IndexedDB — el Blob original + el acta completa. */

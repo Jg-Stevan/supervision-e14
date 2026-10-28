@@ -595,6 +595,11 @@ async function cadenaDedup(
           patchFila(entrada.id, {
             sondeoQrMs: sondeo.ms,
             ...(sondeo.payload != null ? { sondeoQrTier: sondeo.tier ?? undefined } : {}),
+            // D30 (kit e14-qr-heredado-v1) — el payload leído EN INGESTA queda
+            // sobre la fila: la capa 0 del runner lo hereda sin re-decode
+            // (igualdad EXACTA — misma llave). RAM del lote — NUNCA a IDB
+            // (mismo trato que prescanOk; tras recargar la capa 0 re-decodifica).
+            ...(sondeo.payload != null ? { qrPrevio: sondeo.payload } : {}),
           });
         }
       }

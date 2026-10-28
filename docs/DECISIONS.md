@@ -605,3 +605,52 @@ Frankfurt MESA 012; acta-sim-baja.jpg → EGIPTO El Cairo MESA 001) con cola
 procesada completa (ENVIADA AUTO, QR ✓, 100%): cero `POST /api/e14/envios`
 nuevos en el log del dev server (16 antes → 16 después, todas previas al
 gate), cero errores de consola, recepción contando las llegadas en vivo.
+
+## D30 — TIEMPOS del masiva: PAYLOAD QR HEREDADO (kit e14-qr-heredado-v1)
+
+**Problema:** el QR de una acta se leía 3-4 veces por fila con el MISMO coste
+cada vez: sondeo de ingesta (worker e73) → prescan de «PROCESAR COLA» (e107:
+decode full + detect + warp + lectura, serial FIFO) → capa 0 del runner
+(`fileToCaptureDataUrl` + ladder completo de identidad-qr — peor caso
+documentado sin QR: ~15-17 s SYNC). Cada capa ignoraba lo que la anterior ya
+había leído; el payload exacto (Reed-Solomon — misma llave de SIEMPRE) ya
+estaba en RAM.
+
+**Decisión:** un solo campo ADITIVO AL FINAL (contrato D57),
+`FilaMasiva.qrPrevio?: string` (RAM del lote — NUNCA a IDB, mismo trato que
+prescanOk), estampado por las capas tempranas y consumido por la capa 0:
+
+- **Estampa el sondeo (store.cadenaDedup):** con payload ≠ null, el patchFila
+  de telemetría lleva también `qrPrevio`.
+- **Estampa el prescan (`aplicarVeredictoPrescan` rama `registrar`):**
+  además de `registrarQrPayload`, la fila recibe `qrPrevio`.
+- **Consume la capa 0 (runner):** `qrPrevio` presente ⇒ `qrPayload = qrPrevio`
+  con traza `capa0-qr hereda-payload` — SIN re-decode. Todo el bloque de
+  decisión (original/nuevo/ya-enviada/APLAZADA) consume `qrPayload` IGUAL que
+  ayer. `qrPrevio` AUSENTE (flags OFF, abort honesto, recarga) ⇒ decode de hoy
+  byte-idéntico.
+- **Prescan más barato:** (a) salta fila por fila las que ya traen `qrPrevio`
+  (cuenta como leídas — lo fueron); (b) si TODAS las objetivo lo traen, ni
+  siquiera bootea el worker OpenCV (wasm ~10 MB — boot + RAM por nada) y
+  entra directo a `iniciar()`.
+- **Confianza justificada:** el prescan YA marcaba DUPLICADA/YA-ENVIADA con
+  ese payload — heredarlo para la identidad es estrictamente MENOS riesgo.
+  PROCESAR IGUAL (forzarDedupOff) sigue sin sondeo/prescan ⇒ sin estampa ⇒
+  reproceso completo intacto.
+
+**Qué NO se tocó (conservador):** el dhash de ingesta (decode full → hash 9×8:
+bajar el decode cambia los hashes históricos — dedup roto), la mini-sonda de
+orientación (1.3-1.5 s: nuestras actas legítimamente no alcanzan su umbral de
+confianza a 320 px — tocarla arriesga la regresión de las 12 RECHAZADAS que el
+kit repara), el master a 4032 (decisión de calidad) y la doble escritura
+persistMs (contrato de telemetría D61).
+
+**Medición (sandbox throttled, gama BAJO adaptativo, lote de 2 actas
+sim-extra, protocolo idéntico reset-IDB→reload→upload→click, n=1 por
+condición):** wall 15.7 s → **12.8 s (−18 %)**; trazas de control
+`pipeline total=` 6498+5763 ms (antes) vs 6421+5341 ms (después — camino OCR
+intacto); en el after: «boot omitido» + «hereda-payload» ×2 + resultados
+idénticos (misma clasificación AUTO, ENVIADA, QR ✓, recepción contó las 2
+llegadas). Ahorro por fila que escala con el tamaño de la foto (el decode
+evitado es del ORIGINAL) y con el peor caso QR-duro (hasta ~15-17 s/fila si
+el sondeo la leyó y la capa 0 hoy re-pagaba el ladder completo).

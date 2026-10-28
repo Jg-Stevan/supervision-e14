@@ -176,7 +176,13 @@ export async function aplicarVeredictoPrescan(
       );
       return;
     case "registrar":
-      if (payload) deps.registrarQrPayload(payload, filaId);
+      if (payload) {
+        deps.registrarQrPayload(payload, filaId);
+        // D30 (kit e14-qr-heredado-v1) — el payload que el pre-scan ACABA de
+        // leer queda sobre la fila: la capa 0 del runner lo hereda sin
+        // re-decode (igualdad EXACTA — misma llave de siempre). RAM del lote.
+        deps.actualizarFila(filaId, { qrPrevio: payload });
+      }
       return;
     case "nada":
       return; // queda PENDIENTE — Fase 3 lo procesa
@@ -329,6 +335,20 @@ export async function prescanYIniciar(): Promise<void> {
     store.iniciar(); // idempotente, como hoy
     return;
   }
+  // D30 (kit e14-qr-heredado-v1) — TODAS las filas objetivo ya traen payload
+  // del sondeo de ingesta (fila.qrPrevio): no hay NADA que pre-escanear →
+  // saltarse el BOOT del worker OpenCV (wasm ~10 MB — segundos en frío y RAM
+  // por nada) y entrar directo a Fase 3. La clasificación temprana de estas
+  // filas ya vivió en cadenaDedup y el «registrar» lo firma la capa 0 con el
+  // payload heredado (re-chequeo e71). Lotes mixtos: el skip por fila sigue
+  // vivo abajo (D30 en el loop R5).
+  if (objetivo.every((f) => f.qrPrevio != null)) {
+    logger.info(
+      `[e14] prescan-qr: ${objetivo.length} fila(s) con payload heredado del sondeo — boot omitido (D30)`,
+    );
+    store.iniciar();
+    return;
+  }
   corriendoModulo = true;
   emitir({ corriendo: true, total: objetivo.length, listo: 0, leidos: 0, fase: "boot" });
   let leidos = 0;
@@ -342,6 +362,20 @@ export async function prescanYIniciar(): Promise<void> {
       // R5 — FASE 1+2: por fila, EN ORDEN FIFO (for...of, serial, RAM móvil)
       let procesadas = 0;
       for (const fila of objetivo) {
+        // D30 (kit e14-qr-heredado-v1) — la fila ya lleva el payload del
+        // SONDEO de ingesta (fila.qrPrevio): su clasificación temprana ya
+        // vivió en cadenaDedup (mapaSondeoPayload → DUPLICADA / YA-ENVIADA /
+        // registrar) y re-decode+detect+warp sería trabajo REPETIDO (el
+        // banner «SONDEANDO QR… k/N» se reduce a lo que de verdad falta).
+        // El «registrar» que aquí se omitiría lo firma la capa 0 con el
+        // payload heredado (runner conExclusionMutua — re-chequeo e71).
+        // Cuenta como leído (lo fue — por el sondeo). Anti-zombi intacto:
+        // el stamp solo vive en filas vivas (patchFila no-op en muertas).
+        if (fila.qrPrevio != null) {
+          procesadas++;
+          leidos++;
+          continue;
+        }
         emitir({ listo: procesadas, leidos }); // «SONDEANDO QR… k/N»
         try {
           // Bytes originales: duermen en IDB (RegistroMasiva.archivo) —
