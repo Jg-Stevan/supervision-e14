@@ -169,3 +169,10 @@ Task ID: 8 — RESULTADO (D35)
 - P0 reporte: YA EXISTE aquí (D65 runner-watchdog: carrera 75s por gama + matarYRecrearWorkers). Sin duplicación. Opcional pendiente: telemetría de hangs de esa línea.
 - Verificación: tsc 0 · lint 0/0 · E2E agent-browser (REINICIAR ENVÍOS → lote acta+pdf-protegido → PDF_PROTEGIDO + COMPLETADA 6.4 s + INFORME con «+ THUMBS: 3 ms en 1 acta(s)» + EXPORTAR OK) · 0 errores consola.
 - SIGUIENTE: (d) auditoría de reglas de negocio con datos del INFORME (BUG-5 AUTO-sin-QR del reporte, orden de capas dedup, presupuesto del sondeo con hard-kills bajo hambruna).
+
+---
+Task ID: 8 (cont.) — D36 AUDITORÍA DE REGLAS + CORTOCIRCUITO SONDEO
+- R1 AUTO-sin-QR confirmado (gate = OPTIMA/score≥8; QR no bloquea) — decisión del dueño documentada en DECISIONS.md, recomendación: mantener.
+- R2 CB del sondeo implementado (flags.sondeoQrCortocircuito, default true): ≥3 kills/min → pausa 30 s self-healing. Flag plumbing probado EN VIVO (override 500 ms → aborts a ~500 ms). Disparo real no reproducible en sandbox (sondeos máx 833 ms vs kill 1500/3500) — se arma con la señal real del dueño.
+- R3 capas dedup en orden correcto VERIFICADO EN VIVO (dup byte-exacto vetadas pre-sondeo). R4 dhash ya fuera en gama BAJO (D74). R5 watchdog/rescate/relectura acotados (D65 existe — P0 del reporte no aplica). R6 cuello = OCR 98%; palancas restantes: precalor (ya) + persistencia whole-record (P2, decisión del dueño).
+- Estrés E2E: 58 archivos (únicas/dup/12MP) + recarga + cráter del navegador → cola restauró 48/58 (prevención de reinicios OK), runner re-armado, 0 errores de app. tsc 0 · lint 0/0.

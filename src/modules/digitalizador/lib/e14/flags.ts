@@ -42,6 +42,15 @@ export const FLAGS_DEFAULT: FlagsApp = {
   colaPersistente: true,
   sondeoQrPrecoz: true,
   sondeoQrPresupuestoMs: 2500,
+  // D36 — cortocircuito del sondeo bajo hambruna de CPU (≥3 hard-kills/min,
+  // la señal YA medida en e14-sondeo-burst-v1): el worker NO es zombi, está
+  // compitiendo con el OCR por CPU y el bucle kill→respawn→re-boot wasm
+  // ALARGA el pipeline que el sondeo quería ayudar. Pausar 30 s es MENOS
+  // trabajo (compatible con §I «jamás extender presupuesto» — aquí se
+  // reduce carga); la dedup NO se pierde (capa0-qr + dhash + payload
+  // in-pool cubren las mismas gemelas). Kill-switch del dueño: false =
+  // comportamiento de siempre byte-idéntico.
+  sondeoQrCortocircuito: true,
   hangEnCurso: true,
   // KIT e107-prescan-qr-cola-v1 (§D.4): pre-scan QR en «PROCESAR COLA» —
   // kill-switch del dueño (flag OFF ⇒ prescanYIniciar = iniciar()
@@ -102,6 +111,8 @@ export function sanearFlags(o: unknown): Partial<FlagsApp> {
   if (typeof p.sondeoQrPresupuestoMs === "number" && Number.isFinite(p.sondeoQrPresupuestoMs)) {
     limpio.sondeoQrPresupuestoMs = Math.max(500, Math.min(30_000, Math.round(p.sondeoQrPresupuestoMs)));
   }
+  // D36 — whitelist aditiva (booleano).
+  if (typeof p.sondeoQrCortocircuito === "boolean") limpio.sondeoQrCortocircuito = p.sondeoQrCortocircuito;
   // KIT e14-obs-hang-atribucion-v1 (§D) — whitelist aditiva (booleano).
   if (typeof p.hangEnCurso === "boolean") limpio.hangEnCurso = p.hangEnCurso;
   // KIT e107-prescan-qr-cola-v1 (§D.4) — whitelist aditiva (booleano).

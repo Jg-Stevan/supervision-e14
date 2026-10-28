@@ -130,6 +130,8 @@ export interface FlagsApp {
   // ─── KIT e73-sondeo-qr-precoz-v1 (§D) — campos ADITIVOS AL FINAL (D57) ───
   sondeoQrPrecoz: boolean; // default true — sondeo QR en INGESTA (worker e73); false = kill-switch (byte-idéntico a 043b2ba)
   sondeoQrPresupuestoMs: number; // default 2500 — presupuesto del reló del ladder del worker (jamás extender — kit §I)
+  // ─── D35/D36 — cortocircuito del sondeo bajo hambruna (campo ADITIVO AL FINAL, D57) ───
+  sondeoQrCortocircuito: boolean; // default true — ≥3 hard-kills/min (la señal hambruna YA medida) → sondeo PAUSA 30 s: cada kill = terminate+respawn+re-boot wasm que compite con el OCR; pausar es MENOS trabajo (§I compatible); la dedup sigue in-pool (capa0/dhash/payload); false = comportamiento de siempre byte-idéntico
   // ─── KIT e14-obs-hang-atribucion-v1 (§D) — campo ADITIVO AL FINAL (D57) ───
   hangEnCurso: boolean; // default true — sensor hang-en-curso (worker heartbeat + WAL); false = byte-idéntico a b688fbc
   // ─── KIT e107-prescan-qr-cola-v1 (§D.4) — campo ADITIVO AL FINAL (D57) ───

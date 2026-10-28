@@ -858,3 +858,52 @@ lote {acta sintética, pdf-protegido.pdf}: PDF fila ERROR **PDF_PROTEGIDO** en i
 PROTEGIDO_O_CORRUPTO en falso) + acta LISTA pipeline completo (COMPLETADA · 6.4 s, OCR
 p50/p95 2.2 s, EN_REVISION_HUMANA 1); INFORME: «+ THUMBS DE BANDEJA: 3 ms en 1 acta(s)»;
 EXPORTAR JSON OK; 0 errores de consola/dev.log.
+
+---
+
+## D36 — Auditoría de reglas de negocio (tanda del dueño d) + cortocircuito del sondeo bajo hambruna
+
+**Fecha:** 2026-10-28 · **Método:** reglas leídas en el código + cruzadas con los datos del
+INFORME (D34/D35) y con la corrida de estrés E2E (58 archivos: únicas, duplicadas byte-exacto,
+12 MP, recarga + cráter del navegador a mitad de corrida).
+
+**Hallazgos de la auditoría (R1-R6):**
+- **R1 — AUTO sin QR (BUG-5 del reporte): CONFIRMADO también aquí** — el gate de envío
+  automático es `status === "OPTIMA"` (runner.ts, score ≥ 8 vía statusDeScore); el QR NO
+  bloquea (perdón por lectura fuerte). Una acta con QR ✗ y score ≥ 8 sale ENVIADA AUTO sin
+  payload → el veto por payload no la cubre (bytes/visual sí). **DECISIÓN DEL DUEÑO**: se
+  recomienda MANTENER (el gate de legibilidad es el fuerte; endurecer a «AUTO solo con QR»
+  baja el rendimiento para proteger contra un caso que las otras capas ya cubren). Si el
+  dueño decide endurecer: es 1 línea en el gate + kill-switch.
+- **R2 — Sondeo bajo hambruna de CPU: CORTOCIRCUITO implementado (flag
+  `sondeoQrCortocircuito`, default true).** La señal hambruna YA se medía (≥3 hard-kills/min
+  en e14-sondeo-burst-v1; dev.log del dueño: 11-12 kills/min sostenidos) pero solo se
+  LOGUEABA. Cada kill = terminate + respawn + re-boot del wasm del worker que compite con el
+  OCR — bucle vicioso que ALARGA el pipeline que el sondeo quiere ayudar. Ahora: ≥3 kills/min
+  → sondeo PAUSA 30 s (null inmediato, drena la ingesta), media apertura self-healing (1
+  intento/min en lo peor). Compatible con §I («jamás extender presupuesto» — aquí se reduce
+  carga). La dedup NO se pierde: capa0-qr + dhash + payload in-pool cubren las mismas gemelas
+  (el sondeo solo ADELANTA el marcaje). Kill-switch del dueño: false = byte-idéntico a hoy.
+- **R3 — Orden de capas dedup: CORRECTO y verificado en vivo** — en el estrés, las 6
+  duplicadas byte-exacto fueron vetadas por la capa bytes ANTES del sondeo («dedup … bytes
+  gemela viva → sondeo QR omitido (dhash decide)»): cero OCR, cero sondeo, cero contención.
+  Capa más barata primero — sin cambio.
+- **R4 — dhash ya está desactivado en gama BAJO** («dhash OMITIDO — gama adaptativa,
+  identidad post-OCR decide», D74): el plan gama ya gobierna. Sin cambio.
+- **R5 — Watchdog/rescate/relectura: acotados y correctos** — carrera 75 s calibrada por
+  gama (D65), 2 intentos, relectura con tope, rescate anti-falso-rechazo bounded. Sin
+  hallazgos. El P0 del REPORTE (watchdog OCR inexistente) NO aplica aquí: D65 ya existe.
+- **R6 — El cuello sigue siendo el OCR (98% del trabajo, D34/D35)** — las reglas que
+  multiplican OCR (relectura/rescate) están acotadas; paralelizar NO aplica (wasm mono-hilo,
+  D31); palancas reales restantes: precalor (existe), persistencia whole-record (P2 —
+  decisión del dueño, impacta REVISIÓN).
+
+**Verificación E2E del R2 (honesta):** flag plumbing probado EN VIVO — override
+`sondeoQrPresupuestoMs: 500` (localStorage, se lee por sondeo sin reload) → sondeos abortando
+en ~500 ms (504/552 vs 235 base) ✓. Regresión limpia: 58 archivos (únicas + duplicadas
+byte-exacto + 12 MP) con el CB activo: sondeos 232-833 ms, dedup por capas correcto, runner
+avanzando (5→50/58), cola persistente restauró 48/58 tras recarga Y tras cráter del navegador
+(prevención de reinicios del dueño FUNCIONANDO). **El disparo del CB NO se reprodujo en este
+sandbox**: el sondeo worker nunca superó 833 ms (kill a 1500/3500 ms) — la hambruna real del
+dueño (12 MP × lotes grandes + REVISIÓN abierta) es el disparador; el CB se arma solo con su
+señal ya medida. tsc 0 · lint 0/0 · 0 errores de consola de la app.

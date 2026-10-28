@@ -108,6 +108,21 @@ let corriendo = false;
 // dhash→worker (P1b), NO extender este presupuesto (§I — jamás extender).
 let killsRecientes: number[] = [];
 
+// D36 — CORTOCIRCUITO por hambruna: la MISMA señal que ya mide el hard-kill
+// (≥3 kills/min = contención de burst, no zombi) abre una pausa de 30 s.
+// Racional: cada kill = terminate + respawn + re-boot del wasm del worker
+// — bajo hambruna eso compite con el OCR y ALARGA el pipeline que el
+// sondeo quería ayudar (bucle vicioso medido en dev.log: 11-12 kills/min
+// continuos). Pausar es MENOS trabajo (compatible con §I «jamás extender
+// presupuesto» — aquí se reduce carga); la dedup NO se pierde: capa0-qr +
+// dhash + payload in-pool cubren las mismas gemelas (el sondeo solo
+// ADELANTA el marcaje). Media apertura: al vencer la pausa se re-intenta
+// (1 sondeo/min en lo peor — bounded y self-healing). Kill-switch:
+// flags.sondeoQrCortocircuito (false = byte-idéntico a hoy).
+const CB_KILLS_POR_MIN = 3;
+const CB_PAUSA_MS = 30_000;
+let cbAbiertoHasta = 0;
+
 /** Presupuesto saneado del flag (§D — default 2500; jamás extender — §I). */
 function presupuestoDeFlags(): number {
   const bruto = leerFlags().sondeoQrPresupuestoMs;
@@ -131,6 +146,12 @@ export function sondearQrPrecoz(archivo: File | Blob): Promise<SondeoQr | null> 
       }
       // Flag OFF → null sin instanciar worker (kill-switch, byte-idéntico).
       if (!leerFlags().sondeoQrPrecoz) {
+        resolve(null);
+        return;
+      }
+      // D36 — cortocircuito activo → null inmediato: drena la cola de
+      // ingesta sin pagar kills ni re-boots; al vencer la pausa se re-intenta.
+      if (leerFlags().sondeoQrCortocircuito && Date.now() < cbAbiertoHasta) {
         resolve(null);
         return;
       }
@@ -194,6 +215,15 @@ async function ejecutar(tarea: {
       killsRecientes = killsRecientes.filter((t) => ahora - t < 60_000);
       killsRecientes.push(ahora);
       const hambruna = killsRecientes.length >= 3 ? killsRecientes.length : 0;
+      // D36 — abrir el cortocircuito: hambruna confirmada (≥3 kills/min) →
+      // pausa CB_PAUSA_MS. La ingesta sigue (null inmediato por sondeo) y
+      // la dedup queda en manos de las capas in-pool.
+      if (killsRecientes.length >= CB_KILLS_POR_MIN) {
+        cbAbiertoHasta = ahora + CB_PAUSA_MS;
+        logger.warn(
+          `[e14] sondeo-qr CORTOCIRCUITO por hambruna (${killsRecientes.length} kills/min) — pausa ${CB_PAUSA_MS / 1000}s; dedup sigue in-pool (capa0/dhash/payload)`,
+        );
+      }
       logger.warn(
         `[e14] sondeo-qr hard-kill presupuesto=${presupuestoMs}+1000 — worker colgado (respawn)${hambruna ? ` — ${hambruna} kills/min: hambruna de CPU sospechada (contención de burst), no zombi` : ""}`,
       );
