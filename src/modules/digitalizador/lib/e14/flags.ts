@@ -20,16 +20,21 @@ const REFRESH_MS = 24 * 60 * 60 * 1000;
 const REINTENTO_BASE_MS = 60_000;
 const REINTENTO_TOPE_MS = REFRESH_MS;
 
-/** Defaults del contrato §4.2 (poolWorkers 2 · thumbsOn true ·
- *  ocrThreadsTope 4 · telemetriaSalud true · endpointReportes null — sin
- *  backend, D1 · colaPersistente true — ANEXO cola-persistente-v1: la masiva
- *  SOLO se elimina con vaciar() del dueño; false = MODO PRUEBAS e64p ·
- *  sondeoQrPrecoz true + sondeoQrPresupuestoMs 2500 — KIT e73-sondeo-qr-
- *  precoz-v1 §D: sondeo QR en INGESTA, kill-switch del dueño · hangEnCurso
- *  true — KIT e14-obs-hang-atribucion-v1 §D: sensor hang-en-curso,
- *  kill-switch del dueño). */
+/** Defaults del contrato §4.2 (poolWorkers 1 — D31 KIT e14-carril-qr-
+ *  paralelo-v1: el OCR es wasm mono-hilo, DOS en paralelo se reparten el
+ *  mismo CPU sin ganancia y la UI sufre (cabecera runner.ts); el slot
+ *  liberado lo ocupa el CARRIL QR del prescan en paralelo con la corrida ·
+ *  thumbsOn true · ocrThreadsTope 4 · telemetriaSalud true ·
+ *  endpointReportes null — sin backend, D1 · colaPersistente true — ANEXO
+ *  cola-persistente-v1: la masiva SOLO se elimina con vaciar() del dueño;
+ *  false = MODO PRUEBAS e64p · sondeoQrPrecoz true + sondeoQrPresupuestoMs
+ *  2500 — KIT e73-sondeo-qr-precoz-v1 §D: sondeo QR en INGESTA, kill-switch
+ *  del dueño · hangEnCurso true — KIT e14-obs-hang-atribucion-v1 §D: sensor
+ *  hang-en-curso, kill-switch del dueño). El override manual del dueño
+ *  (e14-flags-overrides / flags.json `poolWorkers: 2`) restaura el pool
+ *  doble de e71 — whitelist politica.ts intacta. */
 export const FLAGS_DEFAULT: FlagsApp = {
-  poolWorkers: 2,
+  poolWorkers: 1,
   thumbsOn: true,
   ocrThreadsTope: 4,
   telemetriaSalud: true,

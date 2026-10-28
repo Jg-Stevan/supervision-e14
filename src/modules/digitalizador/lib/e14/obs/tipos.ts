@@ -121,7 +121,7 @@ export interface ErroresAgrupados {
 }
 
 export interface FlagsApp {
-  poolWorkers: 1 | 2; // default 2
+  poolWorkers: 1 | 2; // default 1 (D31 — carril QR paralelo; e71 fue 2)
   thumbsOn: boolean; // default true
   ocrThreadsTope: number; // default 4
   telemetriaSalud: boolean; // default true

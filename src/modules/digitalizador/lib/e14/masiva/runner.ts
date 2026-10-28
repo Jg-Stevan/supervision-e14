@@ -164,16 +164,21 @@ let rescatesCorrida = 0;
 let colaSesionIniciada = false;
 
 // ─── e71 (Opt-3) — PARALELISMO + EXCLUSIÓN MUTUA (kit e71-consolidación) ───
-/** Actas EN VUELO simultáneas (kit Opt-3: 2 workers — benchmark aprobado).
- *  Desde poolworkers-wiring-v1: kill switch del modo dev — el override
- *  `poolWorkers` del dueño (e14-flags-overrides) baja a 1 para RAM justa
- *  (comportamiento secuencial byte-idéntico al pre-e71). Default 2.
+/** Actas EN VUELO simultáneas. HISTORIA: e71 nació con 2 (benchmark del
+ *  dueño); D31 — KIT e14-carril-qr-paralelo-v1 — baja el DEFAULT a 1: el
+ *  OCR es wasm mono-hilo (GH Pages sin SAB — AUDITORIA §2), dos OCR en
+ *  paralelo se reparten el mismo CPU → NO hay ganancia y la UI sí sufre
+ *  (cabecera de este archivo). El slot liberado lo ocupa el CARRIL QR del
+ *  prescan (prescanYIniciar — Fase 3 ANTES que Fase 1+2): mientras UNA acta
+ *  paga su OCR completa, el prescan lee el QR del RESTO de la cola y marca
+ *  DUPLICADA/YA-ENVIADA temprano — esas filas jamás llegan a pagar OCR.
+ *  El override manual del dueño (e14-flags-overrides / flags.json
+ *  `poolWorkers: 2`) restaura el pool doble de e71 byte-idéntico.
  *  KIT e14-gama-adaptativa-v1 (D74): el valor es EFECTIVO y se lee POR
  *  CORRIDA en bucle() (antes const de módulo — el plan puede refrescarse
- *  al montar MASIVA): en gama BAJO adaptativa baja a 1 — dos OCR en
- *  paralelo se reparten el mismo CPU (2-4 núcleos) sin ganancia y la UI
- *  sí sufre (cabecera e71 de este archivo). El override manual del dueño
- *  MANDA (flagsMasivaEfectivos no pisa claves de e14-flags-overrides). */
+ *  al montar MASIVA): en gama BAJO adaptativa baja a 1 — ídem arriba. El
+ *  override manual del dueño MANDA (flagsMasivaEfectivos no pisa claves de
+ *  e14-flags-overrides). */
 function procesamientoConcurrenteEfectivo(): 1 | 2 {
   return flagsMasivaEfectivos().poolWorkers;
 }
