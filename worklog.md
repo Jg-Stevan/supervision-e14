@@ -25,3 +25,25 @@ Stage Summary:
 - La completación mutua funciona end-to-end: clasificación AUTO → idEnlace (D22) → validación D25 → actas-runtime → monitor en vivo → visor con foto real → VER EN MONITOR.
 - Punto de costura documentado: adaptador store-e14 (kit T3, 5 puntos) + seam por props (onVerEnMonitor); decisiones en docs/DECISIONS.md D27; REPORTE en docs/REPORTE-carga-masiva-supervision-v1.md.
 - Límites honestos: publicación en memoria de sesión (export estático, D8); ledger remoto D1 sin endpoint (fail-soft); solo se publican actas AUTO; build de Pages no verificado en este entorno (solo dev + tsc + lint).
+
+---
+Task ID: 2
+Agent: Z.ai Code (orquestador principal)
+Task: Agregar un módulo de RECEPCIÓN para saber las actas que van llegando (sobre la base D27 del port del módulo masiva).
+
+Work Log:
+- Explorado el estado actual (post-Task 1): supervision-shell (nav/vistas), datos-provider (suscripción actas-runtime), actas-runtime (embudo de publicaciones D24/D25), mock-repository (registrarCargaMasiva), store-e14 (sin-join), actas-reales (loader estático SUP-6), vistas de referencia (anomalias/notificaciones), KpiCard, filtros-bar y tokens del tema.
+- NUEVO src/modules/supervision/data/recepcion-log.ts (kit recepcion-actas-v1, D28): log runtime en memoria de sesión (D8), grano PÁGINA (1 foto = 1 entrada — el grano del pipeline masiva), 3 desenlaces = los del kit D27 (PUBLICADA / BLOQUEADA con motivo D25 / SIN_JOIN), suscripción por oyentes (sin libs), y asegurarSemilla() perezosa 1-vez que siembra el ancla estático SUP-6 como "ingesta-inicial" con desfases fijos (§0-7, nada aleatorio).
+- Enganches de escritura en punto ÚNICO: actas-runtime.publicarActaMasiva registra PUBLICADA/BLOQUEADA (los 3 early-returns de validación a/b/d incluidos) y store-e14.publicarDesdeActa registra SIN_JOIN (ese desenlace nunca llega a publicar). Sin ciclos de import (recepcion-log no importa actas-runtime).
+- NUEVO src/modules/supervision/components/vista-recepcion.tsx: header EN VIVO (dot pulsante + última llegada), 4 KpiCards clickeables como filtro de desenlace (gesto del monitor T3), chips de formulario (Todos/TRANSMISIÓN/CÓNSUL-EMBAJADOR), búsqueda (idEnlace/mesa/país/lugar/archivo), log con encabezado desktop + filas (miniatura real, hora exacta + relativa, píldora de estado, destino idEnlace·mesa + lugar impreso, formulario PÁG n/N + SCORE, VER EN MONITOR solo en PUBLICADAS), alto tope 60vh con scroll fino, empty states, skeleton de primera carga (cero lecturas en render SSR).
+- supervision-shell.tsx: vista "recepcion" en VistaId, ítem nav con Inbox + badge dinámico "recepcion" (cuenta llegadas carga-masiva fuera de la vista; se anula al abrir; la semilla no cuenta), routing en VistaActual con seam onVerEnMonitor (mismo patrón D27).
+- globals.css: utilidades .scroll-panel (scrollbar fina webkit/Firefox) y @keyframes recepcion-llegada + .fila-llegada (destello 1.6 s).
+- store-e14.ts: sin-join ahora también deja entrada en el log (idEnlace/mesa "—", formulario null, motivo honesto) antes de marcar sin-join.
+- Docs: DECISIONS.md D28 + docs/REPORTE-recepcion-actas-v1.md.
+- Verificación: bunx tsc --noEmit → 0 errores; bun run lint → 0/0. E2E agent-browser (dev :3000): vista abre con semilla (4 páginas del ancla); filtros TRANSMISIÓN (2 filas) y búsqueda "egipto" (4) / "zzz" (empty state); VER EN MONITOR de semilla → visor con ACTA REAL El Cairo; carga masiva REAL (acta-e14-real.jpg) → SONDEO QR 1/1 → PROCESAR COLA → OCR completo → ENVIADA AUTO → publicación "88_680_005_86::003 (pág 1)" → badge del sidebar contó la llegada en vivo ("RECEPCIÓN DE ACTAS 1") → al abrir la vista: fila nueva al tope (PORTUGAL - SABADO LISBOA - CONSULADO, TRANSMISIÓN PÁG 1/2, SCORE 10.0, foto real, "Hace instantes") y KPIs 5/5/0/0 → VER EN MONITOR aterriza en el visor con el acta real de Portugal; móvil 390px OK (KPIs 2 col, filas apiladas); dev.log sin errores (solo telemetría preexistente del watchdog sondeo-qr).
+- Commit en main: 896670f. Artefactos en /home/z/my-project/download/: supervision-e14-recepcion.bundle + 0001-feat-recepcion-*.patch.
+
+Stage Summary:
+- La vista RECEPCIÓN DE ACTAS está ACTIVA en el nav (badge en vivo) y muestra TODO lo que llega: ingesta inicial (semilla del ancla) + publicaciones en vivo del masiva, con desenlace honesto (publicada/cuarentena D25/sin join).
+- Puntos de costura: recepcion-log es el único log (actas-runtime y store-e14 escriben ahí); la vista consume por suscripción; VER EN MONITOR reutiliza el seam por props D27.
+- Límites honestos: memoria de sesión (D8 — recargar restablece; el histórico durable sigue siendo el IDB del masiva); SIN_JOIN no aterriza en el monitor (no hay join confiable); filas BLOQUEADA/SIN_JOIN no mueven KPIs del monitor (comportamiento D27 intacto).
