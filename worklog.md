@@ -470,3 +470,27 @@ Task ID: 17 — selector-motor-v1 (fase 5): el dueño elige el modelo OCR
   siendo el gate técnico (fallo ⇒ v4 honesto, la corrida jamás se tumba).
 - Verificación: tsc --noEmit → 9 errores TS2307 de assets PRE-EXISTENTES
   (baseline 9 = 9); eslint → 0/0.
+
+Task ID: 18 — tesseract-spa-best-v1 (fase 5b): el Tesseract REAL del
+benchmark como motor ELEGIBLE
+- Pedido del dueño: «faltó el modelo de gama baja, Tesseract spa-best + psm 4».
+  Hasta hoy ese motor era un NOMBRE (el base v4 de RapidOCR lo representaba).
+- ocr/tesseract-ocr.ts (nuevo): tesseract.js v5 (WASM LSTM-only) +
+  spa.traineddata best vendorizado (gz ~12 MB) + núcleos simd-lstm/lstm;
+  OEM LSTM_ONLY + PSM 4 = config EXACTA del benchmark. Salida con el MISMO
+  contrato RapidOCR (conf 0-1, box polígono, texto = líneas \n-joined) — el
+  pipeline (bridge/escalonado/masiva/informe) no cambia una línea. Progreso
+  del recognize inyectado al emit del pipeline (ANALIZANDO vivo).
+- router-ocr.ts: MotorOcr + «tesseract-spa-best-psm4» (jamás del modo
+  automático — solo override del dueño). rapidocr.ts: motorElegidoActual +
+  ramificación en el funnel rapidOcrReconocer + init con prueba integrada
+  (≤ 20 s) + fallback honesto (init o vuelo ⇒ v4 con sello motor/modelos
+  separados) + rapidOcrReiniciar también mata el worker Tesseract.
+- DOBLE whitelist ampliada (flags.ts + politica.ts + tipos.ts) — sin eso el
+  override nuevo se descartaba en silencio.
+- Vendor: public/vendor/tesseract (worker.min.js + 2 núcleos WASM) +
+  public/models/tesseract/spa.traineddata.gz (desde ocr-benchmark/tessdata).
+- panel-perfil.tsx: 4.ª opción «Tesseract spa-best · psm 4 · 13,5 MB ·
+  94,4 %» + etiqueta honesta del base («RapidOCR v4 · producción»).
+- Verificación: tsc --noEmit → 9 TS2307 pre-existentes (baseline 9 = 9);
+  eslint → 0/0.

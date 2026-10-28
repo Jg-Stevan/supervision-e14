@@ -149,7 +149,7 @@ export interface FlagsApp {
   capa0QrWorker: boolean; // default true — la CAPA 0 QR (decode+ladder+barridos jsQR) corre en WORKER dedicado (capa0-qr.worker.js) y el hilo UI deja de comerse los ~15-17 s SYNC del peor caso sin QR; el tier zxing queda en main como rescate único (cobertura EXACTA); false = camino de hoy byte-idéntico (cadena completa en main)
   // ─── KIT ocr-router-v1 — campos ADITIVOS AL FINAL (D57) ───
   ocrMotorAdaptativo: boolean; // default true — ROUTER de motor OCR por dispositivo (docs/ESTRATEGIA-ocr-router-v1.md): BAJO/MEDIO = Tesseract best+psm4 (94,4 %, ~67 MB) · ALTO+SIMD = PP-OCRv5 (100 %, ~487 MB, sonda de carga + gobernador reactivo); false = Tesseract en TODOS los dispositivos (byte-idéntico a hoy)
-  ocrMotor: "ppocrv5" | "tesseract-best-psm4" | null; // default null = el ROUTER decide; no-null = override MANUAL del dueño (D6 — el router NO decide)
+  ocrMotor: "ppocrv5" | "tesseract-best-psm4" | "tesseract-spa-best-psm4" | null; // default null = el ROUTER decide; no-null = override MANUAL del dueño (D6 — el router NO decide). «tesseract-spa-best-psm4» = Tesseract REAL del benchmark (tesseract.js — fase 5b)
 }
 
 export interface ReporteSesion {

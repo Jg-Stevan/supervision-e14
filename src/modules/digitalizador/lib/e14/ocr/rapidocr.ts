@@ -133,6 +133,10 @@ function motorADeModelos(m: MotorOcr): MotorModelos {
 /** Set de modelos de la sesión ACTUAL (el gobernador lo reporta al morir). */
 let motorModelosActual: MotorModelos = "v4";
 
+/** fase 5b — el motor ELEGIDO por el router en la última init (el funnel
+ *  rapidOcrReconocer ramifica a Tesseract REAL cuando el dueño lo fijó). */
+let motorElegidoActual: MotorOcr = "tesseract-best-psm4";
+
 // ─── KIT ocr-router-v1 fase 4 — resolución EN VIVO del motor (auditoría) ────
 /** Lo que el informe de corrida (D34) estampa para AUTO-IDENTIFICAR cada
  *  A/B (hueco real del dueño 2026-10-28: dos informes del mismo kit donde
@@ -142,7 +146,10 @@ let motorModelosActual: MotorModelos = "v4";
  *  (misma fuente que la telemetría [ocr-router]) — null = aún no inició. */
 export interface MotorOcrVivo {
   motor: MotorOcr;
-  modelos: MotorModelos;
+  /** Los modelos que REALMENTE cargaron — «tesseract-spa-best» = worker de
+   *  tesseract.js con spa.traineddata (fase 5b); v4 puede aparecer aunque la
+   *  decisión fuera otra (fallo de sonda/init — cero maquillaje). */
+  modelos: MotorModelos | "tesseract-spa-best";
   origen: ResolucionMotor["origen"];
   motivo: string;
 }
@@ -265,12 +272,45 @@ async function resolverModeloDeArranque(
       presionReciente: presionReciente(),
     });
     const m = motorADeModelos(res.motor);
+    // fase 5b — el motor ELEGIDO queda visible para el reconocer (el funnel
+    // rapidOcrReconocer ramifica aquí) y para la auditoría del informe.
+    motorElegidoActual = res.motor;
     // fase 4 — la resolución queda EN VIVO para el informe D34 (getters de
     // módulo: observador pasivo, cero coste — mismo patrón del kit).
     motorOcrVivo = { motor: res.motor, modelos: m, origen: res.origen, motivo: res.motivo };
     logger.info(
       `[ocr-router] motor=${res.motor} modelos=${m} origen=${res.origen} — ${res.motivo}`,
     );
+    // fase 5b — Tesseract spa-best REAL: sin sonda aparte (motor ligero y
+    // benchmark-probado) — la init del worker ES la prueba (≤ 20 s). Fallo ⇒
+    // v4 honesto (mismo patrón que la sonda de v5: decisión visible, cero
+    // maquillaje). Las sesiones v4 siguen creándose abajo como red de
+    // seguridad (si Tesseract falla EN VUELO, la corrida no se tumba).
+    if (res.motor === "tesseract-spa-best-psm4") {
+      if (await tesseractInit()) {
+        logger.info(
+          "[ocr-router] Tesseract spa-best listo (worker WASM LSTM + psm 4 + spa.traineddata.gz)",
+        );
+        motorOcrVivo = {
+          motor: res.motor,
+          modelos: "tesseract-spa-best",
+          origen: res.origen,
+          motivo: `${res.motivo} · worker Tesseract listo (spa-best + psm 4).`,
+        };
+        return "v4"; // SOLO red de seguridad — el reconocer usa Tesseract
+      }
+      motorElegidoActual = "tesseract-best-psm4"; // fallback honesto de sesión
+      logger.info(
+        "[ocr-router] init de Tesseract FALLO — v4 de seguridad y castigo de decisión visible en el informe",
+      );
+      motorOcrVivo = {
+        motor: res.motor,
+        modelos: "v4",
+        origen: res.origen,
+        motivo: `${res.motivo} · init de Tesseract FALLO — v4 de seguridad (resto de la sesión).`,
+      };
+      return "v4";
+    }
     if (m !== "v5") return m;
     // La sonda de carga real es el gate de v5 — el deviceMemory NO garantiza
     // los buffers del detector (protocolo v2; también cubre el override
@@ -326,6 +366,7 @@ async function resolverModeloDeArranque(
     logger.info(
       `[ocr-router] fallo resolviendo motor (v4 por seguridad): ${e instanceof Error ? e.message : String(e)}`,
     );
+    motorElegidoActual = "tesseract-best-psm4"; // cualquier imprevisto ⇒ motor base
     motorOcrVivo = {
       motor: "tesseract-best-psm4",
       modelos: "v4",
@@ -429,6 +470,9 @@ export function rapidOcrPrecalentar(): Promise<boolean> {
  *  otra vez (~150 s totales) y manda el veredicto honesto de siempre.
  *  NUNCA lanza: un fallo de limpieza no empeora el reintento. */
 export async function rapidOcrReiniciar(): Promise<void> {
+  // fase 5b — el worker Tesseract también muere (APLICAR AHORA cambia de
+  // motor limpio; en el watchdog de v5 es un no-op inocuo).
+  await tesseractReiniciar();
   if (!rtSingleton) return;
   try {
     await soltarRuntime(await rtSingleton);
@@ -494,6 +538,10 @@ async function initReal(): Promise<RapidRuntime> {
 // de la elección, sin dependencia con la entrada viva.
 import { canvasCon, loadImageMemo } from "../image-utils";
 import { logger } from "../../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
+// KIT tesseract-spa-best-v1 (fase 5b) — Tesseract REAL del benchmark como
+// motor ELEGIBLE (solo por override manual del dueño; el modo automático
+// jamás lo elige). La red de seguridad v4 sigue viva en todo momento.
+import { tesseractInit, tesseractReconocer, tesseractReiniciar } from "./tesseract-ocr";
 
 function canvasDe(img: HTMLImageElement | HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
   const c = canvasCon(w, h); // SPRINT-A A3 — factory
@@ -1142,6 +1190,22 @@ export async function rapidOcrReconocer(
   // seguro del panel (reiniciarMotorOcrSiInactivo). Cero costo en la ruta.
   reconocimientosEnVuelo++;
   try {
+    // fase 5b — Tesseract spa-best REAL: el rt ONNX se ignora (es la red de
+    // seguridad); el texto sale 100 % de tesseract.js con el MISMO contrato.
+    // null (fallo en vuelo) ⇒ cae a v4 abajo con sello honesto en el informe
+    // — la corrida jamás se tumba.
+    if (motorElegidoActual === "tesseract-spa-best-psm4") {
+      const rTess = await tesseractReconocer(dataUrl, onProgress);
+      if (rTess) return rTess;
+      motorElegidoActual = "tesseract-best-psm4"; // resto de la sesión
+      motorOcrVivo = {
+        motor: "tesseract-spa-best-psm4",
+        modelos: "v4",
+        origen: motorOcrVivo?.origen ?? "override-manual",
+        motivo: `${motorOcrVivo?.motivo ?? "Override Tesseract spa-best."} · fallo de reconocimiento en vuelo — v4 de seguridad (resto de la sesión).`,
+      };
+      logger.info("[ocr-router] Tesseract spa-best falló en vuelo — v4 de seguridad");
+    }
     return await rapidOcrReconocerInterno(rt, dataUrl, onProgress, opts);
   } finally {
     reconocimientosEnVuelo--;

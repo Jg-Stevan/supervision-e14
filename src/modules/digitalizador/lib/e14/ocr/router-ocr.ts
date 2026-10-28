@@ -29,7 +29,12 @@
 
 // ─── dominio ────────────────────────────────────────────────────────────────
 
-export type MotorOcr = "tesseract-best-psm4" | "ppocrv5";
+/** Los motores elegibles. «tesseract-best-psm4» = el MOTOR BASE de este
+ *  repo (aquí, modelos v4 de RapidOCR — ver motorADeModelos en rapidocr.ts);
+ *  «ppocrv5» = precisión; «tesseract-spa-best-psm4» = Tesseract REAL del
+ *  benchmark (spa-best + psm 4 vía tesseract.js — fase 5b): jamás sale del
+ *  modo automático, SOLO por override manual del dueño. */
+export type MotorOcr = "tesseract-best-psm4" | "ppocrv5" | "tesseract-spa-best-psm4";
 
 /** Estructura mínima que cumple `PerfilRecursos` de perfil-dispositivo. */
 export interface PerfilMinimo {
