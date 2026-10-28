@@ -276,6 +276,12 @@ async function resolverModeloDeArranque(
     // los buffers del detector (protocolo v2; también cubre el override
     // manual: el contrato del router exige sonda para ppocrv5).
     let abandonada = false;
+    // fase 5 (selector-motor-v1) — cuando el DUEÑO fijó el motor a mano, la
+    // ventana de carga sube 8 s → 30 s: pidió esperar explícitamente (D6) —
+    // la valla de 8 s es la sospecha #1 del «se canceló por mucho tiempo»
+    // del A/B 21:26 (descarga de modelos + sesiones ONNX en frío). El modo
+    // automático conserva los 8 s del protocolo v2.
+    const timeoutSondaMs = res.origen === "override-manual" ? 30_000 : 8000;
     const sonda = await ejecutarSondaCarga(async () => {
       const rt = await crearSesiones(ort, opts, "v5");
       if (abandonada) {
@@ -292,7 +298,7 @@ async function resolverModeloDeArranque(
       const r = await rapidOcrReconocer(rt, c.toDataURL("image/png"));
       void soltarRuntime(rt); // la sonda NO es el runtime de producción
       return r.lineas.length > 0 && r.confMedia >= 0.4;
-    }, 8000);
+    }, timeoutSondaMs);
     abandonada = true;
     if (sonda.ok) {
       logger.info(`[ocr-router] sonda de carga v5 OK (${sonda.ms} ms) — modelos PP-OCRv5 activos`);
@@ -342,6 +348,34 @@ export function rapidOcrInit(): Promise<RapidRuntime> {
     });
   }
   return rtSingleton;
+}
+
+// KIT selector-motor-v1 fase 5 — REINICIO SEGURO para la UI del panel: el
+// dueño aplica su elección de motor SIN recargar la página. Un contador de
+// reconocimientos en vuelo impide soltar las sesiones bajo los pies de una
+// inferencia. Los probes de ~centenas de ms (orientación/rec-lote) quedan
+// fuera del conteo a propósito: una carrera ahí se auto-repara (la próxima
+// init re-crea sesiones), una corrida NO se repara igual de barato — por eso
+// solo el reconocer completo cuenta.
+let reconocimientosEnVuelo = 0;
+
+/** true si hay una inferencia det→cls→rec en vuelo (consulta barata). */
+export function ocrEnVuelo(): boolean {
+  return reconocimientosEnVuelo > 0;
+}
+
+/** Reinicio del motor para la UI: rechaza si hay OCR corriendo (false — la
+ *  corrida manda); true = reiniciado o sin motor iniciado (la próxima init
+ *  nace con la elección vigente). Jamás lanza. */
+export async function reiniciarMotorOcrSiInactivo(): Promise<boolean> {
+  try {
+    if (reconocimientosEnVuelo > 0) return false;
+    if (!rtSingleton) return true; // nada que soltar — el arranque ya lee el override
+    await rapidOcrReiniciar();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // KIT e14-prowarm-ocr-v1 (T1): pre-warm REAL de la sesión RapidOCR —
@@ -1102,6 +1136,22 @@ export async function rapidOcrReconocer(
   // KIT e14-ocr-escalonado-v1 (§2.1-§2.2): cap det de ESTA llamada —
   // ausente = DET_CAP_PROD (comportamiento de hoy byte a byte); la 1.ª
   // pasada del escalonado pasa DET_CAP_RAPIDO. La sesión/cls/rec NO cambian.
+  opts?: { detCap?: number },
+): Promise<RapidOcrResultado> {
+  // fase 5 (selector-motor-v1) — contar la inferencia para el reinicio
+  // seguro del panel (reiniciarMotorOcrSiInactivo). Cero costo en la ruta.
+  reconocimientosEnVuelo++;
+  try {
+    return await rapidOcrReconocerInterno(rt, dataUrl, onProgress, opts);
+  } finally {
+    reconocimientosEnVuelo--;
+  }
+}
+
+async function rapidOcrReconocerInterno(
+  rt: RapidRuntime,
+  dataUrl: string,
+  onProgress?: (p: number) => void,
   opts?: { detCap?: number },
 ): Promise<RapidOcrResultado> {
   const tTotal = performance.now();

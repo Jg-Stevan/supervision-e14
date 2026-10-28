@@ -112,6 +112,37 @@ export function v5EnCastigo(now = Date.now()): boolean {
   return dias < DIAS_NO_REINTENTAR;
 }
 
+// ─── fase 5 (selector-motor-v1) — el castigo visible y administrable ───────
+
+/** Estado del castigo para la UI (null = sin castigo vigente). El override
+ *  MANUAL del dueño NO lo consulta (paso 1 de la cadena manda) — solo
+ *  informa al modo automático y le da al dueño la decisión de limpiarlo. */
+export function infoCastigoV5(
+  now = Date.now(),
+): { probadoHaceMs: number; msRestantes: number } | null {
+  try {
+    const s = leerSondaCarga();
+    if (!s || s.ok) return null;
+    const probadoHaceMs = Math.max(0, now - s.probadoEn);
+    const ventanaMs = DIAS_NO_REINTENTAR * 86_400_000;
+    if (probadoHaceMs >= ventanaMs) return null;
+    return { probadoHaceMs, msRestantes: ventanaMs - probadoHaceMs };
+  } catch {
+    return null;
+  }
+}
+
+/** El dueño limpia el castigo para reintentar la sonda YA (D6: la app
+ *  muestra y escribe SOLO lo que el dueño pide — el castigo es una política
+ *  del modo automático, no una valla para el dueño). Jamás lanza. */
+export function limpiarCastigoV5(): void {
+  try {
+    localStorage.removeItem(CLAVE_SONDA_CARGA);
+  } catch {
+    /* storage bloqueado — el castigo expira solo */
+  }
+}
+
 /**
  * Ejecuta la sonda de carga real de PP-OCRv5 y la persiste.
  * `cargarYInferir` la provee el consumidor (p. ej. ocr/rapidocr.ts):
