@@ -269,3 +269,39 @@ Task ID: 11 — RESULTADO (KIT monitor-jornada-v1)
   móvil 375px OK; vista anomalías OK (provider compartido); 0 errores consola.
 - Artefactos para el dueño en /home/z/my-project/download/:
   supervision-e14-monitor-jornada-v1.bundle + patches 0001/0002 + capturas.
+
+---
+Task ID: 13
+Agent: Z.ai Code (orquestador principal)
+Task: El dueño pide poner en práctica la estrategia por dispositivo del benchmark OCR
+(ronda 1-3, 9 motores, 6 actas E-14, sandbox 2 núcleos/4 GB) y pregunta si el
+diagnóstico automático (perfil-dispositivo) basta para repartir motores entre
+dispositivos → KIT ocr-router-v1 (PR aditivo).
+
+Task ID: 13 — RESULTADO
+- Nuevo módulo PURO src/modules/digitalizador/lib/e14/ocr/router-ocr.ts (KIT
+  ocr-router-v1): resuelve el motor OCR por dispositivo con la evidencia medida
+  (Tesseract spa-best psm 4 → 94,4 % de dígitos impresos con ~67 MB de RAM ·
+  PP-OCRv5 mobile latin ONNX → 100 % de dígitos, 97,6 solo-impreso > VLM cloud
+  94,4, inmune a rotación 1,5°, ~487 MB pico · Tesseract fast descartado como
+  default (83,3 %) · EasyOCR/docTR no caben en web).
+- D6 intacto (mismo espíritu que gama.ts): flag revocable `ocrMotorAdaptativo`
+  (default ON; OFF ⇒ Tesseract byte-idéntico), override manual `ocrMotor` manda,
+  gobernador reactivo (≥ 2 fallos/OOM de v5 en 3 min ⇒ degradación por sesión,
+  patrón reportarPresionGama) y sonda de carga real del ONNX (inferencia 200×60,
+  timeout 8 s, castigo 7 días en localStorage — el deviceMemory no garantiza los
+  buffers del detector).
+- v2 del diagnóstico (3 ajustes medidos en el benchmark): 1) la sonda de CPU
+  DECIDE (score < 350 ⇒ Tesseract aunque las señales digan ALTO; ≥ 750 habilita
+  v5 — hoy benchmark.ts es «evidencia que no decide»); 2) vía iOS por GPU Apple
+  (sin deviceMemory ni performance.memory, la inferencia §4.4 por heap nunca
+  aplica en Safari y todo iPhone queda MEDIO para siempre); 3) la red condiciona
+  la DESCARGA del modelo (una vez, wifi — sincronizarSoloWifi), no la capacidad
+  del motor.
+- docs/ESTRATEGIA-ocr-router-v1.md: matriz de decisión por gama (BAJO/MEDIO/ALTO)
+  + pipeline perfil → router → worker → reglas e14 (red de seguridad en TODOS los
+  tiers) → VLM cloud como verificador de campos ambiguos.
+- PR ADITIVO (no wire-in): no toca flags.ts/FlagsApp (contrato §4.2 congelado),
+  ocr-escalonado.ts ni workers — la integración del consumidor queda como
+  siguiente kit (registrar `ocrMotorAdaptativo` en FlagsApp + resolver motor en
+  el arranque del worker OCR).
