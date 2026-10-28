@@ -654,3 +654,54 @@ idénticos (misma clasificación AUTO, ENVIADA, QR ✓, recepción contó las 2
 llegadas). Ahorro por fila que escala con el tamaño de la foto (el decode
 evitado es del ORIGINAL) y con el peor caso QR-duro (hasta ~15-17 s/fila si
 el sondeo la leyó y la capa 0 hoy re-pagaba el ladder completo).
+
+## D31 — TIEMPOS del masiva: CARRIL QR PARALELO + POOL 1 (kit e14-carril-qr-paralelo-v1)
+
+**Fecha:** 2026-02-14 · **Pedido:** «optimizar y ordenar el proceso de masiva tal vez
+solo dejando procesar un acta (no dos como está actualmente) y que en paralelo se
+vayan leyendo los qr de los otros archivos para detectar duplicados».
+
+**Diagnóstico previo (con evidencia):** el OCR es wasm mono-hilo (GH Pages sin SAB —
+cabecera runner.ts AUDITORIA §2): DOS OCR en paralelo (pool 2 de e71) se reparten el
+mismo CPU sin ganancia de throughput y con jank de UI. Y el prescan QR
+(e107) corría ANTES de `iniciar()` — el carril pesado arrancaba tarde cuando el
+sondeo de ingesta no leyó algún QR.
+
+**Decisión (2 cambios quirúrgicos):**
+
+1. **Pool default 2 → 1** (`FLAGS_DEFAULT.poolWorkers`, flags.ts): UNA acta a la vez
+   en el carril pesado, con CPU completo. El override manual del dueño
+   (`e14-flags-overrides` / flags.json `poolWorkers: 2`) restaura e71 byte-idéntico —
+   whitelist politica.ts intacta. El plan gama BAJO (D74) ya forzaba 1: en ese tier
+   no cambia nada (evidencia: sandbox tier BAJO).
+2. **Fase 3 PRIMERO (prescan-qr.ts):** `prescanYIniciar` llama `iniciar()` ANTES del
+   carril QR — el OCR de la primera fila nunca espera el boot de OpenCV (~10 MB wasm)
+   ni la lectura del resto. Las Fases 1+2 bajan a CARRIL PARALELO: mientras el OCR
+   corre, el prescan lee el QR del resto de la cola y estampa `qrPrevio` /
+   DUPLICADA / YA-ENVIADA — las gemelas jamás llegan a pagar OCR.
+
+**Seguridad de la carrera — todo YA construido (cero blindaje nuevo):** el
+pre-chequeo anti-carrera nuevo (re-lectura del store por fila: `estado !==
+"PENDIENTE"` ⇒ skip — el prescan no paga det+warp por una fila que el runner ya
+tomó) + el anti-zombi post-lectura §G intacto + el re-chequeo post-reserva del
+runner (WAVE2 B1) consume la marca DUPLICADA que aterrice durante la reserva + la
+capa 0 hereda `qrPrevio` estampado antes de su decode (D30). El QR no leído JAMÁS
+se descarta — pasa al OCR (regla de oro 4).
+
+**Verificación E2E (sandbox, agent-browser, tsc 0 · lint 0/0):**
+
+- **Corrida A (realista — sondeo ON, 2 actas):** «boot omitido (D30)» + arranque
+  inmediato de la corrida; pool=1 visible en la bandeja (nunca 2 PROCESANDO);
+  `pipeline total=` 6401+5889 ms (control OCR intacto vs D30: 6421+5341);
+  `hereda-payload` ×2; ENVIADA AUTO ×2; recepción contó las 2 llegadas.
+- **Corrida B (carril bajo carga — sondeo OFF + copia renombrada):** runner y lector
+  arrancan en el MISMO tick (banner «PREPARANDO LECTOR…» con fila ya PROCESANDO a
+  151 ms); el prescan leyó el QR de la fila 2 EN PARALELO con el OCR de la fila 1 →
+  `capa0-qr hereda-payload (sondeo/prescan — sin re-decode)`; el duplicado por bytes
+  se copió en **19 ms** (cero OCR); `pipeline total=` 6776+6011 ms (estable);
+  ENVIADAS 2 + DUPLICADA 1; recepción 6/6/0/0; dev.log 0 errores/0 POST ledger.
+
+**Qué NO se tocó:** la maquinaria del pool (bucle/reserva/mutex e71 — solo cambió el
+default), el watchdog, el precalor/prefetch, el filtro `objetivoPrescan`, la UI del
+banner (overlay — coexiste con el progreso de la corrida sin mover layout) y el
+camino OCR completo (totales `pipeline total=` estables en ambas corridas).

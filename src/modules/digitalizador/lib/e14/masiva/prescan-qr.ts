@@ -26,6 +26,18 @@
  * El decodificador wasm lento: NO importado aquí (§F.3 — QA: 0 matches del
  * token). El tier correspondiente de la capa 0 (identidad-qr.ts) queda
  * intacto — cambio separado.
+ *
+ * D31 — KIT e14-carril-qr-paralelo-v1 (reorden del contrato §0): las FASES
+ * ya no son secuenciales. Fase 3 (iniciar()) corre PRIMERO — el runner
+ * (pool 1 default, flags.ts) arranca YA y su OCR nunca espera el boot de
+ * OpenCV ni la lectura QR del resto — y las Fases 1+2 bajan a CARRIL QR
+ * PARALELO: mientras UNA acta paga su OCR completa, el prescan lee el QR
+ * del RESTO de la cola y estampa qrPrevio (capa 0 lo hereda, D30) /
+ * DUPLICADA / YA-ENVIADA — las gemelas jamás llegan a pagar OCR. Seguridad
+ * de la carrera, TODO ya construido: re-chequeo post-reserva del runner
+ * (WAVE2 B1), anti-zombi §G (ahora pre Y post lectura), capa 0 hereda
+ * payload D30. El QR no leído JAMÁS se descarta — pasa al OCR (regla de
+ * oro 4 intacta).
  */
 import { create } from "zustand";
 import { logger } from "../../logger";
@@ -294,9 +306,10 @@ const DEPS_ESCRITURA: DepsEscrituraPrescan = {
 let corriendoModulo = false;
 
 /**
- * Interceptar el clic de «PROCESAR COLA»: pre-scan QR de las PENDIENTE
- * vivas → marcar DUPLICADA / YA-ENVIADA / registrar payloads → iniciar().
- * Kill-switch OFF (prescanQrCola=false) ⇒ `iniciar()` byte-idéntico a hoy
+ * Interceptar el clic de «PROCESAR COLA»: iniciar() YA (D31 — el runner no
+ * espera) + carril QR EN PARALELO: pre-scan de las PENDIENTE vivas →
+ * estampar qrPrevio / marcar DUPLICADA / YA-ENVIADA mientras la corrida
+ * avanza. Kill-switch OFF (prescanQrCola=false) ⇒ `iniciar()` byte-idéntico
  * (sin instanciar worker ni emitir estado — R1).
  */
 export async function prescanYIniciar(): Promise<void> {
@@ -338,10 +351,10 @@ export async function prescanYIniciar(): Promise<void> {
   // D30 (kit e14-qr-heredado-v1) — TODAS las filas objetivo ya traen payload
   // del sondeo de ingesta (fila.qrPrevio): no hay NADA que pre-escanear →
   // saltarse el BOOT del worker OpenCV (wasm ~10 MB — segundos en frío y RAM
-  // por nada) y entrar directo a Fase 3. La clasificación temprana de estas
-  // filas ya vivió en cadenaDedup y el «registrar» lo firma la capa 0 con el
-  // payload heredado (re-chequeo e71). Lotes mixtos: el skip por fila sigue
-  // vivo abajo (D30 en el loop R5).
+  // por nada) y entrar directo a la corrida. La clasificación temprana de
+  // estas filas ya vivió en cadenaDedup y el «registrar» lo firma la capa 0
+  // con el payload heredado (re-chequeo e71). Lotes mixtos: el skip por fila
+  // sigue vivo abajo (D30 en el loop R5).
   if (objetivo.every((f) => f.qrPrevio != null)) {
     logger.info(
       `[e14] prescan-qr: ${objetivo.length} fila(s) con payload heredado del sondeo — boot omitido (D30)`,
@@ -349,14 +362,31 @@ export async function prescanYIniciar(): Promise<void> {
     store.iniciar();
     return;
   }
+  // ─── D31 — KIT e14-carril-qr-paralelo-v1: FASE 3 PRIMERO ───
+  // El runner arranca AQUÍ (NO al final del prescan): el OCR de la primera
+  // fila no espera el boot de OpenCV (~10 MB wasm) ni la lectura QR del
+  // resto del lote — el carril pesado jamás arranca tarde. El carril QR
+  // corre EN PARALELO abajo: mientras esa fila paga su OCR, el prescan lee
+  // el QR del resto y estampa qrPrevio / DUPLICADA / YA-ENVIADA — cuando el
+  // pool llega a ellas, ya están marcadas (la gemela NO paga OCR).
+  // Seguridad de la carrera — todo YA construido, nada nuevo que blindar:
+  // · re-chequeo post-reserva del runner (WAVE2 B1) consume la marca
+  //   DUPLICADA que aterrice entre su reserva y el pipeline;
+  // · la capa 0 del runner hereda qrPrevio estampado antes de su decode
+  //   (D30 hereda-payload);
+  // · el loop de abajo NO toca filas que ya salieron de PENDIENTE
+  //   (pre-chequeo anti-carrera nuevo + anti-zombi post-lectura §G intacto).
+  store.iniciar();
   corriendoModulo = true;
   emitir({ corriendo: true, total: objetivo.length, listo: 0, leidos: 0, fase: "boot" });
   let leidos = 0;
   const cliente: ClientePrescan = crearClientePrescan(); // R4
   try {
     if (!(await cliente.listo())) {
-      // Abort honesto (§G): worker no bootea → flujo de HOY byte-idéntico.
-      logger.info("[e14] prescan-qr: lector no disponible — flujo de hoy (abort honesto)");
+      // Abort honesto (§G): worker no bootea → el carril QR muere y las
+      // filas siguen su curso en el runner (que YA corre — D31): la capa 0
+      // lee cada QR en su turno, igual que con flag OFF.
+      logger.info("[e14] prescan-qr: lector no disponible — carril QR abortado, el runner ya corre");
     } else {
       emitir({ fase: "sondeo" });
       // R5 — FASE 1+2: por fila, EN ORDEN FIFO (for...of, serial, RAM móvil)
@@ -374,6 +404,19 @@ export async function prescanYIniciar(): Promise<void> {
         if (fila.qrPrevio != null) {
           procesadas++;
           leidos++;
+          continue;
+        }
+        // D31 — PRE-CHEQUEO ANTI-CARRERA (re-lectura del store — el snapshot
+        // `objetivo` pudo quedar viejo): si el runner (que YA corre — pool 1)
+        // reservó/PROCESÓ esta fila, su QR lo lee la CAPA 0 del runner — el
+        // prescan JAMÁS paga decode+detect+warp por una fila que ya salió de
+        // PENDIENTE. Anti-zombi §G adelantado al inicio del vuelo (el de
+        // abajo, post-lectura, queda intacto — cierra la ventana del await).
+        const vivaAntes = useMasivaStore
+          .getState()
+          .filas.find((f) => f.id === fila.id);
+        if (!vivaAntes || vivaAntes.estado !== "PENDIENTE") {
+          procesadas++;
           continue;
         }
         emitir({ listo: procesadas, leidos }); // «SONDEANDO QR… k/N»
@@ -441,7 +484,8 @@ export async function prescanYIniciar(): Promise<void> {
     emitir({ corriendo: false, fase: "fin", leidos });
     corriendoModulo = false;
   }
-  // R7 — FASE 3: tM() con la lista ya filtrada. ÚNICO punto de contacto
-  // (flag OFF / abort honesto: iniciar() del flujo de hoy byte-idéntico).
-  useMasivaStore.getState().iniciar();
+  // R7 ELIMINADO (D31 — KIT e14-carril-qr-paralelo-v1): iniciar() ya corrió
+  // AL PRINCIPIO — la Fase 3 jamás espera el carril QR. Con flag OFF / abort
+  // honesto / cola vacía el iniciar() de las salidas tempranas manda
+  // (byte-idéntico a hoy).
 }

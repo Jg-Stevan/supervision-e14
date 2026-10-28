@@ -202,3 +202,20 @@ Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allow
 [browser] [e14] prescan-qr hard-kill warp presupuesto=5000+1500 — worker colgado (respawn perezoso) (src/modules/digitalizador/lib/logger.ts:110:13)
 ✓ Compiled in 2.3s
 ✓ Compiled in 1437ms
+✓ Compiled in 8ms
+ GET / 200 in 41ms (next.js: 3ms, application-code: 37ms)
+ GET / 200 in 27ms (next.js: 0.9ms, application-code: 26ms)
+ GET / 200 in 39ms (next.js: 1.2ms, application-code: 38ms)
+ GET / 200 in 29ms (next.js: 0.8ms, application-code: 28ms)
+✓ Compiled in 1705ms
+ GET / 200 in 34ms (next.js: 1.9ms, application-code: 32ms)
+ GET / 200 in 72ms (next.js: 0.8ms, application-code: 71ms)
+ GET / 200 in 33ms (next.js: 1.0ms, application-code: 32ms)
+ GET / 200 in 246ms (next.js: 1.4ms, application-code: 244ms)
+ GET / 200 in 29ms (next.js: 0.9ms, application-code: 28ms)
+ GET / 200 in 46ms (next.js: 0.9ms, application-code: 45ms)
+ GET / 200 in 38ms (next.js: 1.1ms, application-code: 37ms)
+ GET / 200 in 36ms (next.js: 1.1ms, application-code: 35ms)
+ GET / 200 in 69ms (next.js: 1.3ms, application-code: 68ms)
+ GET / 200 in 37ms (next.js: 0.8ms, application-code: 36ms)
+ GET / 200 in 33ms (next.js: 0.9ms, application-code: 32ms)

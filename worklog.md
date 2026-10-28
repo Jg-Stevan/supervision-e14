@@ -83,3 +83,24 @@ Stage Summary:
 - El masiva procesa más rápido SIN tocar el camino OCR ni las doctrinas de dedup: el payload QR (llave EXACTA de siempre) se lee UNA vez en la capa más temprana disponible y viaja a la identidad por qrPrevio.
 - Presupuesto honesto: −18 % wall en lote pequeño limpio del sandbox; el ahorro crece por fila con fotos grandes/dispositivos lentos y alega el peor caso QR-duro (~15-17 s) cuando el sondeo ya leyó.
 - Lo que domina los tiempos sigue siendo el OCR (rec ~3 s/fila) — siguiente palanca real si el dueño quiere más: calidad/resolución del rec y orientación, ambos con riesgo de calidad (decisión del dueño).
+
+---
+Task ID: 5
+Agent: Z.ai Code (orquestador principal)
+Task: D31 — optimizar y ordenar el proceso de masiva según el pedido literal del dueño: «solo dejando procesar un acta (no dos como está actualmente) y que en paralelo se vayan leyendo los qr de los otros archivos para detectar duplicados».
+
+Work Log:
+- Mapeado el pipeline post-D30: pool 2 workers (e71) + prescan e107 BLOQUEANTE antes de iniciar() + sondeo e73 en ingesta (D30 qrPrevio). El OCR es wasm mono-hilo — dos OCR paralelos se reparten el mismo CPU sin ganancia (cabecera runner.ts).
+- Cambio 1 (flags.ts): FLAGS_DEFAULT.poolWorkers 2 → 1 — UNA acta a la vez en el carril pesado; override manual del dueño (poolWorkers: 2) restaura e71; whitelist politica.ts intacta. Comentarios actualizados en obs/tipos.ts y bloque e71 del runner.
+- Cambio 2 (prescan-qr.ts): prescanYIniciar reordenado — iniciar() PRIMERO (Fase 3), carril QR EN PARALELO (Fases 1+2) con pre-chequeo anti-carrera nuevo (re-lectura del store: fila fuera de PENDIENTE ⇒ skip). Abort honesto reescrito («el runner ya corre»). Header/contrato §0 documentados.
+- Seguridad de la carrera: todo preexistente (WAVE2 B1 re-chequeo post-reserva, anti-zombi §G, hereda-payload D30) — cero blindaje nuevo; ver D31 en DECISIONS.md.
+- Verificación: bunx tsc --noEmit → 0 errores; bun run lint → 0/0.
+- E2E agent-browser corrida A (realista, sondeo ON, 2 actas): boot omitido (D30), arranque inmediato, pool=1 visible (nunca 2 PROCESANDO simultáneos), pipeline total= 6401+5889 ms (estable vs D30), hereda-payload ×2, ENVIADA AUTO ×2, recepción contó las 2 llegadas.
+- E2E corrida B (carril bajo carga: override sondeoQrPrecoz=false + copia renombrada): runner y lector arrancan mismo tick (PREPARANDO LECTOR… + fila PROCESANDO a 151 ms); el prescan leyó el QR de la fila 2 EN PARALELO con el OCR de la fila 1 → «capa0-qr hereda-payload (sondeo/prescan — sin re-decode)»; duplicado por bytes copiado en 19 ms (cero OCR); pipeline 6776+6011 ms; ENVIADAS 2 + DUPLICADA 1; recepción 6/6/0/0; dev.log 0 errores, 0 POST ledger (D29 intacto).
+- Docs: DECISIONS.md D31 + artefactos para el dueño renovados en download/.
+- Commit en main.
+
+Stage Summary:
+- El masiva queda ordenado como pidió el dueño: UNA acta paga OCR completa a la vez (CPU completo, UI fluida) y en paralelo el carril QR va leyendo el resto del lote — las gemelas/ya-enviadas se marcan ANTES de que el pool las alcance (jamás pagan OCR) y el arranque de la corrida ya no espera el prescan.
+- Los hallazgos del carril quedan demostrados con trazas: hereda-payload en plena corrida (cero re-decode) y reutilización de duplicado en 19 ms.
+- Límite honesto: en este sandbox (tier BAJO) el plan gama ya forzaba pool 1 — el default D31 gobierna en los equipos ALTO/MEDIO del dueño; el ahorro del carril escala con lotes grandes y QR-duros (los que el sondeo no leyó en ingesta).
