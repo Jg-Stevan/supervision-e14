@@ -305,3 +305,37 @@ Task ID: 13 — RESULTADO
   ocr-escalonado.ts ni workers — la integración del consumidor queda como
   siguiente kit (registrar `ocrMotorAdaptativo` en FlagsApp + resolver motor en
   el arranque del worker OCR).
+
+---
+Task ID: 14
+Agent: Z.ai Code (orquestador principal)
+Task: El dueño aprueba conectar el ROUTER (KIT ocr-router-v1, PR #10) al informe
+del diagnóstico — que cada JSON traiga motor + motivo + origen para auditar por
+qué cada dispositivo corre lo que corre.
+
+Task ID: 14 — RESULTADO
+- FlagsApp (obs/tipos.ts) + FLAGS_DEFAULT/sanearFlags (flags.ts) + whitelist de
+  leerOverridesFlags (politica.ts): `ocrMotorAdaptativo` (default true —
+  kill-switch único) y `ocrMotor` ("ppocrv5" | "tesseract-best-psm4" | null —
+  default null = el router decide). Ambos ADITIVOS AL FINAL (D57) con DOBLE
+  whitelist (cada puerta su línea): el kill-switch y el override MANUAL del
+  dueño ya son reales vía e14-flags-overrides.
+- panel-perfil.tsx: el informe «COPIAR JSON» (diagnosticoJson) trae el campo
+  ADITIVO AL FINAL `motorOcr: { motor, motivo, origen, requiereSondaCarga,
+  condicionesUpgrade }` resuelto con la cadena COMPLETA del router (flag ←
+  override manual ← gobernador ← sonda de carga cacheada ← sonda de CPU ←
+  tier). Informes previos no cambian de forma (mismo patrón
+  hangResumen/enviosDetalle). Ausente = sin señales aún (honesto, jamás
+  inventar).
+- Adaptador perfilMinimoDe (PerfilRecursos → PerfilMinimo del router:
+  runtime/sync/async a la raíz) + resolverMotorDelDispositivo (jamás lanza;
+  se resuelve EN MONTAJE como el resto del bloque autonomía — hydration-safe).
+- La tarjeta AUTONOMÍA muestra la fila «Motor OCR» (etiqueta legible + origen,
+  tooltip con el motivo) y, si aplican, la fila «Upgrade a v5» con las
+  condiciones pendientes del upgrade a PP-OCRv5.
+- Verificación: tsc --noEmit → los 9 errores TS2307 de assets son
+  PRE-EXISTENTES en main (9 = 9, verificado con stash — archivos que este PR
+  no toca); eslint → 0 errores / 0 warnings.
+- PENDIENTE (siguiente kit): consumir resolverMotor en el ARRANQUE del worker
+  OCR (ocr-escalonado.ts / rapidocr.ts) — hoy el router decide, el informe
+  audita y los flags existen, pero el worker aún no cambia de motor.

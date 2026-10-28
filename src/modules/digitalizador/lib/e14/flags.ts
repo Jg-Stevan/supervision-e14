@@ -95,6 +95,14 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // de hoy). Kill-switch del dueño: false = byte-idéntico a hoy (cadena
   // completa en main con SU presupuesto de gama).
   capa0QrWorker: true,
+  // KIT ocr-router-v1 (docs/ESTRATEGIA-ocr-router-v1.md) — ROUTER de motor
+  // OCR por dispositivo (PR #10): BAJO/MEDIO = Tesseract best+psm4 ·
+  // ALTO+SIMD = PP-OCRv5 con sonda de carga. `ocrMotorAdaptativo` false =
+  // Tesseract en TODOS los dispositivos (kill-switch único, byte-idéntico a
+  // hoy). `ocrMotor` no-null = override MANUAL del dueño (D6): el router NO
+  // decide.
+  ocrMotorAdaptativo: true,
+  ocrMotor: null,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */
@@ -141,6 +149,9 @@ export function sanearFlags(o: unknown): Partial<FlagsApp> {
   }
   // KIT e14-gama-adaptativa-v1 — whitelist aditiva (booleano).
   if (typeof p.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = p.masivaAdaptativoGama;
+  // KIT ocr-router-v1 — whitelist aditiva (booleano + enum del motor).
+  if (typeof p.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = p.ocrMotorAdaptativo;
+  if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4") limpio.ocrMotor = p.ocrMotor;
   return limpio;
 }
 
