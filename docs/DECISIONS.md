@@ -950,3 +950,42 @@ en header · vista Perfil del dispositivo con GAMA/FORMA/CONFIANZA 100 %/BENCHMA
 Capacidades del runtime: WASM SIMD ✓ Hilos WASM ✓ COOP/COEP ✓ (crossOriginIsolated=true) ·
 Plan de recursos recomendado y Evidencia del tier íntegros · responsive 375 px OK ·
 0 errores de consola. `tsc 0 · lint 0/0`.
+
+## D38 — AUTONOMÍA de recursos: amplificación ALTO + gobernador reactivo (kit e14-recursos-autonomos-v1)
+
+**Fecha:** 2026-10-28 · **Origen:** el dueño pide que el sistema sea «lo suficientemente
+autónomo e inteligente en la administración de recursos y aprovecharlos al máximo» — la
+capa D74 degradaba en BAJO/MEDIO pero ALTO corría con el plan base (desaprovechado) y no
+había reacción a presión observada en caliente.
+
+**Qué cambia (gama.ts sigue siendo el ÚNICO configurador — D6/D74 intactos).**
+1. **AMPLIFICACIÓN ALTO** (aprovechar al máximo): tier ALTO ∧ hilos WASM reales
+   (`crossOriginIsolated` — COOP/COEP de Cloudflare, D37) ⇒ `poolWorkers: 2` (el premisa
+   e71 «dos OCR se reparten el mismo CPU sin ganancia» era válido MONO-HILO; con pthreads
+   reales el 2º worker amortiza el arranque frío y el carril QR no desplaza OCR). Sin
+   aislamiento ⇒ base (honesto: sin ganancia medida). Kill-switch/override manual intactos
+   (flagsMasivaEfectivos filtra la mano del dueño clave a clave).
+2. **GOBERNADOR REACTIVO** (auto-tuning bajo presión): `matarYRecrearWorkers()` (runner-
+   watchdog) reporta cada hard-kill vía `reportarPresionGama()` — la señal más cara del
+   pipeline (workers muertos + re-OCR completo). ≥2 kills en 3 min ⇒ presupuestos de UN
+   escalón menor durante 3 min desde el último evento (ALTO→MEDIO→BAJO; BAJO es el suelo),
+   self-healing: expira sola sin intervención. El tier REAL jamás se pisa (plan.tier) —
+   solo los presupuestos (tierEfectivo + reactivo{motivo,hasta} en el plan). El flag
+   `masivaAdaptativoGama=false` desactiva también el gobernador.
+3. **VISIBILIDAD** (paridad detectar↔reportar): nueva tarjeta «AUTONOMÍA — aplicado ahora»
+   en el Perfil del dispositivo (panel-perfil): badge AUTO/MANUAL, tier real→efectivo, pool
+   OCR e hilos EFECTIVOS (flagsMasivaEfectivos — lo que los workers consumen de verdad),
+   ajustes activos, aviso de degradación preventiva y la regla de precedencia (override
+   manual manda · kill-switch). Resuelto en montaje (useState+useEffect) — hydration-safe
+   con export estático. La traza `[e14] gama plan` ahora incluye efectivo/REACTIVA/
+   AMPLIFICADO. El chip D74 de MASIVA muestra «ADAPTADO» también en ALTO amplificado.
+
+**Contratos:** solo-additive (D57) — PlanGama gana tierEfectivo/amplificado/reactivo; los
+consumidores existentes (pool/threads/warp/prescan/watchdog/master/QR/dhash/progreso) leen
+SUS campos como siempre. Sin criterios/score/reglas de negocio nuevos. Sin dependencias.
+
+**Verificación:** `tsc 0 · lint 0/0` · script download/verifica-d38.ts (7/7: amplifica con
+aislamiento; base honesta sin él; 1 kill no degrada; 2 kills ALTO→MEDIO con motivo;
+MEDIO→BAJO; BAJO suelo sin reactivo) · E2E agent-browser: tarjeta AUTONOMÍA con badge
+AUTO, pool 1 worker · OCR 2 hilos · ajustes BAJO aplicándose en la tablet del sandbox ·
+0 errores de consola. CI/CD de D37 despliega este commit automáticamente a Cloudflare.

@@ -24,6 +24,20 @@
  *   nunca cambia criterios/score/reglas de negocio — SOLO presupuestos de
  *   recursos (memoria/CPU/reló). Con flag OFF todo vuelve a hoy.
  *
+ * D38 (KIT e14-recursos-autonomos-v1) — de adaptativa a AUTÓNOMA:
+ * · AMPLIFICACIÓN ALTO (aprovechar al máximo): en tier ALTO con hilos WASM
+ *   reales (crossOriginIsolated — COOP/COEP vía _headers de Cloudflare,
+ *   D37) el pool sube a 2 workers (el premiso e71 «dos OCR se reparten el
+ *   mismo CPU» era válido mono-hilo; con pthreads reales el segundo worker
+ *   amortiza el arranque frío y el carril QR corre sin desplazar OCR).
+ *   Sin aislamiento ⇒ base (honesto: sin ganancia medida).
+ * · GOBERNADOR REACTIVO (auto-tuning bajo presión): matarYRecrearWorkers()
+ *   reporta cada hard-kill del watchdog (reportarPresionGama). ≥2 kills en
+ *   3 min ⇒ degradación PREVENTIVA de un escalón (ALTO→MEDIO, MEDIO→BAJO)
+ *   durante 3 min desde el último evento (self-healing: expira sola). El
+ *   kill `masivaAdaptativoGama=false` la desactiva también; el tier REAL
+ *   jamás se pisa (plan.tier) — solo los presupuestos (tierEfectivo).
+ *
  * TABLA DE AJUSTES (BAJO = cualquier señal débil §4.4; MEDIO = resto):
  *
  *   Parámetro               | BASE  | MEDIO | BAJO
@@ -88,6 +102,10 @@ interface SeñalesGama {
   heapLimitMB: number | null;
   redTipo: string | null;
   redWifi: boolean;
+  /** D38 — aislamiento COOP/COEP activo (SharedArrayBuffer disponible):
+   *  los wasm (OCR/QR) pueden usar hilos reales — habilita la amplificación
+   *  ALTO (pool 2). En GH Pages (sin _headers) queda false ⇒ base. */
+  wasmHilos: boolean;
 }
 
 /** Plan EFECTIVO de gama — los consumidores leen SUS campos aquí. */
@@ -100,8 +118,16 @@ export interface PlanGama {
   nucleos: number;
   memoriaGB: number | null;
   saveData: boolean;
-  /** true = adaptaciones ACTIVAS (flag ON ∧ tier ≠ ALTO ∧ hay ajustes). */
+  /** true = adaptaciones ACTIVAS (flag ON ∧ (tier ≠ ALTO ∨ amplificado)). */
   activo: boolean;
+  /** D38 — tier con el que se compusieron los presupuestos (real, o un
+   *  escalón abajo si el gobernador reactivo está activo). El tier REAL
+   *  sigue en `tier` — jamás se pisa. */
+  tierEfectivo: Tier;
+  /** D38 — amplificación ALTO activa (pool 2 con hilos WASM reales). */
+  amplificado: boolean;
+  /** D38 — degradación preventiva del gobernador reactivo (null = normal). */
+  reactivo: { motivo: string; hasta: number } | null;
   /** Override de FLAGS consumidos vía leerFlags() — filtrado por el override
    *  manual del dueño dentro de flagsMasivaEfectivos(). */
   flagsOverride: Partial<FlagsApp>;
@@ -126,16 +152,20 @@ export interface PlanGama {
   ajustes: string[];
 }
 
-/** Base byte-idéntica a hoy (flag OFF / ALTO / sin navigator). */
+/** Base byte-idéntica a hoy (flag OFF / sin navigator). ALTO sin hilos WASM
+ *  también cae aquí (D38: sin ganancia medida mono-hilo — honesto). */
 function planBase(tier: Tier, tierInferido: boolean, fuente: PlanGama["fuente"], señales: SeñalesGama): PlanGama {
   return {
     tier,
+    tierEfectivo: tier,
     tierInferido,
     fuente,
     nucleos: señales.nucleos,
     memoriaGB: señales.memoriaGB,
     saveData: señales.saveData,
     activo: false,
+    amplificado: false,
+    reactivo: null,
     flagsOverride: {},
     precalorCola: 3,
     maestroLadoMayor: 4032,
@@ -149,7 +179,8 @@ function planBase(tier: Tier, tierInferido: boolean, fuente: PlanGama["fuente"],
   };
 }
 
-/** Componer el plan del tier (flag ON ∧ tier ≠ ALTO — decidido AQUÍ). */
+/** Componer el plan del tier EFECTIVO (flag ON — decidido AQUÍ). El tier
+ *  llega ya degradado por el gobernador reactivo si applies (D38). */
 function componerPlan(
   tier: Tier,
   tierInferido: boolean,
@@ -163,7 +194,22 @@ function componerPlan(
   } catch {
     return base; // sin flags ⇒ sin adaptación (jamás inventar)
   }
-  if (!flags.masivaAdaptativoGama || tier === "ALTO") return base;
+  if (!flags.masivaAdaptativoGama) return base;
+
+  // D38 — ALTO con hilos WASM reales: AMPLIFICAR (aprovechar al máximo).
+  // El premissa e71 (pool 1 — «dos OCR se reparten el mismo CPU») era
+  // válido mono-hilo; con COOP/COEP el wasm corre pthreads y el 2º worker
+  // amortiza el arranque frío. Sin aislamiento ⇒ base (honesto).
+  if (tier === "ALTO") {
+    if (!señales.wasmHilos) return base;
+    return {
+      ...base,
+      activo: true,
+      amplificado: true,
+      flagsOverride: { poolWorkers: 2 },
+      ajustes: ["pool 2 (hilos WASM ✓)", "master 4032 (base potente)", "precalor 3"],
+    };
+  }
 
   if (tier === "BAJO") {
     return {
@@ -221,6 +267,46 @@ function componerPlan(
   };
 }
 
+// ─── D38 — gobernador reactivo (presión observada → degradación preventiva) ──
+
+/** Ventana de observación y duración de la degradación (3 min c/u). */
+const PRESION_VENTANA_MS = 180_000;
+const PRESION_UMBRAL = 2;
+const PRESION_DURACION_MS = 180_000;
+
+/** Timestamps de hard-kills recientes (solo el sitio real: matarYRecrearWorkers). */
+let eventosPresion: number[] = [];
+let presionHasta = 0;
+let presionMotivo = "";
+
+/** Hook del watchdog (runner-watchdog.matarYRecrearWorkers): cada hard-kill
+ *  es la señal más cara del pipeline (workers muertos + re-OCR completo).
+ *  ≥2 en la ventana ⇒ presupuestos de un escalón menor durante 3 min desde
+ *  el último evento (self-healing — expira sola). Jamás lanza. */
+export function reportarPresionGama(): void {
+  try {
+    const ahora = Date.now();
+    eventosPresion = eventosPresion.filter((t) => ahora - t < PRESION_VENTANA_MS);
+    eventosPresion.push(ahora);
+    if (eventosPresion.length >= PRESION_UMBRAL && presionHasta < ahora + PRESION_DURACION_MS) {
+      presionHasta = ahora + PRESION_DURACION_MS;
+      presionMotivo = `${eventosPresion.length} hard-kills del watchdog en ${PRESION_VENTANA_MS / 1000} s`;
+      logger.warn(`[e14] gama REACTIVA: ${presionMotivo} — presupuestos de un escalón menor por 3 min (auto-recupera)`);
+    }
+  } catch {
+    /* jamás lanza */
+  }
+}
+
+function presionActiva(): boolean {
+  return Date.now() < presionHasta;
+}
+
+/** Un escalón abajo (ALTO→MEDIO, MEDIO→BAJO; BAJO no baja más). */
+function degradarTier(t: Tier): Tier {
+  return t === "ALTO" ? "MEDIO" : "BAJO";
+}
+
 // ─── Medición + caché de tier ───────────────────────────────────────────────
 
 function señalesSync(): SeñalesGama | null {
@@ -242,6 +328,9 @@ function señalesSync(): SeñalesGama | null {
       heapLimitMB: typeof heap === "number" ? Math.round(heap / 1048576) : null,
       redTipo: nav.connection?.effectiveType ?? null,
       redWifi: nav.connection?.type === "wifi",
+      wasmHilos:
+        typeof SharedArrayBuffer !== "undefined" &&
+        (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true,
     };
   } catch {
     return null;
@@ -272,7 +361,9 @@ function tierSyncDe(señales: SeñalesGama): { tier: Tier; tierInferido: boolean
 
 /** Plan del MOMENTO (sync — los consumidores lo leen en caliente). Cachea el
  *  TIER, no el plan: los flips del flag `masivaAdaptativoGama` del dueño se
- *  respetan EN VIVO sin recargar. Jamás lanza. */
+ *  respetan EN VIVO sin recargar. D38: compone con el tier EFECTIVO (el
+ *  real, o un escalón abajo si el gobernador reactivo está activo). Jamás
+ *  lanza. */
 export function planGamaActual(): PlanGama {
   try {
     const señales = cacheSync?.señales ?? señalesSync();
@@ -285,14 +376,31 @@ export function planGamaActual(): PlanGama {
         heapLimitMB: null,
         redTipo: null,
         redWifi: false,
+        wasmHilos: false,
       });
     }
     if (!cacheSync) {
       const t = tierSyncDe(señales);
       cacheSync = { señales, ...t };
     }
-    const tier = cacheCompleta ?? { tier: cacheSync.tier, tierInferido: cacheSync.tierInferido };
-    return componerPlan(tier.tier, tier.tierInferido, cacheCompleta ? "completa" : "sync", señales);
+    const real = cacheCompleta ?? { tier: cacheSync.tier, tierInferido: cacheSync.tierInferido };
+    // D38 — gobernador reactivo: presupuestos de un escalón menor mientras
+    // dure la presión; el tier REAL jamás se pisa (reporte honesto en UI).
+    let tierEfectivo = real.tier;
+    let reactivo: PlanGama["reactivo"] = null;
+    try {
+      if (leerFlags().masivaAdaptativoGama && presionActiva() && real.tier !== "BAJO") {
+        tierEfectivo = degradarTier(real.tier);
+        reactivo = { motivo: presionMotivo, hasta: presionHasta };
+      }
+    } catch {
+      /* sin flags ⇒ sin reactivo */
+    }
+    const plan = componerPlan(tierEfectivo, real.tierInferido, cacheCompleta ? "completa" : "sync", señales);
+    plan.tier = real.tier;
+    plan.tierEfectivo = tierEfectivo;
+    plan.reactivo = reactivo;
+    return plan;
   } catch {
     // Cinturón: la capa adaptativa JAMÁS tumba nada — plan base.
     return planBase("MEDIO", false, "sync", {
@@ -302,6 +410,7 @@ export function planGamaActual(): PlanGama {
       heapLimitMB: null,
       redTipo: null,
       redWifi: false,
+      wasmHilos: false,
     });
   }
 }
@@ -316,7 +425,7 @@ export async function refrescarPlanGama(): Promise<PlanGama> {
     cacheCompleta = { tier: snap.tier, tierInferido: snap.tierInferido };
     const plan = planGamaActual();
     logger.info(
-      `[e14] gama plan tier=${plan.tier}${plan.tierInferido ? " (inferido)" : ""} fuente=${plan.fuente} adaptativo=${plan.activo ? `ON (${plan.ajustes.join(", ")})` : "OFF"}`,
+      `[e14] gama plan tier=${plan.tier}${plan.tierInferido ? " (inferido)" : ""} efectivo=${plan.tierEfectivo}${plan.reactivo ? " [REACTIVA]" : ""}${plan.amplificado ? " [AMPLIFICADO]" : ""} fuente=${plan.fuente} adaptativo=${plan.activo ? `ON (${plan.ajustes.join(", ")})` : "OFF"}`,
     );
     return plan;
   } catch {
@@ -355,8 +464,11 @@ export function flagsMasivaEfectivos(): FlagsApp {
   }
 }
 
-/** Prueba interna (tests): reset de las cachés de tier. */
+/** Prueba interna (tests): reset de las cachés de tier y del gobernador. */
 export function __resetGamaParaTest(): void {
   cacheSync = null;
   cacheCompleta = null;
+  eventosPresion = [];
+  presionHasta = 0;
+  presionMotivo = "";
 }

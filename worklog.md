@@ -206,3 +206,22 @@ Task ID: 9 — RESULTADO
   wrangler pages deploy) + secrets CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID en GitHub.
 - GitHub Pages (pages.yml) intacto y conviviendo — basePath /supervision-e14 solo ahí.
 - Detalle completo en docs/DECISIONS.md D37.
+
+---
+Task ID: 10
+Agent: Z.ai Code (orquestador principal)
+Task: El dueño pregunta si Cloudflare Pages se sincroniza con main y pide autonomía plena
+en recursos («aprovecharlos al máximo») → D38 KIT e14-recursos-autonomos-v1.
+
+Task ID: 10 — RESULTADO
+- Sincronización CONFIRMADA con corridas (cloudflare-pages.yml push→deploy; la failure
+  histórica fue la corrida previa a los secrets). GitHub Pages también sigue en verde.
+- D38 en gama.ts: AMPLIFICACIÓN ALTO (pool 2 solo con hilos WASM reales — D37) +
+  GOBERNADOR REACTIVO (reportarPresionGama en matarYRecrearWorkers; ≥2 kills/3min ⇒
+  presupuestos un escalón abajo 3 min, self-healing; BAJO suelo; tier real intacto) +
+  tarjeta AUTONOMÍA en panel-perfil (AUTO/MANUAL, tier real→efectivo, pool/hilos efectivos,
+  ajustes, aviso reactivo, precedencia D6). Panel importa gama/flags (leerFlags desde
+  flags.ts — fix de export en build).
+- Verificación: build 0 · lint 0/0 · download/verifica-d38.ts 7/7 · E2E tarjeta AUTO en
+  sandbox (BAJO: pool 1, OCR 2 hilos, warp 1920) · 0 errores consola.
+- Commit + PUSH (auto-deploy a Cloudflare Pages activo).

@@ -12,6 +12,7 @@
  * Estilo del kit SUP-1: superficies oscuras, bordes 1px (sin sombras),
  * label-caps para títulos, font-data para datos, radius 4px.
  */
+import { useEffect, useState } from "react";
 import {
   BatteryCharging,
   CheckCircle2,
@@ -27,6 +28,7 @@ import {
   Microchip,
   Monitor,
   RefreshCw,
+  Sparkles,
   Wifi,
   type LucideIcon,
 } from "lucide-react";
@@ -36,6 +38,17 @@ import { usePerfilRecursos } from "../perfil-provider";
 import { tonoTier } from "../lib/clasificador";
 import { etiquetaForma } from "../lib/senales";
 import type { PerfilRecursos, PlanRecursos } from "../domain/tipos";
+// D38 (KIT e14-recursos-autonomos-v1) — la tarjeta AUTONOMÍA lee el plan que
+// la capa adaptativa (gama.ts, D74/D38) está APLICANDO de verdad: planGamaActual
+// (presupuestos vivos) + flagsMasivaEfectivos (flags que consumen los workers,
+// ya filtrados por el override manual del dueño). Paridad visual: lo que la
+// app usa, visible en pantalla.
+import {
+  flagsMasivaEfectivos,
+  planGamaActual,
+} from "@/modules/digitalizador/lib/e14/gama";
+import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
+import type { PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 
 // ─── piezas locales (mismo lenguaje visual del kit) ────────────────────────
 
@@ -174,6 +187,26 @@ export function VistaPerfil() {
   const s = perfil.senales;
   const tono = tonoTier(perfil.tier);
   const forma = s ? etiquetaForma(s.forma) : "—";
+
+  // D38 — estado de autonomía (plan aplicado AHORA por gama.ts). Se resuelve
+  // EN MONTAJE (no en render) para hydration-safe con el export estático;
+  // se re-resuelve cuando el perfil se re-detecta.
+  const [auto, setAuto] = useState<
+    | null
+    | { planGama: PlanGama; poolOcr: number; hilosOcr: number; flagAuto: boolean }
+  >(null);
+  useEffect(() => {
+    try {
+      setAuto({
+        planGama: planGamaActual(),
+        poolOcr: flagsMasivaEfectivos().poolWorkers,
+        hilosOcr: flagsMasivaEfectivos().ocrThreadsTope,
+        flagAuto: leerFlags().masivaAdaptativoGama !== false,
+      });
+    } catch {
+      setAuto(null); // jamás tumba el panel
+    }
+  }, [perfil]);
 
   const copiar = () => {
     try {
@@ -356,6 +389,71 @@ export function VistaPerfil() {
             podrían usar hilos reales y SIMD en paralelo.
           </p>
         </div>
+      )}
+
+      {/* D38 — AUTONOMÍA: lo que la capa adaptativa está APLICANDO ahora */}
+      {auto && (
+        <section className="rounded-[4px] border border-border bg-card">
+          <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+            <Sparkles className="size-4 shrink-0 text-(--primary)" aria-hidden />
+            <h3 className="label-caps text-foreground">Autonomía — aplicado ahora</h3>
+            <span
+              className={cn(
+                "ml-auto inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-data text-[10px] uppercase tracking-wider",
+                auto.flagAuto
+                  ? "border-(--success)/40 bg-(--success)/10 text-(--success)"
+                  : "border-(--outline-variant) text-muted-foreground",
+              )}
+              title={
+                auto.flagAuto
+                  ? "La app ajusta sola los presupuestos de recursos (KIT e14-recursos-autonomos-v1 · D38)"
+                  : "Kill-switch del dueño activo (masivaAdaptativoGama=false) — la app no se auto-configura"
+              }
+            >
+              {auto.flagAuto ? "AUTO" : "MANUAL"}
+            </span>
+          </header>
+          <div className="px-4 py-3">
+            {auto.planGama.reactivo && (
+              <div className="mb-3 flex items-start gap-2 rounded-[4px] border border-(--warning)/40 bg-(--warning)/10 p-3">
+                <CircleAlert className="mt-0.5 size-4 shrink-0 text-(--warning)" aria-hidden />
+                <p className="body-md text-muted-foreground">
+                  <span className="font-semibold text-foreground">Degradación preventiva activa:</span>{" "}
+                  {auto.planGama.reactivo.motivo} — presupuestos de un escalón menor; se recupera
+                  sola al expirar (self-healing, sin tocar tu tier real).
+                </p>
+              </div>
+            )}
+            <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              <Fila
+                k="Tier real → efectivo"
+                v={
+                  auto.planGama.tierEfectivo !== auto.planGama.tier
+                    ? `${auto.planGama.tier} → ${auto.planGama.tierEfectivo} (reactivo)`
+                    : auto.planGama.tier
+                }
+              />
+              <Fila k="Pool OCR efectivo" v={`${auto.poolOcr} worker(s)`} />
+              <Fila k="Hilos OCR efectivos" v={String(auto.hilosOcr)} />
+              <Fila
+                k="Ajustes activos"
+                v={
+                  auto.planGama.activo
+                    ? auto.planGama.ajustes.join(" · ")
+                    : "base del pipeline (sin adaptación)"
+                }
+                titulo={auto.planGama.activo ? auto.planGama.ajustes.join(" · ") : undefined}
+              />
+            </div>
+            <p className="body-md mt-3 text-muted-foreground">
+              La app administra los recursos sola: detecta el equipo, aplica presupuestos
+              (CPU/memoria/reló) y se degrada preventivamente bajo presión observada (hard-kills).
+              Jamás toca criterios ni score. Tu override manual manda clave a clave (D6) y{" "}
+              <code className="font-data text-(--primary)">masivaAdaptativoGama=false</code> apaga
+              toda la autonomía.
+            </p>
+          </div>
+        </section>
       )}
 
       {/* Plan de recursos recomendado */}

@@ -15,7 +15,7 @@ import { getScannerWorker, warmUpScannerWorker } from "@jg-stevan/scanner-core/d
 // KIT e14-gama-adaptativa-v1 (D74): re-warm del OCR tras el kill — sin él,
 // el reintento pagaba sesión+calor completos (~27 s fríos medidos).
 import { rapidOcrPrecalentar, rapidOcrReiniciar } from "../ocr/rapidocr";
-import { flagsMasivaEfectivos } from "../gama";
+import { flagsMasivaEfectivos, reportarPresionGama } from "../gama";
 // D65 (T1.3): semilla para el acta de timeout del watchdog — la MISMA que el
 // bridge usa en SU acta de timeout (solo lectura de la forma; cero criterios).
 import { ACTA_MOCK } from "../seed";
@@ -92,6 +92,11 @@ function esVeredictoTimeout(acta: Acta): boolean {
  *    re-crea el runtime (rapidOcrReiniciar — best-effort, jamás lanza).
  *  Nada de esto toca criterios/score del veredicto: es infraestructura. */
 async function matarYRecrearWorkers(): Promise<void> {
+  // D38 (KIT e14-recursos-autonomos-v1) — el hard-kill es la señal más cara
+  // del pipeline: el gobernador reactivo de gama la cuenta y, con ≥2 en
+  // 3 min, degrada los presupuestos un escalón por 3 min (self-healing).
+  // Fire-and-forget, jamás lanza, no altera ESTE flujo.
+  reportarPresionGama();
   try {
     getScannerWorker()?.dispose();
   } catch {
