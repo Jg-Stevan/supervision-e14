@@ -9,6 +9,7 @@ import {
 import {
   Activity,
   Bell,
+  Cpu,
   FileText,
   Flag,
   Inbox,
@@ -40,6 +41,17 @@ import { VistaRecepcion } from "./vista-recepcion";
 // UI supervision→digitalizador: la vista recibe `onVerEnMonitor` para
 // aterrizar un acta publicada en el visor (props, sin contexto cruzado).
 import { MasivaView as VistaCargaMasiva } from "@/modules/digitalizador/components/e14/screens/MasivaView";
+// KIT perfil-recursos-v1 — perfil de recursos del dispositivo (módulo
+// perfil-dispositivo): detección de gama/forma + panel de diagnóstico.
+// El provider monta UNA vez en el shell; la vista y el chip del header
+// consumen por el hook. (Paridad de tier con la capa de MASIVA §4.4.)
+import {
+  PerfilProvider,
+  usePerfilRecursos,
+} from "@/modules/perfil-dispositivo/perfil-provider";
+import { VistaPerfil } from "@/modules/perfil-dispositivo/components/panel-perfil";
+import { tonoTier } from "@/modules/perfil-dispositivo/lib/clasificador";
+import { etiquetaForma } from "@/modules/perfil-dispositivo/lib/senales";
 
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
  * (el export estático sigue siendo trivial: una sola página).
@@ -53,7 +65,8 @@ type VistaId =
   | "carga-masiva"
   | "notificaciones"
   | "anomalias"
-  | "informes";
+  | "informes"
+  | "perfil";
 
 /**
  * D20 — Retiro TEMPORAL de módulos (no borrado): las entradas cuyo
@@ -109,6 +122,9 @@ const ITEMS_NAV: ItemNav[] = [
     vista: "anomalias",
     badgeDe: "anomalias",
   },
+  // KIT perfil-recursos-v1 — diagnóstico de recursos del dispositivo
+  // (gama baja/media/alta · PC/móvil): detección + plan recomendado.
+  { Icono: Cpu, etiqueta: "Perfil del dispositivo", vista: "perfil" },
 ];
 
 const CLASE_ITEM =
@@ -273,6 +289,9 @@ function VistaActual({
       return <VistaRecepcion onVerEnMonitor={onVerEnMonitor} />;
     case "carga-masiva":
       return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
+    case "perfil":
+      // KIT perfil-recursos-v1 — diagnóstico del dispositivo.
+      return <VistaPerfil />;
     default:
       return <VistaMonitor />;
   }
@@ -287,11 +306,46 @@ function VistaActual({
  * Cierre: ✕, Escape y clic en el scrim. Móvil y desktop comparten el
  * MISMO overlay (unificado, sin duplicar).
  */
+/**
+ * Chip de gama del header (KIT perfil-recursos-v1): el supervisor SIEMPRE
+ * ve qué recursos tiene entre manos — `GAMA {tier} · {forma}` — y un clic
+ * lo lleva al panel completo. Se monta DESPUÉS de la hidratación (el perfil
+ * arranca PENDIENTE en SSR — cero mismatch) y abre la vista `perfil`.
+ */
+function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
+  const { perfil } = usePerfilRecursos();
+  if (!perfil.listo || perfil.tier === "PENDIENTE" || !perfil.senales) return null;
+  const color =
+    tonoTier(perfil.tier) === "success"
+      ? "var(--success)"
+      : tonoTier(perfil.tier) === "warning"
+        ? "var(--warning)"
+        : "var(--danger)";
+  return (
+    <button
+      type="button"
+      onClick={onAbrir}
+      className="font-data inline-flex h-9 items-center gap-1.5 rounded-[4px] border border-border bg-(--surface) px-2.5 text-[11px] font-semibold tracking-wide text-foreground hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+      title={`Gama ${perfil.tier} detectada${perfil.tierInferido ? " (inferida)" : ""} · dispositivo: ${perfil.senales.forma} — abrir el perfil del dispositivo`}
+      aria-label={`Gama ${perfil.tier} · ${etiquetaForma(perfil.senales.forma)} — abrir perfil del dispositivo`}
+    >
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+        aria-hidden
+      />
+      GAMA {perfil.tier} · {etiquetaForma(perfil.senales.forma)}
+    </button>
+  );
+}
+
 export function SupervisionShell() {
   return (
-    <DatosProvider>
-      <ShellInterno />
-    </DatosProvider>
+    <PerfilProvider>
+      <DatosProvider>
+        <ShellInterno />
+      </DatosProvider>
+    </PerfilProvider>
   );
 }
 
@@ -395,6 +449,7 @@ function ShellInterno() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 md:gap-3">
+            <ChipGamaHeader onAbrir={() => elegirVista("perfil")} />
             <span className="label-caps flex items-center gap-1.5 text-(--success)">
               <StatusDot />
               Online
