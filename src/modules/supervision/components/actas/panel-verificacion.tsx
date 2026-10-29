@@ -109,16 +109,16 @@ export function PanelVerificacion({
           <label htmlFor={`${inputId}-pais`} className={CLASE_LABEL}>
             País
           </label>
-          <select
+          {/* Catálogo del acta — solo lectura operativa (§0-1): el país es
+              dato impreso del encabezado; la UI lo muestra, no lo edita. */}
+          <input
             id={`${inputId}-pais`}
-            defaultValue={pais}
+            type="text"
+            value={pais}
+            readOnly
+            aria-label="País del acta (solo lectura)"
             className={CLASE_INPUT}
-            onChange={() => {
-              /* catálogo del acta — solo lectura operativa */
-            }}
-          >
-            <option>{pais}</option>
-          </select>
+          />
         </div>
         <div>
           <label htmlFor={`${inputId}-zona`} className={CLASE_LABEL}>

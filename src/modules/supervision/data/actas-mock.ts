@@ -405,11 +405,12 @@ export function aprobarActaMock(
 
 /** CONFIRMAR RESCANEO: versión 1→2, hora de carga +30 min determinísticos,
  * todas las páginas → VALIDA, motivo fuera, evento RESCANEO CONFIRMADO.
- * La observación es obligatoria (T5.2); el kit no la imprime en el evento. */
+ * La observación es obligatoria (T5.2) y queda REGISTRADA en el detalle
+ * del evento (trazabilidad de auditoría: el motivo del rechazo nunca se
+ * descarta — kit stitch-visor-actas-v1). */
 export function confirmarRescanActaMock(
   actaId: string,
-   
-  _observacion: string
+  observacion: string
 ): ActaMesa | null {
   const hallada = actaEnCache(actaId);
   if (!hallada) return null;
@@ -432,7 +433,7 @@ export function confirmarRescanActaMock(
     {
       hora: `${horaActual()} LOCAL`,
       titulo: "RESCANEO CONFIRMADO",
-      detalle: `Nueva transmisión recibida desde sesión ${acta.id}`,
+      detalle: `Nueva transmisión recibida desde sesión ${acta.id} · Obs: ${truncar(observacion)}`,
       nivel: "ALERTA",
     },
     ...acta.historial,

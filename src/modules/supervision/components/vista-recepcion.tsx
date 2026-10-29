@@ -173,7 +173,14 @@ function FilaRecepcion({
           aria-label={`Ver en monitor: ${entrada.idEnlace} mesa ${entrada.mesa}`}
           onClick={
             conJoin && onVerEnMonitor
-              ? () => onVerEnMonitor(entrada.idEnlace, entrada.mesa)
+              ? () =>
+                  onVerEnMonitor(
+                    entrada.idEnlace,
+                    entrada.mesa,
+                    // El formulario conocido de la llegada aterriza el visor
+                    // en el ORIGEN correcto (no siempre TRANSMISIÓN P1).
+                    entrada.formulario ?? undefined
+                  )
               : undefined
           }
         >

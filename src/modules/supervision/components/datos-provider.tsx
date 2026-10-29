@@ -10,11 +10,10 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import {
-  mockSupervisionRepository,
-  TICKER_SEGUNDOS,
-  TRANSICION_CADA_SEGUNDOS,
-} from "../data/mock-repository";
+import { TICKER_SEGUNDOS, TRANSICION_CADA_SEGUNDOS } from "../data/mock-repository";
+// Seam único del repositorio (§0-9): el store ya NO hardcodea el mock —
+// cambiar de implementación = editar data/repositorio.ts.
+import { supervisionRepository } from "../data/repositorio";
 import { tieneActa } from "../data/actas-mock";
 import { suscribirseActasRuntime } from "../data/actas-runtime";
 import type {
@@ -174,7 +173,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let vivo = true;
     (async () => {
-      const repo = mockSupervisionRepository;
+      const repo = supervisionRepository;
       const [puestos, notificaciones, anomalias] = await Promise.all([
         repo.getPuestos(),
         repo.getNotificaciones(),
@@ -200,7 +199,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
 
   // ── Ticker de vida (T3): +5s cada 5s; a los 45s UNA transición ─────────
   const aplicarTransicion = useCallback(async () => {
-    const repo = mockSupervisionRepository;
+    const repo = supervisionRepository;
     const transicion = await repo.aplicarTransicionVida();
     if (!transicion) return;
     const [puestos, mesas] = await Promise.all([
@@ -238,7 +237,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   const reinspeccionar = useCallback(async (puestoId: string, mesaId: string) => {
     setEstado((prev) => ({ ...prev, mesaEnAccionId: mesaId }));
     try {
-      const repo = mockSupervisionRepository;
+      const repo = supervisionRepository;
       const resultado = await repo.resolverRescaneo(puestoId, mesaId);
       if (resultado) {
         const puestos = await repo.getPuestos();
@@ -269,7 +268,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   // en vivo, junto con la notificación del evento. Patrón idéntico a
   // reinspeccionar (el store del shell manda — kit SUP-3 T4).
   useEffect(() => {
-    const repo = mockSupervisionRepository;
+    const repo = supervisionRepository;
     const desuscribir = suscribirseActasRuntime(async (evento) => {
       const resultado = await repo.registrarCargaMasiva(
         evento.idEnlace,
@@ -329,7 +328,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     if (!puestoIdVisor || !mesaIdVisor) return;
     let vivo = true;
     (async () => {
-      const acta = await mockSupervisionRepository.getActaDeMesa(
+      const acta = await supervisionRepository.getActaDeMesa(
         puestoIdVisor,
         mesaIdVisor
       );
@@ -452,7 +451,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       if (!actaActual || accionActaEnCurso) return;
       setAccionActaEnCurso("aprobar");
       try {
-        const resultado = await mockSupervisionRepository.aprobarActa(
+        const resultado = await supervisionRepository.aprobarActa(
           actaActual.id,
           observacion
         );
@@ -481,7 +480,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       if (!actaActual || accionActaEnCurso) return;
       setAccionActaEnCurso("rescanear");
       try {
-        const resultado = await mockSupervisionRepository.confirmarRescanActa(
+        const resultado = await supervisionRepository.confirmarRescanActa(
           actaActual.id,
           observacion
         );
@@ -508,7 +507,7 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       if (!actaActual || accionActaEnCurso) return;
       setAccionActaEnCurso("anomalia");
       try {
-        const resultado = await mockSupervisionRepository.reportarAnomaliaActa(
+        const resultado = await supervisionRepository.reportarAnomaliaActa(
           actaActual.id,
           observacion
         );

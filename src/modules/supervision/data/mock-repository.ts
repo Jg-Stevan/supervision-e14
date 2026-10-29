@@ -690,6 +690,12 @@ function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   if (f.zona && puesto.zonaId !== f.zona) return false;
   if (f.puesto && puesto.puesto !== f.puesto) return false;
   if (f.estado && puesto.estadoGlobal !== f.estado) return false;
+  // Filtros de COLUMNA (mismos criterios que aplica el monitor en cliente):
+  // «Cierre COL» = valor exacto de la hora de cierre en hora de Colombia y
+  // «Tiempo» = tramo del transcurrido desde el cierre local (tiempo-cierre).
+  if (f.cierreCol && puesto.horaCierreColombia !== f.cierreCol) return false;
+  if (f.tiempo && tramoDeMinutos(puesto.minutosDesdeCierre).id !== f.tiempo)
+    return false;
   const q = f.busqueda?.trim().toLowerCase();
   if (q) {
     const texto = [
@@ -876,12 +882,12 @@ export const mockSupervisionRepository: SupervisionRepository = {
     return { acta, notificacion: { ...notificacion }, anomalia };
   },
 
-  async confirmarRescanActa(actaId: string, _observacion: string) {
-    // La observación es OBLIGATORIA (T5.2) pero el kit no la imprime en el
-    // evento/notificación del rescan (textos exactos de T5.4) — queda en la
-    // auditoría del visor.
+  async confirmarRescanActa(actaId: string, observacion: string) {
+    // La observación es OBLIGATORIA (T5.2) y queda REGISTRADA en el evento
+    // «RESCANEO CONFIRMADO» del historial del acta (auditoría del visor) —
+    // el motivo del rechazo nunca se descarta.
     await esperar(LATENCIA_REINSPECCION_MS);
-    const acta = confirmarRescanActaMock(actaId, _observacion);
+    const acta = confirmarRescanActaMock(actaId, observacion);
     if (!acta) return null;
     const puesto = puestoPorId(acta.puestoId);
     const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;

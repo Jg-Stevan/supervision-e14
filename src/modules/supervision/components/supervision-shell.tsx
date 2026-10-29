@@ -20,6 +20,17 @@ import {
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -38,6 +49,10 @@ import { DatosProvider, useDatos } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
 import { VistaRecepcion } from "./vista-recepcion";
+// Reactivadas (D20): las vistas NOTIFICACIONES e INFORMES están COMPLETAS
+// en este repo (componente + lógica del store) — hoy SÍ navegan.
+import { VistaNotificaciones } from "./vista-notificaciones";
+import { VistaInformes } from "./vista-informes";
 // NOTA de trasplante (sandbox): la vista CARGA MASIVA (módulo digitalizador)
 // y el PERFIL DEL DISPOSITIVO (módulo perfil-dispositivo) viven en el repo
 // completo del proyecto. Aquí quedan DORMIDOS vía MODULOS_INACTIVOS (D20) —
@@ -61,12 +76,16 @@ type VistaId =
 /**
  * D20 — Retiro TEMPORAL de módulos (no borrado): las entradas cuyo
  * `vista` figure aquí se filtran del sidebar. El código de las vistas
- * dormidas queda intacto en el repo ("llegada la integración con el
- * digitalizador, reactivar debe costar editar esta lista").
+ * dormidas queda intacto en el repo («llegada la integración con el
+ * digitalizador, reactivar debe costar editar esta lista» — hoy la
+ * promesa es CIERTA: VistaActual ya sabe renderizar cualquier vista
+ * activable; solo carga-masiva y perfil esperan su módulo).
+ *
+ * NOTIFICACIONES e INFORMES fueron REACTIVADAS: sus vistas viven y
+ * funcionan en este repo (centro de notificaciones con badge real e
+ * informes con descarga .md/.csv).
  */
 export const MODULOS_INACTIVOS: readonly VistaId[] = [
-  "notificaciones",
-  "informes",
   "carga-masiva",
   "perfil",
 ];
@@ -98,7 +117,9 @@ const ITEMS_NAV: ItemNav[] = [
   {
     Icono: Upload,
     etiqueta: "Carga masiva",
-    // D27 — activada: el digitalizador (módulo masiva) vive en este repo.
+    // D27 — DORMIDO aquí: el módulo digitalizador (módulo masiva) vive en
+    // el repo completo del proyecto; su publicación (publicarActaMasiva)
+    // ya tiene consumidor en este repo (D28/recepción + monitor en vivo).
     vista: "carga-masiva",
   },
   {
@@ -185,9 +206,8 @@ function BloqueLogo({ onCerrar }: { onCerrar?: () => void }) {
 /**
  * Contenido de navegación (kit T1): la sidebar flotante conserva su
  * contenido actual (logo, ítems, badges, CERRAR SESIÓN). Los ítems con
- * vista cambian el estado del shell; Carga Masiva sigue deshabilitada con
- * el tooltip del kit; el resto de tooltips "Próximamente" desaparecen
- * porque ahora SÍ navegan.
+ * vista cambian el estado del shell; los módulos dormidos (D20) se
+ * filtran; CERRAR SESIÓN pide confirmación antes de cerrar.
  */
 /**
  * KIT puente-remoto-v1 — bloque compacto de estado del PUENTE REMOTO en
@@ -254,6 +274,7 @@ function ContenidoNav({
   onVista,
   badges,
   puente,
+  onCerrarSesion,
 }: {
   vista: VistaId;
   onVista: (v: VistaId) => void;
@@ -264,6 +285,7 @@ function ContenidoNav({
   };
   /** KIT puente-remoto-v1 — estado del poller para el bloque del footer. */
   puente: EstadoPuenteRemoto & { sincronizarAhora: () => void };
+  onCerrarSesion: () => void;
 }) {
   // D20 — filtro del sidebar: fuera las entradas de módulos inactivos
   // (su badge dinámico desaparece con ellas; el de anomalías queda).
@@ -309,17 +331,18 @@ function ContenidoNav({
           {/* KIT puente-remoto-v1 — estado del hub del digitalizador;
               clic = sincronizar ahora + abrir Recepción. */}
           <BloquePuenteRemoto puente={puente} onVerRecepcion={() => onVista("recepcion")} />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" className={CLASE_ITEM}>
-                <LogOut className="size-4 shrink-0" aria-hidden />
-                <span className="flex-1 leading-4">Cerrar sesión</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="font-data text-xs">
-              Próximamente
-            </TooltipContent>
-          </Tooltip>
+          {/* Sesión local de demo (sin backend): confirmar → pantalla de
+              sesión cerrada → volver a entrar remonta TODO el store. Al
+              integrar autenticación real (p. ej. NextAuth), reemplazar el
+              estado del shell por la sesión del proveedor. */}
+          <button
+            type="button"
+            className={CLASE_ITEM}
+            onClick={onCerrarSesion}
+          >
+            <LogOut className="size-4 shrink-0" aria-hidden />
+            <span className="flex-1 leading-4">Cerrar sesión</span>
+          </button>
         </div>
       </div>
     </TooltipProvider>
@@ -327,10 +350,9 @@ function ContenidoNav({
 }
 
 /**
- * D20 — las vistas de los módulos inactivos son INALCANZABLES (sin
- * entrada en el sidebar y sin rutas — D11): ninguna referencia activa a
- * sus componentes (T1.3); sus archivos quedan dormidos en el repo. Si
- * llegaran por estado (imposible hoy), caen al monitor.
+ * D20 — las vistas de los módulos inactivos caen al monitor (sus
+ * componentes viven en el repo completo del proyecto). Las ACTIVAS —
+ * incluidas notificaciones e informes, reactivadas — renderizan aquí.
  */
 function VistaActual({
   vista,
@@ -349,7 +371,12 @@ function VistaActual({
     case "recepcion":
       // D28 — log de recepción: mismo seam por props del masiva (D27).
       return <VistaRecepcion onVerEnMonitor={onVerEnMonitor} />;
+    case "notificaciones":
+      return <VistaNotificaciones />;
+    case "informes":
+      return <VistaInformes />;
     default:
+      // monitor + los módulos dormidos (imposible alcanzarlos hoy).
       return <VistaMonitor />;
   }
 }
@@ -362,16 +389,64 @@ function VistaActual({
  * rgba(0,0,0,0.5) y borde derecho 1px outline-variant (sin sombras).
  * Cierre: ✕, Escape y clic en el scrim. Móvil y desktop comparten el
  * MISMO overlay (unificado, sin duplicar).
+ *
+ * SESIÓN (demo sin backend): cerrar sesión pide confirmación, muestra la
+ * pantalla de sesión cerrada y, al volver a entrar, REMONTA el store
+ * (key=ciclo) — los datos en memoria se restablecen, mismo contrato de
+ * memoria de sesión (§0-5) que una recarga.
  */
 export function SupervisionShell() {
+  const [sesionActiva, setSesionActiva] = useState(true);
+  /** Cada «volver a entrar» incrementa el ciclo → DatosProvider remonta
+   * limpio (carga inicial, badges, ticker y suscripciones desde cero). */
+  const [cicloSesion, setCicloSesion] = useState(0);
+
+  if (!sesionActiva) {
+    return (
+      <PantallaSesionCerrada
+        onVolver={() => {
+          setCicloSesion((c) => c + 1);
+          setSesionActiva(true);
+        }}
+      />
+    );
+  }
+
   return (
-    <DatosProvider>
-      <ShellInterno />
+    <DatosProvider key={cicloSesion}>
+      <ShellInterno onCerrarSesion={() => setSesionActiva(false)} />
     </DatosProvider>
   );
 }
 
-function ShellInterno() {
+/** Pantalla post-logout: confirmación visual del cierre con la identidad
+ * del supervisor y reingreso manual (sin backend no hay formulario de
+ * credenciales — al integrar auth real, esta pantalla lo reemplaza). */
+function PantallaSesionCerrada({ onVolver }: { onVolver: () => void }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <main className="w-full max-w-sm rounded-[4px] border border-border bg-card p-6 text-center">
+        <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full border border-border bg-(--surface)">
+          <LogOut className="size-5 text-muted-foreground" aria-hidden />
+        </div>
+        <p className="headline-lg">Sesión cerrada</p>
+        <p className="body-md mt-2 text-muted-foreground">
+          Cerraste la sesión de{" "}
+          <span className="font-data text-foreground">
+            {SUPERVISOR.nombre} · {SUPERVISOR.id}
+          </span>{" "}
+          en este dispositivo. Los datos en memoria se restablecen al volver
+          a entrar.
+        </p>
+        <Button className="mt-6 w-full" onClick={onVolver}>
+          Volver a entrar
+        </Button>
+      </main>
+    </div>
+  );
+}
+
+function ShellInterno({ onCerrarSesion }: { onCerrarSesion: () => void }) {
   const { notificacionesNoLeidas, anomaliasAbiertas, cargando, abrirVisor } =
     useDatos();
   const [vista, setVista] = useState<VistaId>("monitor");
@@ -381,6 +456,9 @@ function ShellInterno() {
   // TODO el histórico del hub; luego polling cada 8 s (visible + sin
   // ciclo en curso). Publica vía publicarActaMasiva → monitor/recepción.
   const puente = usePuenteRemoto();
+  // CERRAR SESIÓN: confirmación antes de ejecutar (evita cierres por
+  // clic accidental en la sidebar flotante).
+  const [confirmarSalir, setConfirmarSalir] = useState(false);
   // D28 — llegadas mientras el supervisor NO está mirando la recepción
   // (badge del sidebar; se anula al abrir la vista).
   const [recepcionesNuevas, setRecepcionesNuevas] = useState(0);
@@ -448,6 +526,10 @@ function ShellInterno() {
         <ContenidoNav
           vista={vista}
           onVista={elegirVista}
+          onCerrarSesion={() => {
+            setMenuAbierto(false);
+            setConfirmarSalir(true);
+          }}
           badges={{
             notificaciones: notificacionesNoLeidas,
             anomalias: anomaliasAbiertas,
@@ -510,6 +592,26 @@ function ShellInterno() {
           )}
         </main>
       </div>
+
+      {/* Confirmación de cierre de sesión (dialog modal accesible). */}
+      <AlertDialog open={confirmarSalir} onOpenChange={setConfirmarSalir}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cerrar sesión?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se cerrará la sesión de {SUPERVISOR.nombre} (ID: {SUPERVISOR.id})
+              en este dispositivo. Los datos en memoria se restablecerán al
+              volver a entrar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={onCerrarSesion}>
+              Cerrar sesión
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
