@@ -494,3 +494,49 @@ benchmark como motor ELEGIBLE
   94,4 %» + etiqueta honesta del base («RapidOCR v4 · producción»).
 - Verificación: tsc --noEmit → 9 TS2307 pre-existentes (baseline 9 = 9);
   eslint → 0/0.
+
+Task ID: 19 — perfil-dev-v1: módulo perfil-dispositivo ORGANIZADO + MODO
+DESARROLLADOR (D43)
+- Pedido del dueño: «el módulo de perfil del dispositivo está muy
+  desorganizado» + «ocultarlo como en modo desarrollador — ya casi lo saco
+  al público y no quiero cosas tan técnicas de desarrollador».
+- ORGANIZACIÓN: panel-perfil.tsx (861 líneas monolíticas) → composición por
+  responsabilidad, MISMO JSX/estilo/strings (cero cambio visual):
+  · components/piezas.tsx — primitivas del kit (KpiPerfil, Tarjeta, Fila,
+    SiNo + fmtMB/fmtN).
+  · lib/diagnostico.ts — capa NO-UI del informe: ETIQUETA_MOTOR,
+    OPCIONES_MOTOR, fmtDuracion, perfilMinimoDe,
+    resolverMotorDelDispositivo, resolverRecomendacionRouter,
+    diagnosticoJson (D6 y «jamás lanza» intactos).
+  · components/seccion-recursos.tsx — grid de tarjetas de señales + nota
+    COOP/COEP.
+  · components/seccion-autonomia.tsx — D38 autonomía aplicada + selector de
+    motor OCR (fase 5/5b): estado `auto`, fijarMotor (puerta oficial
+    e14-flags-overrides), castigo v5, APLICAR AHORA (import dinámico).
+  · components/seccion-plan.tsx — tabla catálogo D6-safe (scroll acotado).
+  · components/seccion-evidencia.tsx — el porqué auditable del tier.
+  · components/vista-perfil.tsx — SOLO composición: cabecera (RE-DETECTAR /
+    COPIAR JSON) + KPIs + 4 secciones.
+  · El provider (perfil-provider.tsx), domain y lib de detección NO cambian.
+- MODO DESARROLLADOR (D43 — perfil-dev-v1): la app sale al público; el
+  diagnóstico del dispositivo (señales/benchmark/router OCR/overrides) es
+  material técnico. Nuevo modo-desarrollador.tsx (provider + hook
+  useModarrollador... useModoDesarrollador): estado APAGADO determinista en
+  SSR (hydration-safe, mismo patrón del perfil), persistencia
+  localStorage «e14-modo-desarrollador» (al desactivar se BORRA — cero
+  rastro), dos puertas de activación: GESTO 5 toques ≤ 2,5 s sobre el logo
+  E-14 del menú (alternar, con toast) y URL ?dev=1 (persiste).
+- supervision-shell.tsx: MODULOS_SOLO_DEV=["perfil"] (par D20), filtro del
+  sidebar (sin modo ⇒ la entrada NO existe), marca «DEV» discreta en el
+  ítem cuando el modo está activo, chip GAMA del header oculto sin modo,
+  elegirVista rechaza «perfil» sin modo (defensa en profundidad), vista
+  cae al monitor si el modo se apaga mirándolo, gestor «MODO
+  DESARROLLADOR ON» en el pie del sidebar (solo con el modo activo) y
+  SupervisionShell envuelve con ModoDevProvider.
+- Verificación: tsc --noEmit → 9 errores TS2307 de assets PRE-EXISTENTES
+  (baseline 9 = 9); eslint → 0/0. Smoke E2E con agent-browser (dev :3021):
+  sin modo → entrada del perfil ausente del menú, chip GAMA ausente; 5
+  toques en el logo → toast + entrada «Perfil del dispositivo» con DEV +
+  vista completa (KPIs, tarjetas, autonomía, plan, evidencia) + gestor ON
+  en el pie; apagar → cae al monitor y la entrada desaparece; ?dev=1
+  re-activa tras recarga. Cero errores de consola.
