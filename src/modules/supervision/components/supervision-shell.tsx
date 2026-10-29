@@ -30,6 +30,9 @@ import { SUPERVISOR } from "../data/mock-repository";
 // KIT recepcion-actas-v1 (D28): el badge del sidebar cuenta las llegadas
 // EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
 import { suscribirseRecepcion } from "../data/recepcion-log";
+// KIT puente-remoto-v1: poller del hub de actas del digitalizador — trae
+// las actas publicadas remotamente y las inyecta por publicarActaMasiva.
+import { usePuenteRemoto, type EstadoPuenteRemoto } from "./use-puente-remoto";
 import { StatusDot } from "./status-dot";
 import { DatosProvider, useDatos } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
@@ -186,10 +189,71 @@ function BloqueLogo({ onCerrar }: { onCerrar?: () => void }) {
  * el tooltip del kit; el resto de tooltips "Próximamente" desaparecen
  * porque ahora SÍ navegan.
  */
+/**
+ * KIT puente-remoto-v1 — bloque compacto de estado del PUENTE REMOTO en
+ * el footer del sidebar (mismo lenguaje que los badges: label-caps,
+ * font-data, borde/fondo oscuros del kit). Clic = sincronizar AHORA +
+ * abrir la vista Recepción (donde aterrizan las llegadas).
+ */
+function BloquePuenteRemoto({
+  puente,
+  onVerRecepcion,
+}: {
+  puente: EstadoPuenteRemoto & { sincronizarAhora: () => void };
+  onVerRecepcion: () => void;
+}) {
+  const { conectado, sincronizando, nuevas } = puente;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        puente.sincronizarAhora();
+        onVerRecepcion();
+      }}
+      title="Puente remoto — clic para sincronizar ahora"
+      aria-label={`Puente remoto: ${conectado ? "en vivo" : "sin conexión"}. Clic para sincronizar ahora y abrir Recepción`}
+      className="mb-2 flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] border border-border bg-(--surface) px-3 py-2 text-left hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+    >
+      {/* Punto de estado: verde + pulse si conectado, rojo si no. */}
+      <span
+        aria-hidden
+        className={cn(
+          "inline-block size-2 shrink-0 rounded-full",
+          conectado ? "animate-pulse bg-emerald-400" : "bg-red-400"
+        )}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="label-caps block leading-4 text-muted-foreground">
+          Puente remoto
+        </span>
+        <span
+          className={cn(
+            "font-data block text-[10px] leading-4 font-semibold",
+            conectado ? "text-emerald-400" : "text-red-400"
+          )}
+        >
+          {sincronizando
+            ? "SINCRONIZANDO…"
+            : conectado
+              ? "EN VIVO"
+              : "SIN CONEXIÓN"}
+        </span>
+      </span>
+      {/* Llegadas de la última sync (como el badge de los ítems). */}
+      {nuevas > 0 && (
+        <span className="font-data shrink-0 rounded-[4px] border border-border bg-card px-1.5 py-0.5 text-[10px] leading-4 font-semibold normal-case tracking-normal text-emerald-400">
+          +{nuevas} nuevas
+        </span>
+      )}
+    </button>
+  );
+}
+
 function ContenidoNav({
   vista,
   onVista,
   badges,
+  puente,
 }: {
   vista: VistaId;
   onVista: (v: VistaId) => void;
@@ -198,6 +262,8 @@ function ContenidoNav({
     anomalias: number;
     recepcion: number;
   };
+  /** KIT puente-remoto-v1 — estado del poller para el bloque del footer. */
+  puente: EstadoPuenteRemoto & { sincronizarAhora: () => void };
 }) {
   // D20 — filtro del sidebar: fuera las entradas de módulos inactivos
   // (su badge dinámico desaparece con ellas; el de anomalías queda).
@@ -240,6 +306,9 @@ function ContenidoNav({
       <div className="mt-auto">
         <Separator />
         <div className="p-3">
+          {/* KIT puente-remoto-v1 — estado del hub del digitalizador;
+              clic = sincronizar ahora + abrir Recepción. */}
+          <BloquePuenteRemoto puente={puente} onVerRecepcion={() => onVista("recepcion")} />
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" className={CLASE_ITEM}>
@@ -308,6 +377,10 @@ function ShellInterno() {
   const [vista, setVista] = useState<VistaId>("monitor");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  // KIT puente-remoto-v1 — productor remoto: al montar (800 ms) repuebla
+  // TODO el histórico del hub; luego polling cada 8 s (visible + sin
+  // ciclo en curso). Publica vía publicarActaMasiva → monitor/recepción.
+  const puente = usePuenteRemoto();
   // D28 — llegadas mientras el supervisor NO está mirando la recepción
   // (badge del sidebar; se anula al abrir la vista).
   const [recepcionesNuevas, setRecepcionesNuevas] = useState(0);
@@ -380,6 +453,7 @@ function ShellInterno() {
             anomalias: anomaliasAbiertas,
             recepcion: recepcionesNuevas,
           }}
+          puente={puente}
         />
       </div>
 

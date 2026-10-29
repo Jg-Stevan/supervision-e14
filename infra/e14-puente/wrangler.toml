@@ -1,0 +1,11 @@
+name = "e14-puente"
+main = "src/index.ts"
+compatibility_date = "2026-10-24"
+account_id = "d6515fed257a88a14348718d0a45f4be"
+workers_dev = true
+
+# D1 compartido con el ecosistema E-14 (misma BD que usa el worker e14-masiva)
+[[d1_databases]]
+binding = "DB"
+database_name = "e14-envios-remoto-masiva"
+database_id = "f4db6e47-e1fc-4066-890c-282bbb113f61"
