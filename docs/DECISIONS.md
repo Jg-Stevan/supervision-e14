@@ -1138,3 +1138,40 @@ publicaciones quedan para decisión del dueño (el memo ya elimina el peaje por 
 negocio, sondeo/prescan/dhash, persistMs (contrato D61), `store.ts` de la masiva,
 workflows (D39: la retractación del hallazgo de CI quedó registrada — `branches: [main]`
 SIEMPRE fue válido).
+
+## D43 — KIT perfil-dev-v1: módulo perfil-dispositivo organizado + MODO DESARROLLADOR
+
+**Fecha:** 2026-02-16 · **Origen:** pedido del dueño antes del lanzamiento público: «el módulo
+de perfil del dispositivo está muy desorganizado» y «ocúltalo como en modo desarrollador — no
+quiero cosas tan técnicas de desarrollador a la vista».
+
+**Qué cambia.**
+1. **Organización (cero cambio visual):** panel-perfil.tsx (861 líneas) se divide por
+   responsabilidad — `components/piezas.tsx` (KpiPerfil/Tarjeta/Fila/SiNo + formatos),
+   `lib/diagnostico.ts` (capa NO-UI: resolución del motor por el router, catálogo D6 de
+   opciones y diagnosticoJson), y las secciones `seccion-recursos` / `seccion-autonomia`
+   (D38 + selector motor fase 5/5b) / `seccion-plan` / `seccion-evidencia`, compuestas por
+   `vista-perfil.tsx` (solo cabecera + KPIs + composición). El provider, domain y lib de
+   detección quedan intactos.
+2. **Modo desarrollador:** `modo-desarrollador.tsx` — provider + `useModoDesarrollador()`.
+   El módulo perfil-dispositivo (entrada del sidebar, chip GAMA del header y vista) SOLO
+   existe con el modo ACTIVO. Estado inicial APAGADO determinista (hydration-safe, export
+   estático intacto); persistencia en localStorage `e14-modo-desarrollador`; al desactivar
+   se BORRA la marca (cero rastro). Activación: gesto de 5 toques ≤ 2,5 s sobre el logo E-14
+   del menú (alterna, con toast) o URL `?dev=1` (persiste). Con el modo activo, el ítem del
+   sidebar muestra marca «DEV» y el pie del menú ofrece «MODO DESARROLLADOR ON» para apagarlo
+   (un clic — y si se estaba mirando el perfil, la vista cae al monitor).
+3. **Defensa en profundidad:** `MODULOS_SOLO_DEV=["perfil"]` (par de D20), filtro del sidebar,
+   `elegirVista` rechaza «perfil» sin modo, `VistaActual` cae al monitor, chip GAMA oculto.
+   El público no encuentra NINGUNA referencia técnica al pipeline.
+
+**Qué NO se tocó (conservador):** perfil-provider.tsx (ciclo hydration-safe de 4 pasos),
+domain/tipos.ts, lib de detección (senales/benchmark/clasificador/recomendaciones), la capa
+adaptativa gama.ts (D74/D38) ni su chip dentro de Carga Masiva, flags/politica/router-ocr.
+La detección sigue corriendo (el tier alimenta a la masiva §4.4) — lo que desaparece es la
+UI técnica, no la observabilidad interna.
+
+**Verificación:** tsc --noEmit → 9 TS2307 pre-existentes (baseline 9 = 9) · eslint 0/0 ·
+E2E agent-browser: sin modo ⇒ sin entrada, sin chip, header limpio; 5 toques ⇒ toast +
+entrada DEV + vista completa + gestor ON; apagar ⇒ monitor + entrada desaparece; ?dev=1 ⇒
+re-activa tras recarga. Cero errores de consola.

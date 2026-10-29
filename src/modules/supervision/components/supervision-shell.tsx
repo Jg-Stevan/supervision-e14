@@ -15,10 +15,12 @@ import {
   Inbox,
   LogOut,
   Menu,
+  Terminal,
   Upload,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -45,11 +47,19 @@ import { MasivaView as VistaCargaMasiva } from "@/modules/digitalizador/componen
 // perfil-dispositivo): detección de gama/forma + panel de diagnóstico.
 // El provider monta UNA vez en el shell; la vista y el chip del header
 // consumen por el hook. (Paridad de tier con la capa de MASIVA §4.4.)
+// D43 — la vista SOLO es alcanzable en MODO DESARROLLADOR (perfil-dev-v1):
+// la app sale al público y nada técnico debe ser visible sin él.
 import {
   PerfilProvider,
   usePerfilRecursos,
 } from "@/modules/perfil-dispositivo/perfil-provider";
-import { VistaPerfil } from "@/modules/perfil-dispositivo/components/panel-perfil";
+import { VistaPerfil } from "@/modules/perfil-dispositivo/components/vista-perfil";
+import {
+  GESTO_TOQUES,
+  GESTO_VENTANA_MS,
+  ModoDevProvider,
+  useModoDesarrollador,
+} from "@/modules/perfil-dispositivo/modo-desarrollador";
 import { tonoTier } from "@/modules/perfil-dispositivo/lib/clasificador";
 import { etiquetaForma } from "@/modules/perfil-dispositivo/lib/senales";
 
@@ -77,6 +87,18 @@ type VistaId =
 export const MODULOS_INACTIVOS: readonly VistaId[] = [
   "notificaciones",
   "informes",
+];
+
+/**
+ * D43 (KIT perfil-dev-v1) — módulos SOLO DESARROLLADOR: visibles únicamente
+ * con el modo desarrollador ACTIVO (gesto: 5 toques sobre el logo E-14 del
+ * menú · o abrir la app con ?dev=1). La app sale al público: el diagnóstico
+ * del dispositivo (señales, benchmark, router OCR, overrides) es material
+ * técnico y NO se le muestra al usuario final. Mismo espíritu que D20 —
+ * el código queda intacto; ocultar/ mostrar = esta lista + el modo.
+ */
+export const MODULOS_SOLO_DEV: readonly VistaId[] = [
+  "perfil",
 ];
 
 interface ItemNav {
@@ -134,11 +156,14 @@ function ItemNavBoton({
   item,
   activo,
   badge,
+  devVisible,
   onSelect,
 }: {
   item: ItemNav;
   activo: boolean;
   badge?: number;
+  /** D43 — true si el ítem solo existe en modo desarrollador (muestra DEV). */
+  devVisible?: boolean;
   onSelect?: () => void;
 }) {
   const { Icono, etiqueta } = item;
@@ -159,6 +184,13 @@ function ItemNavBoton({
         aria-hidden
       />
       <span className="flex-1 leading-4">{etiqueta}</span>
+      {/* D43 — marca discreta del ítem solo-desarrollador (solo lo ve el
+          dueño con el modo activo — el público jamás renderiza esto). */}
+      {devVisible && (
+        <span className="font-data rounded-[4px] border border-(--primary)/40 bg-(--primary)/10 px-1 py-0.5 text-[9px] leading-4 font-semibold uppercase text-(--primary)">
+          DEV
+        </span>
+      )}
       {/* T5/T6: badge = contador dinámico (sin número si es 0). */}
       {typeof badge === "number" && badge > 0 && (
         <span className="font-data rounded-[4px] border border-border bg-(--surface) px-1.5 py-0.5 text-[10px] leading-4 font-semibold normal-case tracking-normal text-muted-foreground">
@@ -169,13 +201,31 @@ function ItemNavBoton({
   );
 }
 
-function BloqueLogo({ onCerrar }: { onCerrar?: () => void }) {
+function BloqueLogo({
+  onCerrar,
+  onToqueLogo,
+}: {
+  onCerrar?: () => void;
+  /** D43 — el logo E-14 recibe el gesto (5 toques seguidos) que alterna
+   *  el MODO DESARROLLADOR. Sin gesto registrado: es un clic normal sin
+   *  efecto — el público no descubre nada (el texto no sugiere interacción
+   *  más allá del title discreto). */
+  onToqueLogo?: () => void;
+}) {
   return (
     <div className="relative border-b border-border px-4 py-4">
-      <p className="headline-lg">E-14</p>
-      <p className="label-caps mt-1 text-muted-foreground">
-        Módulo de monitoreo y auditoría
-      </p>
+      <button
+        type="button"
+        onClick={onToqueLogo}
+        title="Modo desarrollador: 5 toques seguidos aquí (o abrir con ?dev=1)"
+        aria-label="Logo E-14 — alternar modo desarrollador (5 toques seguidos)"
+        className="block w-full rounded-[4px] text-left focus-visible:outline-2 focus-visible:outline-(--primary)"
+      >
+        <p className="headline-lg">E-14</p>
+        <p className="label-caps mt-1 text-muted-foreground">
+          Módulo de monitoreo y auditoría
+        </p>
+      </button>
       {onCerrar && (
         <button
           type="button"
@@ -212,9 +262,15 @@ function ContenidoNav({
 }) {
   // D20 — filtro del sidebar: fuera las entradas de módulos inactivos
   // (su badge dinámico desaparece con ellas; el de anomalías queda).
+  // D43 — filtro de módulos SOLO DEV: sin modo desarrollador, la entrada
+  // del perfil NO existe para el público (y el chip GAMA tampoco — ver
+  // ChipGamaHeader). Con el modo activo, vuelve CON su marca DEV.
+  const { activo: devActivo, desactivar: desactivarDev } = useModoDesarrollador();
   const itemsVisibles = ITEMS_NAV.filter(
     (item) =>
-      item.vista === undefined || !MODULOS_INACTIVOS.includes(item.vista)
+      item.vista === undefined ||
+      (!MODULOS_INACTIVOS.includes(item.vista) &&
+        (devActivo || !MODULOS_SOLO_DEV.includes(item.vista)))
   );
   return (
     <TooltipProvider delayDuration={150}>
@@ -234,6 +290,9 @@ function ContenidoNav({
               item={item}
               activo={item.vista === vista}
               badge={badge}
+              devVisible={
+                item.vista !== undefined && MODULOS_SOLO_DEV.includes(item.vista)
+              }
               onSelect={item.vista ? () => onVista(item.vista as VistaId) : undefined}
             />
           );
@@ -249,6 +308,28 @@ function ContenidoNav({
         })}
       </nav>
       <div className="mt-auto">
+        {/* D43 — gestor del modo desarrollador: SOLO existe con el modo
+            activo (el público jamás lo ve). Un clic lo apaga y si se
+            estaba mirando el perfil, la vista cae al monitor. */}
+        {devActivo && (
+          <div className="p-3 pb-0">
+            <button
+              type="button"
+              onClick={() => {
+                desactivarDev();
+                toast.success("Modo desarrollador DESACTIVADO");
+              }}
+              aria-label="Desactivar modo desarrollador"
+              className="label-caps flex h-11 w-full items-center gap-3 rounded-[4px] border border-(--primary)/40 px-3 text-left text-(--primary) hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+            >
+              <Terminal className="size-4 shrink-0" aria-hidden />
+              <span className="flex-1 leading-4">Modo desarrollador</span>
+              <span className="font-data rounded-[4px] border border-(--primary)/40 bg-(--primary)/10 px-1.5 py-0.5 text-[10px] leading-4 font-semibold text-(--primary)">
+                ON
+              </span>
+            </button>
+          </div>
+        )}
         <Separator />
         <div className="p-3">
           <Tooltip>
@@ -281,6 +362,10 @@ function VistaActual({
   vista: VistaId;
   onVerEnMonitor?: ComponentProps<typeof VistaCargaMasiva>["onVerEnMonitor"];
 }) {
+  // D43 — el perfil es SOLO desarrollador: si llegara por estado sin el
+  // modo activo (imposible hoy — el sidebar lo oculta y elegirVista
+  // rechaza), cae al monitor. Mismo patrón D20 de vistas dormidas.
+  const { activo: devActivo } = useModoDesarrollador();
   switch (vista) {
     case "anomalias":
       return <VistaAnomalias />;
@@ -290,8 +375,8 @@ function VistaActual({
     case "carga-masiva":
       return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
     case "perfil":
-      // KIT perfil-recursos-v1 — diagnóstico del dispositivo.
-      return <VistaPerfil />;
+      // KIT perfil-recursos-v1 — diagnóstico del dispositivo (solo dev).
+      return devActivo ? <VistaPerfil /> : <VistaMonitor />;
     default:
       return <VistaMonitor />;
   }
@@ -313,7 +398,11 @@ function VistaActual({
  * arranca PENDIENTE en SSR — cero mismatch) y abre la vista `perfil`.
  */
 function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
+  // D43 — el chip GAMA es una referencia técnica (abre el diagnóstico):
+  // SOLO se muestra en modo desarrollador. El público ve un header limpio.
+  const { activo: devActivo } = useModoDesarrollador();
   const { perfil } = usePerfilRecursos();
+  if (!devActivo) return null;
   if (!perfil.listo || perfil.tier === "PENDIENTE" || !perfil.senales) return null;
   const color =
     tonoTier(perfil.tier) === "success"
@@ -342,9 +431,13 @@ function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
 export function SupervisionShell() {
   return (
     <PerfilProvider>
-      <DatosProvider>
-        <ShellInterno />
-      </DatosProvider>
+      {/* D43 — el MODO DESARROLLADOR envuelve el shell: apagado, el módulo
+          perfil-dispositivo no existe en la UI (nav + chip + vista). */}
+      <ModoDevProvider>
+        <DatosProvider>
+          <ShellInterno />
+        </DatosProvider>
+      </ModoDevProvider>
     </PerfilProvider>
   );
 }
@@ -352,6 +445,13 @@ export function SupervisionShell() {
 function ShellInterno() {
   const { notificacionesNoLeidas, anomaliasAbiertas, cargando, abrirVisor } =
     useDatos();
+  // D43 — modo desarrollador: sin él, el módulo perfil-dispositivo NO
+  // existe en la UI (entrada del sidebar, chip GAMA y vista).
+  const {
+    activo: devActivo,
+    activar: activarDev,
+    desactivar: desactivarDev,
+  } = useModoDesarrollador();
   const [vista, setVista] = useState<VistaId>("monitor");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -372,6 +472,12 @@ function ShellInterno() {
     });
   }, []);
 
+  // D43 — si el modo desarrollador se apaga mientras se miraba el perfil,
+  // la vista cae al monitor (el módulo deja de existir — paridad con D20).
+  useEffect(() => {
+    if (!devActivo && vista === "perfil") setVista("monitor");
+  }, [devActivo, vista]);
+
   // Escape cierra el overlay (kit T1) + bloqueo de scroll de fondo.
   useEffect(() => {
     if (!menuAbierto) return;
@@ -388,7 +494,30 @@ function ShellInterno() {
     };
   }, [menuAbierto]);
 
+  // D43 — GESTO del logo: 5 toques seguidos (≤ 2,5 s entre toques) alternan
+  // el modo desarrollador. Un solo clic queda sin efecto alguno — el
+  // público no descubre nada; el dueño sí tiene una puerta sin teclado.
+  const toquesRef = useRef<number[]>([]);
+  const toqueLogo = () => {
+    const ahora = Date.now();
+    const toques = toquesRef.current.filter((t) => ahora - t <= GESTO_VENTANA_MS);
+    toques.push(ahora);
+    toquesRef.current = toques;
+    if (toques.length < GESTO_TOQUES) return;
+    toquesRef.current = []; // el gesto se consume
+    if (devActivo) {
+      desactivarDev();
+      toast.success("Modo desarrollador DESACTIVADO — la app queda en vista pública");
+    } else {
+      activarDev();
+      toast.success("Modo desarrollador ACTIVADO — «Perfil del dispositivo» visible");
+    }
+  };
+
   const elegirVista = (v: VistaId) => {
+    // D43 — defensa en profundidad: el perfil es inalcanzable sin modo
+    // desarrollador (el filtro del sidebar ya lo oculta; esto lo remata).
+    if (v === "perfil" && !devActivo) return;
     setVista(v);
     if (v === "recepcion") setRecepcionesNuevas(0); // D28 — leídas al abrir
     setMenuAbierto(false); // el overlay cede el paso a la vista elegida
@@ -418,7 +547,10 @@ function ShellInterno() {
           !menuAbierto && "hidden"
         )}
       >
-        <BloqueLogo onCerrar={() => setMenuAbierto(false)} />
+        <BloqueLogo
+          onCerrar={() => setMenuAbierto(false)}
+          onToqueLogo={toqueLogo}
+        />
         <ContenidoNav
           vista={vista}
           onVista={elegirVista}
