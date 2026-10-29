@@ -66,9 +66,11 @@ import { etiquetaForma } from "@/modules/perfil-dispositivo/lib/senales";
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
  * (el export estático sigue siendo trivial: una sola página).
  *
- * KIT SUP-5 (D20): "notificaciones" e "informes" quedan DORMIDAS — sus
- * componentes y su lógica en el store permanecen intactos e inalcanzables
- * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista. */
+ * KIT SUP-5 (D20): "notificaciones", "informes" y "anomalias" quedan
+ * DORMIDAS — sus componentes y su lógica en el store permanecen intactos
+ * e inalcanzables (ver MODULOS_INACTIVOS); reactivar la entrada = editar
+ * esa lista. "anomalias" se suma al retiro por decisión del dueño
+ * (rama feat/ocr-era-ux-v1): ni informes ni anomalías en el público. */
 type VistaId =
   | "monitor"
   | "recepcion"
@@ -87,6 +89,7 @@ type VistaId =
 export const MODULOS_INACTIVOS: readonly VistaId[] = [
   "notificaciones",
   "informes",
+  "anomalias",
 ];
 
 /**
