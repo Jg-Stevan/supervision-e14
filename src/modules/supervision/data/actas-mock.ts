@@ -214,22 +214,19 @@ function esRomaMesa1(puestoId: string, mesaId: string): boolean {
   return puestoId === ID_ENLACE_ROMA && mesaId === "001";
 }
 
-// ─── El Cairo mesa 1: acta REAL del digitalizador (SUP-6 / D26) ──────────
-
-/** ANCLA DE PRÁCTICA (SUP-6 §2.3 / D26): El Cairo - Consulado (EGIPTO).
- * Constante local (evita ciclo con mock-repository). */
-const ID_ENLACE_CAIRO = "88_335_005_02";
-
-function esCairoMesa1(puestoId: string, mesaId: string): boolean {
-  return puestoId === ID_ENLACE_CAIRO && mesaId === "001";
-}
+// ─── Acta REAL del digitalizador (SUP-6 / D26 · generalizada D44) ────────
 
 /** Acta REAL del ancla (D26): la realidad impresa trae 2 páginas por
  * formulario (TRANSMISIÓN P1/P2 y CÓNSUL/EMBAJADOR P1/P2, todas VALIDA —
  * la mesa está forzada a COMPLETO), `fotos` del loader + `impresion`
  * verbatim del manifest. id/hora/historial generados por seed como
- * cualquier acta (mismas reglas, sin textos custom — kit T4.2). */
-function construirActaRealCairo(
+ * cualquier acta (mismas reglas, sin textos custom — kit T4.2).
+ *
+ * actas-reales-v2 (D44): GENERALIZADA — la paginación DELEGADOS sale del
+ * largo REAL del registro (2 páginas CÓNSUL/EMBAJADOR en los 3 anclas);
+ * cualquier mesa con clave en el loader cae aquí (hoy El Cairo y
+ * Barcelona-Girona — forzada COMPLETO en mock-repository, D44). */
+function construirActaReal(
   mesa: Mesa,
   puesto: Puesto,
   registroReal: ActaRealLista
@@ -240,11 +237,15 @@ function construirActaRealCairo(
   const minutosCarga = 13 * 60 + Math.floor(random() * (4 * 60 - 14));
   const id = generarIdActa(seed);
   const formularios = paginasDeMesa(mesa, puesto);
-  // Realidad impresa del formulario CÓNSUL/EMBAJADOR (2 páginas — D26).
-  formularios.DELEGADOS = [
-    { numero: 1, estado: "VALIDA" },
-    { numero: 2, estado: "VALIDA" },
-  ];
+  // Realidad impresa del formulario CÓNSUL/EMBAJADOR: tantas páginas
+  // VALIDA como fotos reales del registro (2 en los anclas actuales — D26/D44).
+  const fotosDelegados = registroReal.fotos.DELEGADOS;
+  if (fotosDelegados && fotosDelegados.length > 0) {
+    formularios.DELEGADOS = fotosDelegados.map((_, i) => ({
+      numero: i + 1,
+      estado: "VALIDA" as const,
+    }));
+  }
   return {
     id,
     mesaId: mesa.id,
@@ -296,20 +297,37 @@ export function obtenerActa(mesa: Mesa, puesto: Puesto): ActaMesa | null {
   if (enCache) return clonarActa(enCache);
 
   if (esRomaMesa1(puesto.id, mesa.id)) {
-    CACHE_ACTAS[clave] = clonarActa(ROMA_MESA_1);
-    return clonarActa(ROMA_MESA_1);
+    const ancla = clonarActa(ROMA_MESA_1);
+    // actas-reales-v2 (D44): si el loader trae el registro real de Roma
+    // mesa 001, el ANCLA recibe sus FOTOS (ranuras CÓNSUL/EMBAJADOR P1/P2)
+    // + encabezado impreso verbatim + paginación DELEGADOS real. Los textos
+    // del ancla (id #A92-F, hora, motivo, historial — §0-6) quedan INTACTOS:
+    // la foto se UBICA, no se interpreta (§0-1); TRANSMISIÓN sigue sintética
+    // (sin fotos reales — honesto).
+    const registroRoma = cargarActasReales().actas[clave];
+    if (registroRoma) {
+      const fotosDelegados = registroRoma.fotos.DELEGADOS;
+      if (fotosDelegados && fotosDelegados.length > 0) {
+        ancla.formularios.DELEGADOS = fotosDelegados.map((_, i) => ({
+          numero: i + 1,
+          estado: "VALIDA" as const,
+        }));
+      }
+      ancla.fotos = registroRoma.fotos;
+      ancla.impresion = registroRoma.impresion;
+    }
+    CACHE_ACTAS[clave] = clonarActa(ancla);
+    return clonarActa(ancla);
   }
 
-  // D26: ancla El Cairo mesa 001 → acta real (fotos + impresión). Si el
-  // loader la dejó en cuarentena (D25) cae al sintético como cualquier
-  // otra mesa — nada se improvisa.
-  if (esCairoMesa1(puesto.id, mesa.id)) {
-    const registroReal = cargarActasReales().actas[clave];
-    if (registroReal) {
-      const acta = construirActaRealCairo(mesa, puesto, registroReal);
-      CACHE_ACTAS[clave] = acta;
-      return clonarActa(acta);
-    }
+  // D26/D44: cualquier mesa con registro real en el loader → acta real
+  // (fotos + impresión). Si el loader la dejó en cuarentena (D25) cae al
+  // sintético como cualquier otra mesa — nada se improvisa.
+  const registroReal = cargarActasReales().actas[clave];
+  if (registroReal) {
+    const acta = construirActaReal(mesa, puesto, registroReal);
+    CACHE_ACTAS[clave] = acta;
+    return clonarActa(acta);
   }
 
   const seed = `${puesto.id}::mesa-${mesa.id}`;
