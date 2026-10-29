@@ -1175,3 +1175,48 @@ UI técnica, no la observabilidad interna.
 E2E agent-browser: sin modo ⇒ sin entrada, sin chip, header limpio; 5 toques ⇒ toast +
 entrada DEV + vista completa + gestor ON; apagar ⇒ monitor + entrada desaparece; ?dev=1 ⇒
 re-activa tras recarga. Cero errores de consola.
+
+## D44 — KIT autonomia-ui-v1: la app DECIDE los recursos de UI/arranque (plan recomendado → APLICADO)
+
+Petición del dueño tras ocultar la técnica al público (D43): «que el proyecto
+sea lo suficientemente autónomo para decidir sobre los recursos con los que
+cuenta en cada dispositivo». D74/D38 ya automatiza los presupuestos del
+PIPELINE (pool/threads/warp/prescan/watchdog/master/QR/dhash); D44 completa
+la autonomía con lo que faltaba y vuelve HONESTA la tabla del plan:
+
+1. **COLUMNA ESTADO del plan** (seccion-plan): cada fila muestra su estado
+   REAL — `● AUTOMÁTICO` (la capa adaptativa lo aplica), `● BASE` (el base
+   ya es lo óptimo), `◉ TU OVERRIDE` (el dueño fijó la clave — D6 manda) u
+   `○ SUGERENCIA` (catálogo sin consumidor todavía). Derivado de
+   planGamaActual + flagsMasivaEfectivos + overrides REALES, jamás del texto
+   de la recomendación. Resuelto EN MONTAJE (hydration-safe, par de D38).
+2. **ANIMACIONES DE UI** (nuevo consumidor): tier BAJO ⇒
+   `<html data-anim="reducidas">` — CSS puro en globals.css (transiciones
+   80 ms, keyframes 0.6 s — los spinners siguen girando —, scroll auto):
+   menos re-raster en scroll de bandejas grandes. MEDIO/ALTO ⇒ sin atributo
+   (byte-idéntico a hoy).
+3. **PRECARGA DEL MOTOR OCR EN IDLE** (nuevo consumidor — cierra el plan
+   «Precarga de modelos»): plan.preloadModelos (gama ≠ BAJO) ∧ red holgada
+   (¬sincronizarSoloWifi — respeta saveData/datos del dueño) ⇒ en idle
+   (requestIdleCallback, fallback 3 s) import dinámico de rapidocr +
+   `rapidOcrPrecalentar()` (e14-prowarm: UNA inferencia dummy — la 1.ª acta
+   del día ya no paga ~27 s de frío). 1 vez por sesión; fallo ⇒ frío como
+   siempre (el pipeline jamás depende de esto).
+4. **FLAG `uiAdaptativaGama`** (default ON) — kill-switch ÚNICO de la
+   autonomía UI/arranque; `false` = byte-idéntico a hoy. DOBLE whitelist
+   registrada (sanearFlags + leerOverridesFlags — cada puerta su línea). El
+   override MANUAL del dueño manda clave a clave (flagsMasivaEfectivos ya lo
+   garantiza para el pipeline; el kill-switch cubre los consumidores nuevos).
+5. **HONESTIDAD del catálogo** (recomendaciones.ts): el pool ALTO recomienda
+   2 SOLO con hilos WASM reales (misma regla que aplica gama.ts — antes la
+   tabla decía 2 en ALTO mono-hilo y la app NO lo aplicaba); «Caché de
+   thumbnails» y «Sincronización de datos» quedan como SUGERENCIA explícita
+   (sin consumidor v1 — no fingir autonomía). Filas con `clave` estable
+   (id para estadosPlan).
+
+**Qué NO se tocó (conservador):** gama.ts (D74/D38 — presupuestos y
+gobernador intactos), router-ocr, runner/*, store, supervision-shell (el
+provider del perfil ya envolvía toda la app — el efecto D44 corre en el
+montaje del PerfilProvider, público incluido).
+
+**Verificación:** tsc --noEmit → baseline igualada · eslint 0/0.

@@ -24,6 +24,9 @@ import {
 import { toast } from "sonner";
 import { cn } from "cn";
 import { usePerfilRecursos } from "../perfil-provider";
+// KIT autonomia-ui-v1 (D44) — estado REAL de las filas de UI/arranque
+// (precarga + animaciones) derivado del plan aplicado, no del catálogo.
+import { estadosPlan } from "../lib/autonomia";
 import {
   ETIQUETA_MOTOR,
   OPCIONES_MOTOR,
@@ -56,7 +59,7 @@ import type { PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 import { Fila } from "./piezas";
 
 export function SeccionAutonomia() {
-  const { perfil } = usePerfilRecursos();
+  const { perfil, plan } = usePerfilRecursos();
 
   // D38 — estado de autonomía (plan aplicado AHORA por gama.ts). Se resuelve
   // EN MONTAJE (no en render) para hydration-safe con el export estático;
@@ -78,6 +81,8 @@ export function SeccionAutonomia() {
          *  la advertencia honesta del selector + estado del castigo v5. */
         motorSinOverride: ReturnType<typeof resolverRecomendacionRouter>;
         castigoV5: { probadoHaceMs: number; msRestantes: number } | null;
+        /** KIT autonomia-ui-v1 (D44) — estado real de precarga/animaciones. */
+        estadosUi: ReturnType<typeof estadosPlan>;
       }
   >(null);
   // D38 — resolución EN MONTAJE (no en render) para hydration-safe con el
@@ -95,11 +100,12 @@ export function SeccionAutonomia() {
         motor: resolverMotorDelDispositivo(perfil),
         motorSinOverride: resolverRecomendacionRouter(perfil),
         castigoV5: infoCastigoV5(),
+        estadosUi: estadosPlan(plan),
       });
     } catch {
       setAuto(null); // jamás tumba el panel
     }
-  }, [perfil]);
+  }, [perfil, plan]);
   useEffect(() => {
     resolverAuto();
   }, [resolverAuto]);
@@ -199,6 +205,18 @@ export function SeccionAutonomia() {
           />
           <Fila k="Pool OCR efectivo" v={`${auto.poolOcr} worker(s)`} />
           <Fila k="Hilos OCR efectivos" v={String(auto.hilosOcr)} />
+          {/* KIT autonomia-ui-v1 (D44) — los dos consumidores nuevos de la
+              autonomía de UI/arranque, con su estado REAL (no el catálogo). */}
+          <Fila
+            k="Precarga de modelos"
+            v={auto.estadosUi.precarga?.aplicado ?? "—"}
+            titulo={auto.estadosUi.precarga?.detalle}
+          />
+          <Fila
+            k="Animaciones de UI"
+            v={auto.estadosUi.animaciones?.aplicado ?? "—"}
+            titulo={auto.estadosUi.animaciones?.detalle}
+          />
           {/* KIT ocr-router-v1 — el motor que correría HOY en este equipo
               y el porqué (auditable también en el JSON del informe: campo
               motorOcr). */}
@@ -337,10 +355,13 @@ export function SeccionAutonomia() {
         )}
         <p className="body-md mt-3 text-muted-foreground">
           La app administra los recursos sola: detecta el equipo, aplica presupuestos
-          (CPU/memoria/reló) y se degrada preventivamente bajo presión observada (hard-kills).
+          (CPU/memoria/reló), reduce animaciones en gama baja y precarga el motor OCR
+          en idle (D44). Se degrada preventivamente bajo presión observada (hard-kills).
           Jamás toca criterios ni score. Tu override manual manda clave a clave (D6) y{" "}
           <code className="font-data text-(--primary)">masivaAdaptativoGama=false</code> apaga
-          toda la autonomía.
+          la autonomía del pipeline mientras que{" "}
+          <code className="font-data text-(--primary)">uiAdaptativaGama=false</code> apaga la de
+          UI/arranque.
         </p>
       </div>
     </section>

@@ -10,6 +10,13 @@
  * de forma ACOTADA y REVOCABLE (cada consumidor decide; el override manual
  * del dueño manda siempre). Nada aquí configura la app solo.
  *
+ * D44 (KIT autonomia-ui-v1 — excepción BOUNDADA al espíritu D6, misma
+ * naturaleza que D74): autonomia.ts aplica en automático los recursos de
+ * UI/ARRANQUE que este plan recomienda (animaciones BAJO + precarga OCR
+ * en idle ≠ BAJO, respetando saveData) — kill-switch uiAdaptativaGama.
+ * El pool ALTO aquí es HONESTO con la misma regla que aplica gama.ts
+ * (2 SOLO con hilos WASM reales).
+ *
  * Tabla base = flags/defaults del pipeline (FLAGS_DEFAULT + gama.ts BASE).
  */
 import type { FilaRecomendacion, PlanRecursos, RecursoSenales, Tier } from "../domain/tipos";
@@ -24,7 +31,11 @@ export function planRecomendado(tier: Tier, senales: RecursoSenales | null): Pla
       senales?.sync.saveData === true ||
       (senales?.sync.redTipo !== null && senales?.sync.redTipo !== undefined && senales.sync.redTipo !== "4g");
 
-    const poolWorkers = esBajo ? 1 : esAlto ? 2 : 1;
+    // D44 — hilosWasmActivos PRIMERO: el pool ALTO es honesto con la MISMA
+    // regla que aplica gama.ts (amplifica a 2 SOLO con hilos WASM reales —
+    // antes la tabla recomendaba 2 en ALTO mono-hilo y la app no lo aplicaba).
+    const hilosWasmActivos = (senales?.runtime.wasmHilos ?? false) && !esBajo;
+    const poolWorkers = esBajo ? 1 : esAlto && hilosWasmActivos ? 2 : 1;
     const ocrThreads = esBajo ? 2 : 4;
     const masterLadoMayor = esBajo ? 3072 : 4032;
     const precalorCola = esBajo ? 1 : esAlto ? 3 : 2;
@@ -32,21 +43,24 @@ export function planRecomendado(tier: Tier, senales: RecursoSenales | null): Pla
     const cacheThumbsMB = esBajo ? 32 : esAlto ? 128 : 64;
     const preloadModelos = !esBajo;
     const animaciones = esBajo ? "reducidas" : esAlto ? "completas" : "normales";
-    const hilosWasmActivos = (senales?.runtime.wasmHilos ?? false) && !esBajo;
 
     const filas: FilaRecomendacion[] = [
       {
+        clave: "pool",
         parametro: "Workers del pool OCR",
         base: "1 (flag poolWorkers)",
         recomendado: `${poolWorkers}`,
         nota:
-          esAlto
-            ? "≥ 6 núcleos sin competencia: el segundo worker amortiza el arranque frío"
+          esAlto && hilosWasmActivos
+            ? "≥ 6 núcleos + hilos WASM reales: el segundo worker amortiza el arranque frío (D38)"
             : esBajo
               ? "Dos OCR en paralelo se reparten el mismo CPU sin ganancia y la UI sufre (e71)"
-              : "Sin ganancia medida en gama media — se conserva el base",
+              : esAlto
+                ? "Sin aislamiento COOP/COEP los wasm corren mono-hilo — se conserva el base (honesto)"
+                : "Sin ganancia medida en gama media — se conserva el base",
       },
       {
+        clave: "hilos",
         parametro: "Hilos de OCR",
         base: "4 (flag ocrThreadsTope)",
         recomendado: hilosWasmActivos ? `${ocrThreads} (hilos WASM ✓)` : `${ocrThreads}`,
@@ -55,6 +69,7 @@ export function planRecomendado(tier: Tier, senales: RecursoSenales | null): Pla
           : "Los wasm corren mono-hilo; con COOP/COEP (Cloudflare Pages) podrían usar hilos",
       },
       {
+        clave: "master",
         parametro: "Lado mayor del master",
         base: "4032 px",
         recomendado: `${masterLadoMayor} px`,
@@ -63,24 +78,28 @@ export function planRecomendado(tier: Tier, senales: RecursoSenales | null): Pla
           : "Calibración de escritorio — se conserva",
       },
       {
+        clave: "precalor",
         parametro: "Precalor de masters en memoria",
         base: "3",
         recomendado: `${precalorCola}`,
         nota: esMovil ? "En móvil el pico de RAM es el riesgo dominante" : "Cola de calentamiento estándar",
       },
       {
+        clave: "qr",
         parametro: "Capa QR — lado largo",
         base: "2048 px",
         recomendado: `${qrLadoLargo} px`,
         nota: esBajo ? "La capa 0 sin QR media 15-17 s SYNC — con menos lado salta antes a zxing" : "Se conserva",
       },
       {
+        clave: "thumbs",
         parametro: "Caché de thumbnails",
         base: "— (según vista)",
         recomendado: `${cacheThumbsMB} MB`,
         nota: esAlto ? "Caché amplia: la bandeja no re-genera miniaturas al volver" : "Caché moderada para no competir por RAM",
       },
       {
+        clave: "precarga",
         parametro: "Precarga de modelos (OCR/QR)",
         base: "al primer uso",
         recomendado: preloadModelos ? "precarga en idle" : "al primer uso",
@@ -89,12 +108,14 @@ export function planRecomendado(tier: Tier, senales: RecursoSenales | null): Pla
           : "Precarga en idle: la primera acta del día no paga el arranque frío",
       },
       {
+        clave: "animaciones",
         parametro: "Animaciones de UI",
         base: "completas",
         recomendado: animaciones,
         nota: esBajo ? "Menos re-raster en scroll de bandejas grandes" : "Coste de animación despreciable",
       },
       {
+        clave: "sync",
         parametro: "Sincronización de datos",
         base: "siempre",
         recomendado: redDebil ? "solo en wifi" : "siempre",

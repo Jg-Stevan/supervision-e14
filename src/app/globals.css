@@ -195,4 +195,24 @@
   .fila-llegada {
     animation: recepcion-llegada 1.6s ease-out 1;
   }
+
+  /* ============================================================
+     KIT autonomia-ui-v1 (D44) — animaciones de UI REDUCIDAS por gama.
+     La capa de autonomía (perfil-dispositivo/lib/autonomia.ts) marca
+     <html data-anim="reducidas"> SOLO en tier BAJO (kill-switch
+     uiAdaptativaGama). CSS puro — sin JS en caliente:
+     · transiciones acotadas a 80 ms (sigan percibiéndose pero sin
+       re-raster prolongado en scroll de bandejas grandes),
+     · keyframes acotados a 0.6 s (los spinners SIGEN girando — un
+       spinner estático confunde —, los destellos se acortan),
+     · scroll instantáneo (scroll-behavior: auto).
+     Sin el atributo: comportamiento de hoy byte-idéntico.
+     ============================================================ */
+  [data-anim="reducidas"] *,
+  [data-anim="reducidas"] *::before,
+  [data-anim="reducidas"] *::after {
+    transition-duration: 80ms !important;
+    animation-duration: 0.6s !important;
+    scroll-behavior: auto !important;
+  }
 }

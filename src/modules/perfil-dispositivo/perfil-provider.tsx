@@ -36,6 +36,10 @@ import type {
   PlanRecursos,
 } from "./domain/tipos";
 import { BENCHMARK_SIN_EJECUTAR, ejecutarBenchmark } from "./lib/benchmark";
+// KIT autonomia-ui-v1 (D44) — la autonomía de UI/arranque corre en TODA la
+// app (el provider envuelve el shell público también): animaciones por gama
+// + precarga del motor OCR en idle. Acotada y revocable (uiAdaptativaGama).
+import { aplicarAutonomiaUi } from "./lib/autonomia";
 import { clasificar, confianzaDe } from "./lib/clasificador";
 import { planRecomendado } from "./lib/recomendaciones";
 import {
@@ -196,6 +200,15 @@ export function PerfilProvider({ children }: { children: ReactNode }) {
     () => planRecomendado(perfil.tier === "PENDIENTE" ? "MEDIO" : perfil.tier, perfil.senales),
     [perfil.tier, perfil.senales],
   );
+
+  // KIT autonomia-ui-v1 (D44) — al tener el perfil listo, la app APLICA la
+  // autonomía de UI/arranque del plan (animaciones por gama + precarga OCR
+  // en idle). Efecto cliente post-montaje (hydration-safe — igual que la
+  // detección); idempotente; jamás lanza (try/catch total en el kit).
+  useEffect(() => {
+    if (!perfil.listo) return;
+    aplicarAutonomiaUi(plan);
+  }, [perfil.listo, plan]);
 
   const valor = useMemo<PerfilContexto>(
     () => ({ perfil, plan, refrescar, midiendo }),

@@ -103,6 +103,11 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // decide.
   ocrMotorAdaptativo: true,
   ocrMotor: null,
+  // KIT autonomia-ui-v1 (D44) — autonomía de UI/ARRANQUE por dispositivo:
+  // animaciones reducidas en tier BAJO + precarga del motor OCR en idle
+  // (cuando el plan la recomienda — planRecomendado().preloadModelos).
+  // false = byte-idéntico a hoy (kill-switch del dueño).
+  uiAdaptativaGama: true,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */
@@ -152,6 +157,8 @@ export function sanearFlags(o: unknown): Partial<FlagsApp> {
   // KIT ocr-router-v1 — whitelist aditiva (booleano + enum del motor).
   if (typeof p.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = p.ocrMotorAdaptativo;
   if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4" || p.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = p.ocrMotor;
+  // KIT autonomia-ui-v1 (D44) — whitelist aditiva (booleano).
+  if (typeof p.uiAdaptativaGama === "boolean") limpio.uiAdaptativaGama = p.uiAdaptativaGama;
   return limpio;
 }
 

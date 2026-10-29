@@ -150,6 +150,8 @@ export interface FlagsApp {
   // ─── KIT ocr-router-v1 — campos ADITIVOS AL FINAL (D57) ───
   ocrMotorAdaptativo: boolean; // default true — ROUTER de motor OCR por dispositivo (docs/ESTRATEGIA-ocr-router-v1.md): BAJO/MEDIO = Tesseract best+psm4 (94,4 %, ~67 MB) · ALTO+SIMD = PP-OCRv5 (100 %, ~487 MB, sonda de carga + gobernador reactivo); false = Tesseract en TODOS los dispositivos (byte-idéntico a hoy)
   ocrMotor: "ppocrv5" | "tesseract-best-psm4" | "tesseract-spa-best-psm4" | null; // default null = el ROUTER decide; no-null = override MANUAL del dueño (D6 — el router NO decide). «tesseract-spa-best-psm4» = Tesseract REAL del benchmark (tesseract.js — fase 5b)
+  // ─── KIT autonomia-ui-v1 (D44) — campo ADITIVO AL FINAL (mismo patrón D57) ───
+  uiAdaptativaGama: boolean; // default true — autonomía de UI/ARRANQUE por dispositivo: animaciones de UI reducidas en tier BAJO (data-anim en <html>, CSS puro) + PRECARGA del motor OCR en idle cuando el plan la recomienda (rapidOcrPrecalentar — la 1.ª acta del día no paga los ~27 s de frío); respeta saveData/red lenta; false = byte-idéntico a hoy (animaciones completas + sin precarga en idle) — kill-switch del dueño
 }
 
 export interface ReporteSesion {

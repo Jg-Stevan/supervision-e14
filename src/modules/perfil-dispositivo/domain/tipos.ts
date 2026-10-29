@@ -13,6 +13,12 @@
  *   cuenta. El único enforcement sigue siendo la capa adaptativa de MASIVA
  *   (gama.ts) con su flag revocable. El plan recomendado es un CATÁLOGO
  *   que los consumidores adoptan acotadamente.
+ * · D44 (KIT autonomia-ui-v1 — excepción BOUNDADA al espíritu D6, misma
+ *   naturaleza que D74): el plan ya no es solo catálogo — autonomia.ts
+ *   aplica los recursos de UI/ARRANQUE que recomienda (animaciones +
+ *   precarga OCR en idle) con kill-switch revocable uiAdaptativaGama y
+ *   la mano del dueño siempre por encima. Los estados reales de cada
+ *   fila (estadosPlan) son parte del contrato — la tabla jamás finge.
  *
  * Null HONESTO donde el navegador no da el dato (iOS: deviceMemory,
  * batería, performance.memory — jamás inventar).
@@ -125,8 +131,12 @@ export interface PerfilRecursos {
   benchmark: BenchmarkResultado;
 }
 
-/** Una fila del plan de recursos recomendado (tabla del panel). */
+/** Una fila del plan de recursos recomendado (tabla del panel).
+ *  KIT autonomia-ui-v1 (D44): `clave` es el id ESTABLE de la fila —
+ *  estadosPlan() la usa para anclar el estado real (auto/base/override/
+ *  sugerencia) sin depender del texto humano del parámetro. */
 export interface FilaRecomendacion {
+  clave: string;
   parametro: string;
   base: string;
   recomendado: string;

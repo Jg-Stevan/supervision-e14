@@ -166,6 +166,11 @@ export function leerOverridesFlags(): Partial<FlagsApp> {
     // línea).
     if (typeof o.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = o.ocrMotorAdaptativo;
     if (o.ocrMotor === "ppocrv5" || o.ocrMotor === "tesseract-best-psm4" || o.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = o.ocrMotor;
+    // KIT autonomia-ui-v1 (D44) — mismo criterio: sin esta línea el override
+    // localStorage del kill-switch `uiAdaptativaGama` (false = animaciones
+    // completas + sin precarga en idle, byte-idéntico a hoy) sería
+    // inalcanzable (DOBLE whitelist — cada puerta su línea).
+    if (typeof o.uiAdaptativaGama === "boolean") limpio.uiAdaptativaGama = o.uiAdaptativaGama;
     return limpio;
   } catch {
     return {};
