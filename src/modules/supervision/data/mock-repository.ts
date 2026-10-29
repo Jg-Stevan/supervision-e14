@@ -54,6 +54,13 @@ import {
  * la mesa 001 sirve el acta real del digitalizador (kit actas-reales-v1). */
 export const ID_ENLACE_CAIRO = "88_335_005_02";
 
+/** ANCLA DE PRÁCTICA #2 (actas-reales-v2 / D44): Barcelona - Girona
+ * (ESPAÑA) — la mesa 001 sirve el acta real CÓNSUL/EMBAJADOR del
+ * digitalizador. Su seed natural cae PENDIENTE (mesa 001 NO_INICIADO →
+ * sin acta → ancla inalcanzable); mismo mecanismo del ancla El Cairo
+ * (D26): se FUERZA a COMPLETO. */
+export const ID_ENLACE_BARCELONA = "88_355_003_08";
+
 /** Supervisor de la sesión (header del mockup). */
 export const SUPERVISOR = {
   nombre: "SUPERVISOR",
@@ -149,6 +156,10 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
   // NO_INICIADO (4a llamada del seed > 0.5 — rango NO_INICIADO; el kit
   // lo anota como 0.9872): sin fuerza el ancla es inalcanzable.
   const esAnclaCairo = registro.idEnlace === ID_ENLACE_CAIRO;
+  // D44: ancla de práctica #2 Barcelona - Girona — misma historia: seed
+  // natural PENDIENTE (mesa 001 NO_INICIADO) → se FUERZA a COMPLETO para
+  // que la acta real CÓNSUL/EMBAJADOR del digitalizador sea servible.
+  const esAnclaBarcelona = registro.idEnlace === ID_ENLACE_BARCELONA;
   const random = crearRandomDeterministico(`divipola::puesto::${registro.idEnlace}`);
   const horario = esAncla ? HORARIO_ROMA : horarioPorSeed(random);
   return {
@@ -165,7 +176,11 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
     // Los pcts se recalculan al inicializar (derivación de mesas, D16).
     pctDelegado: 0,
     pctTransmision: 0,
-    estadoGlobal: esAncla ? "CRITICO" : esAnclaCairo ? "COMPLETO" : estadoPorSeed(random()),
+    estadoGlobal: esAncla
+      ? "CRITICO"
+      : esAnclaCairo || esAnclaBarcelona
+        ? "COMPLETO"
+        : estadoPorSeed(random()),
     diaJornada: diaDeNombrePuesto(registro.nombre),
   };
 }

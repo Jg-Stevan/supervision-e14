@@ -7,7 +7,9 @@
  * y `paginas[]`. Los assets son PNG importados estáticamente desde
  * `assets/` (el export estático resuelve la ruta con basePath solo).
  * Convención de nombre (la del digitalizador):
- * `E14_<idEnlace con _>_<mesa>_<FORMULARIO>-<pagina>.png`.
+ * `E14_<idEnlace con _>_<mesa>_<FORMULARIO>-<pagina>.png` (DELEGADOS
+ * queda como `DELEGADOS` o `CONSUL_EMBAJADOR` según el lote de origen —
+ * ambos son la clave de dominio DELEGADOS).
  *
  * VALIDACIÓN (D25 a–e) de CADA acta contra el catálogo DIVIPOLA
  * (`CARGAR_CATALOGO()` — import de solo-lectura; el adaptador NO cambia):
@@ -16,15 +18,16 @@
  * 1..N completas y continuas; (e) asset importable. La que falla NO se
  * publica y queda `BLOQUEADA: <motivo>` en consola y en el reporte
  * (cuarentena); el resto sigue. Guardrail: máx 10 assets y 2 MB totales;
- * más → BLOQUEADA del manifest completo.
+ * más → BLOQUEADA del manifest completo (actas-reales-v2: 8 assets /
+ * 1.82 MB — dentro).
  *
  * REGLA DE ORO (§0-1): la foto se UBICA, no se INTERPRETA — aquí no hay
  * OCR ni cifras de votación; solo ranuras (idEnlace + mesa + formulario
  * + página) y la información impresa del encabezado.
  *
  * Se ejecuta 1 vez (memo en módulo). Sin efecto en bundle inicial salvo
- * los 4 PNG (el loader es perezoso: lo consumen el ancla del mock y el
- * visor al abrir un acta real).
+ * los 8 PNG (el loader es perezoso: lo consumen el ancla del mock, el
+ * visor al abrir un acta real y la semilla del log de recepción).
  */
 
 import type {
@@ -41,6 +44,12 @@ import fotoTransmision1 from "./assets/E14_88_335_005_02_001_TRANSMISION-1.png";
 import fotoTransmision2 from "./assets/E14_88_335_005_02_001_TRANSMISION-2.png";
 import fotoConsul1 from "./assets/E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.png";
 import fotoConsul2 from "./assets/E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.png";
+// actas-reales-v2 (D44): Roma - Consulado (ITALIA) y Barcelona - Girona
+// (ESPAÑA) — misma convención de nombre (DELEGADOS = CÓNSUL/EMBAJADOR).
+import fotoRoma1 from "./assets/E14_88_495_010_02_001_DELEGADOS-1.png";
+import fotoRoma2 from "./assets/E14_88_495_010_02_001_DELEGADOS-2.png";
+import fotoBarcelona1 from "./assets/E14_88_355_003_08_001_DELEGADOS-1.png";
+import fotoBarcelona2 from "./assets/E14_88_355_003_08_001_DELEGADOS-2.png";
 
 /** Assets importables por nombre de archivo (D24-e). */
 const ASSETS: Record<string, { src: string; width: number; height: number }> = {
@@ -48,18 +57,27 @@ const ASSETS: Record<string, { src: string; width: number; height: number }> = {
   "E14_88_335_005_02_001_TRANSMISION-2.png": fotoTransmision2,
   "E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.png": fotoConsul1,
   "E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.png": fotoConsul2,
+  "E14_88_495_010_02_001_DELEGADOS-1.png": fotoRoma1,
+  "E14_88_495_010_02_001_DELEGADOS-2.png": fotoRoma2,
+  "E14_88_355_003_08_001_DELEGADOS-1.png": fotoBarcelona1,
+  "E14_88_355_003_08_001_DELEGADOS-2.png": fotoBarcelona2,
 };
 
 /**
  * Peso en bytes de cada asset (Anexo A, verificado con sha256sum al
  * copiar — el bundle no expone el peso del asset). SOLO alimenta el
- * guardrail D25; no es dato de dominio.
+ * guardrail D25; no es dato de dominio. actas-reales-v2 (D44): los 4
+ * nuevos verificados igual al copiarlos (REPORTE-actas-reales-v2 §1).
  */
 const PESO_ASSETS: Record<string, number> = {
   "E14_88_335_005_02_001_TRANSMISION-1.png": 237_038,
   "E14_88_335_005_02_001_TRANSMISION-2.png": 204_950,
   "E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.png": 262_874,
   "E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.png": 194_627,
+  "E14_88_495_010_02_001_DELEGADOS-1.png": 253_534,
+  "E14_88_495_010_02_001_DELEGADOS-2.png": 214_258,
+  "E14_88_355_003_08_001_DELEGADOS-1.png": 254_952,
+  "E14_88_355_003_08_001_DELEGADOS-2.png": 197_248,
 };
 
 // ─── Guardrail (D25) ────────────────────────────────────────────────────────
