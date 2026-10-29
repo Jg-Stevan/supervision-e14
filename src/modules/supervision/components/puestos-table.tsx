@@ -34,18 +34,51 @@ const ENCABEZADOS = [
   "Estado global",
 ] as const;
 
+/**
+ * D43 — columnas FIJAS y alineadas (fix «no están alineadas ni ordenadas»):
+ * con `table-layout: auto` el navegador reparte el sobrante según el
+ * contenido de cada fila → País/Puesto se inflaban con espacio muerto,
+ * las columnas de tiempo se comprimían y el ancho de UNA columna cambiaba
+ * cuando los datos vivos cambiaban (las filas "bailaban"). Con
+ * `table-fixed` + <colgroup> cada columna recibe un % estable del ancho
+ * de la tabla y la alineación del encabezado y de las celdas queda
+ * definida en UN solo lugar (`align`), sin divergencias.
+ *
+ * Los % se calibraron contra el contenido real más largo de cada columna
+ * (p. ej. «83 - MIERCOLES ACCRA CONSULADO», badge «NO INICIADO» + 👁) y
+ * suman exactamente 100. Bajo 1200px la tabla hace scroll horizontal en
+ * su contenedor (min-w) en vez de aplastar columnas.
+ */
+const COLUMNAS = [
+  { ancho: "15%", align: "left" }, // País
+  { ancho: "4.5%", align: "left" }, // Zona
+  { ancho: "18.5%", align: "left" }, // Puesto
+  { ancho: "7%", align: "right" }, // # Mesas (encabezado Y celda a la derecha)
+  { ancho: "8%", align: "left" }, // Cierre COL
+  { ancho: "8.5%", align: "left" }, // Hora actual
+  { ancho: "6%", align: "left" }, // Tiempo
+  { ancho: "9.5%", align: "right" }, // E-14 deleg.
+  { ancho: "9.5%", align: "right" }, // E-14 transm.
+  { ancho: "13.5%", align: "right" }, // Estado global
+] as const;
+
 // D10 — px-1.5 compacta el padding horizontal (override del px-2 de ui/table
 // vía tailwind-merge): a 1440px con sidebar de 256px las 10 columnas caben
 // sin scroll horizontal (hallazgo de auditoría SUP-2 §2).
 const TH =
   "label-caps sticky top-0 z-10 h-12 border-b border-border bg-card text-muted-foreground whitespace-nowrap px-1.5";
 
-/** Mini barra de progreso 4px (track #242e2e, relleno del color de estado). */
+/**
+ * Mini barra de progreso 4px (track #242e2e, relleno del color de estado).
+ * D43 — `w-full` (antes min-w-24): con columnas fijas la barra SIEMPRE
+ * llena su celda y la etiqueta % queda shrink-0 alineada al borde derecho
+ * donde termina el encabezado — todas las filas comparten el mismo borde.
+ */
 function MiniProgreso({ pct, color }: { pct: number; color: string }) {
   return (
-    <div className="flex min-w-24 items-center gap-1.5">
+    <div className="flex w-full items-center gap-1.5">
       <div
-        className="h-1 flex-1 overflow-hidden rounded-full bg-(--border)"
+        className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-(--border)"
         role="progressbar"
         aria-valuenow={pct}
         aria-valuemin={0}
@@ -56,7 +89,7 @@ function MiniProgreso({ pct, color }: { pct: number; color: string }) {
           style={{ width: `${pct}%`, backgroundColor: color }}
         />
       </div>
-      <span className="body-md w-9 text-right">{pct}%</span>
+      <span className="body-md w-9 shrink-0 text-right">{pct}%</span>
     </div>
   );
 }
@@ -116,14 +149,25 @@ export function PuestosTable({
         <table> directo (sin el wrapper de shadcn): su contenedor con
         overflow-x-auto crearía un scrollport propio y rompería el sticky
         del encabezado dentro de esta región de scroll.
+
+        D43 — table-fixed + colgroup: anchos de columna deterministas
+        (ver COLUMNAS); min-w evita aplastar columnas bajo 1200px.
       */}
-      <table className="w-full border-collapse bg-card text-sm">
+      <table className="w-full min-w-[1200px] table-fixed border-collapse bg-card text-sm">
+        <colgroup>
+          {COLUMNAS.map((columna, indice) => (
+            <col key={indice} style={{ width: columna.ancho }} />
+          ))}
+        </colgroup>
         <TableHeader>
         <TableRow className="hover:bg-transparent border-b border-border">
           {ENCABEZADOS.map((encabezado, indice) => (
             <TableHead
               key={encabezado}
-              className={cn(TH, indice >= 7 && "text-right")}
+              className={cn(
+                TH,
+                COLUMNAS[indice].align === "right" && "text-right"
+              )}
             >
               {encabezado}
             </TableHead>
@@ -192,7 +236,7 @@ const PuestoRow = memo(function PuestoRow({
             style={{ borderLeft: `4px solid ${acento}` }}
             aria-expanded={abierto}
           >
-            <TableCell className="body-md px-1.5 font-medium whitespace-nowrap">
+            <TableCell className="body-md px-1.5 font-medium whitespace-nowrap overflow-hidden text-ellipsis">
               <span className="inline-flex items-center gap-1.5">
                 <ChevronDown
                   className={cn(
@@ -205,10 +249,15 @@ const PuestoRow = memo(function PuestoRow({
               </span>
             </TableCell>
             <TableCell className="body-md px-1.5">{puesto.zona}</TableCell>
-            <TableCell className="body-md px-1.5 whitespace-nowrap">
+            <TableCell
+              className="body-md px-1.5 whitespace-nowrap overflow-hidden text-ellipsis"
+              title={puesto.puesto}
+            >
               {puesto.puesto}
             </TableCell>
-            <TableCell className="body-md px-1.5 text-right">{puesto.numeroMesas}</TableCell>
+            <TableCell className="body-md px-1.5 text-right">
+              {puesto.numeroMesas}
+            </TableCell>
             <TableCell className="body-md px-1.5 whitespace-nowrap">
               {puesto.horaCierreColombia}
             </TableCell>

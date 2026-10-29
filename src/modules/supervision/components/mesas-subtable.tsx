@@ -45,6 +45,20 @@ function ChipParte({
 }
 
 /**
+ * D43 — columnas fijas de la sub-tabla (misma técnica que la matriz):
+ * anchos estables y proporcionales, suman 100. La columna Acción reserva
+ * 20% para caber «REINSPECCIONAR» (w-36) + «VER ACTA» sin apretujones.
+ */
+const COLUMNAS_MESAS = [
+  { ancho: "8%", align: "left" }, // Mesa
+  { ancho: "22%", align: "left" }, // Delegados
+  { ancho: "26%", align: "left" }, // Transmisión
+  { ancho: "12%", align: "left" }, // Estado mesa
+  { ancho: "12%", align: "left" }, // Última carga
+  { ancho: "20%", align: "left" }, // Acción
+] as const;
+
+/**
  * Sub-tabla de mesas de un puesto expandido (kit SUP-1 §2.4).
  * Fondo hundido (surface-lowest).
  *
@@ -88,7 +102,12 @@ export function MesasSubtable({
   }
   return (
     <div className="bg-(--surface-lowest) px-4 py-3 md:px-6">
-      <table className="w-full min-w-[640px] border-collapse text-left">
+      <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+        <colgroup>
+          {COLUMNAS_MESAS.map((columna, indice) => (
+            <col key={indice} style={{ width: columna.ancho }} />
+          ))}
+        </colgroup>
         <caption className="sr-only">
           Detalle de mesas del puesto seleccionado
         </caption>
