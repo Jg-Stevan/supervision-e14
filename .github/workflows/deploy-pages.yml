@@ -30,7 +30,10 @@ jobs:
         run: BUILD_STATIC=1 NEXT_PUBLIC_BASE_PATH= bunx next build
 
       - name: Deploy a Cloudflare Pages
-        run: bunx wrangler pages deploy out --project-name=supervision-e14 --branch=main --commit-dirty=true
+        # ref_name dinámico: en main = "main" (producción, igual que antes);
+        # en ramas feature (vía workflow_dispatch) = deployment de PREVIEW
+        # (<alias>.supervision-e14.pages.dev) sin tocar producción.
+        run: bunx wrangler pages deploy out --project-name=supervision-e14 --branch=${{ github.ref_name }} --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
