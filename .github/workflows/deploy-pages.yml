@@ -1,0 +1,36 @@
+name: Deploy a Cloudflare Pages
+
+# Kit puente-remoto-v2 — CI/CD del panel: cada push a `main` construye el
+# export estático y lo sube al proyecto Pages `supervision-e14`
+# (supervision-e14.pages.dev). Sin procesos locales: push = deploy.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Instalar dependencias
+        run: bun install --frozen-lockfile
+
+      - name: Build estático (BUILD_STATIC=1 → out/)
+        run: BUILD_STATIC=1 NEXT_PUBLIC_BASE_PATH= bunx next build
+
+      - name: Deploy a Cloudflare Pages
+        run: bunx wrangler pages deploy out --project-name=supervision-e14 --branch=main --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
