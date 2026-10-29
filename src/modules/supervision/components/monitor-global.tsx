@@ -7,6 +7,7 @@ import { PuestosTable } from "./puestos-table";
 import { ResumenChips } from "./resumen-chips";
 import { EsqueletoMonitor } from "./esqueleto";
 import { useDatos, useDatosTicker, resumenDePuestos } from "./datos-provider";
+import { tramoDeMinutos } from "../domain/tiempo-cierre";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
 /**
@@ -34,7 +35,11 @@ export function VistaMonitor() {
   // contexto hoja — este componente (y las 949 filas) ya NO re-renderiza
   // cada 5 s; solo el chip del ticker lo hace.
   const { segundos: segundosDesdeSync } = useDatosTicker();
-  const [filtros, setFiltros] = useState<FiltrosPuestos>({});
+  // Pedido del dueño: la vista abre en la jornada del LUNES (primer día
+  // de la semana electoral) — KPIs, resumen y matriz cargan SOLO ese día
+  // («no cargue todos los puestos de todos los días»). «Todos los días»
+  // sigue disponible a mano desde el select FECHA.
+  const [filtros, setFiltros] = useState<FiltrosPuestos>({ fecha: "LUNES" });
 
   // Conjunto del DÍA (solo filtro de fecha): alimenta KPIs y resumen —
   // los otros filtros (país/zona/puesto/búsqueda/estado toggle) siguen
@@ -58,6 +63,15 @@ export function VistaMonitor() {
       if (filtros.zona && puesto.zonaId !== filtros.zona) return false;
       if (filtros.puesto && puesto.puesto !== filtros.puesto) return false;
       if (filtros.estado && puesto.estadoGlobal !== filtros.estado) return false;
+      // Filtros de COLUMNA (encabezados de «Cierre COL» y «Tiempo»):
+      // valor exacto de cierre en hora COL y tramo del transcurrido.
+      if (filtros.cierreCol && puesto.horaCierreColombia !== filtros.cierreCol)
+        return false;
+      if (
+        filtros.tiempo &&
+        tramoDeMinutos(puesto.minutosDesdeCierre).id !== filtros.tiempo
+      )
+        return false;
       if (q) {
         const texto = [
           puesto.id,
@@ -143,6 +157,11 @@ export function VistaMonitor() {
         />
         <PuestosTable
           puestos={filtrados}
+          puestosBase={puestosDelDia}
+          filtros={filtros}
+          onFiltroColumna={(parcial) =>
+            setFiltros((prev) => ({ ...prev, ...parcial }))
+          }
           mesasPorPuesto={mesasPorPuesto}
           expandidoInicialId={filtrados[0]?.id}
           mesaEnAccionId={mesaEnAccionId}

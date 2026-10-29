@@ -53,8 +53,19 @@ export interface Puesto {
   numeroMesas: number;
   /** Hora de cierre en hora de Colombia (p. ej. "9:00 AM"). */
   horaCierreColombia: string;
-  /** Hora actual local del puesto (p. ej. "7:08 PM"). */
+  /**
+   * Hora actual local del puesto (p. ej. "7:08 PM") — la hora del PAÍS
+   * del puesto de digitalización. Coherente por construcción con el
+   * cierre de 4:00 p. m. local y el tiempo transcurrido (16:00 + t).
+   */
   horaActualLocal: string;
+  /**
+   * Minutos transcurridos desde el cierre (4:00 p. m. HORA LOCAL del
+   * país del puesto de digitalización) — alimenta la columna «Tiempo»
+   * (señalización por color) y su filtro por tramos (ver
+   * domain/tiempo-cierre). `diferenciaTiempo` es su etiqueta derivada.
+   */
+  minutosDesdeCierre: number;
   /** Diferencia de tiempo reportada (p. ej. "> 3 hrs", "—"). */
   diferenciaTiempo: string;
   /** Porcentaje de delegados completados (0-100). */
@@ -122,6 +133,16 @@ export interface FiltrosPuestos {
   estado?: EstadoGlobal;
   /** Búsqueda rápida: coincide con id, código, nombre, zona o puesto. */
   busqueda?: string;
+  /**
+   * Filtro de COLUMNA «Cierre COL»: valor exacto de la hora de cierre en
+   * hora de Colombia (p. ej. "9:00 AM"). undefined = todos.
+   */
+  cierreCol?: string;
+  /**
+   * Filtro de COLUMNA «Tiempo»: id del tramo de transcurrido desde el
+   * cierre (ver TRAMOS_TIEMPO — p. ej. ">3"). undefined = todos.
+   */
+  tiempo?: string;
 }
 
 // ─── KIT INSTRUCCIONES-sup-e14-vida-v1 (SUP-3) — tipos nuevos ──────────────

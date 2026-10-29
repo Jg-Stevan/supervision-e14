@@ -1,12 +1,18 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
-import { ChevronDown, Eye } from "lucide-react";
+import { memo, useCallback, useMemo, useState } from "react";
+import { ChevronDown, Eye, Funnel } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   TableCell,
   TableHead,
@@ -14,7 +20,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "cn";
-import type { Mesa, Puesto } from "../domain/types";
+import type { FiltrosPuestos, Mesa, Puesto } from "../domain/types";
+import {
+  minutosDeReloj,
+  tramoDeMinutos,
+  TRAMOS_TIEMPO,
+  type SeveridadTiempo,
+} from "../domain/tiempo-cierre";
 import { colorDeEstado, StatusBadge } from "./status-badge";
 import { MesasSubtable } from "./mesas-subtable";
 import { useDatos } from "./datos-provider";
@@ -54,13 +66,118 @@ const COLUMNAS = [
   { ancho: "4.5%", align: "left" }, // Zona
   { ancho: "18.5%", align: "left" }, // Puesto
   { ancho: "7%", align: "right" }, // # Mesas (encabezado Y celda a la derecha)
-  { ancho: "8%", align: "left" }, // Cierre COL
-  { ancho: "8.5%", align: "left" }, // Hora actual
-  { ancho: "6%", align: "left" }, // Tiempo
+  { ancho: "8%", align: "left" }, // Cierre COL (con filtro de columna)
+  { ancho: "8%", align: "left" }, // Hora actual
+  { ancho: "7%", align: "left" }, // Tiempo (con filtro de columna)
   { ancho: "9.5%", align: "right" }, // E-14 deleg.
   { ancho: "9.5%", align: "right" }, // E-14 transm.
-  { ancho: "13.5%", align: "right" }, // Estado global
+  { ancho: "13%", align: "right" }, // Estado global
 ] as const;
+
+/** Índices de columnas con filtro en el encabezado. */
+const INDICE_CIERRE = 4;
+const INDICE_TIEMPO = 6;
+
+/** Opción del filtro de columna (valor canónico + etiqueta visible). */
+interface OpcionFiltro {
+  valor: string;
+  etiqueta: string;
+}
+
+/** Opciones del filtro «Tiempo» — los tramos canónicos del dominio. */
+const OPCIONES_TIEMPO: OpcionFiltro[] = TRAMOS_TIEMPO.map((tramo) => ({
+  valor: tramo.id,
+  etiqueta: tramo.etiqueta,
+}));
+
+/**
+ * Filtro de COLUMNA (pedido del dueño): embudo en el encabezado de
+ * «Cierre COL» y «Tiempo». Abre un menú con «Todos» + las opciones del
+ * conjunto del día; el activo queda marcado y el embudo se señaliza en
+ * ámbar mientras haya filtro aplicado.
+ */
+function FiltroColumna({
+  label,
+  valor,
+  opciones,
+  onFiltro,
+}: {
+  label: string;
+  valor: string | undefined;
+  opciones: OpcionFiltro[];
+  onFiltro: (valor: string | undefined) => void;
+}) {
+  const activa = valor !== undefined;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Filtrar por ${label}`}
+          title={activa ? `Filtro activo por ${label}` : `Filtrar por ${label}`}
+          className={cn(
+            "inline-flex size-4 items-center justify-center rounded-[2px] hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)",
+            activa ? "text-(--warning)" : "text-muted-foreground"
+          )}
+        >
+          <Funnel className="size-3" aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="border-border bg-popover font-data text-[13px]"
+      >
+        <DropdownMenuCheckboxItem
+          checked={!activa}
+          onSelect={() => onFiltro(undefined)}
+        >
+          Todos
+        </DropdownMenuCheckboxItem>
+        {opciones.map((opcion) => (
+          <DropdownMenuCheckboxItem
+            key={opcion.valor}
+            checked={valor === opcion.valor}
+            onSelect={() => onFiltro(opcion.valor)}
+          >
+            {opcion.etiqueta}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Color de señalización del «Tiempo» según la severidad del tramo. */
+const COLOR_SEVERIDAD: Record<SeveridadTiempo, string> = {
+  ok: "var(--success)",
+  alerta: "var(--warning)",
+  critico: "var(--danger)",
+};
+
+/**
+ * Celda «Tiempo» — transcurrido desde el cierre de 4:00 p. m. HORA LOCAL
+ * del país del puesto de digitalización (pedido del dueño), señalizado
+ * por color según el tramo: verde < 1 hr · ámbar 1-3 hrs · rojo > 3 hrs
+ * (umbral crítico del dueño).
+ */
+function SenalTiempo({ minutos }: { minutos: number }) {
+  const tramo = tramoDeMinutos(minutos);
+  const color = COLOR_SEVERIDAD[tramo.severidad];
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 whitespace-nowrap"
+      style={{ color }}
+      title="Tiempo transcurrido desde el cierre (4:00 p. m. hora local del país del puesto de digitalización). Más de 3 horas es crítico."
+    >
+      <span
+        aria-hidden
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      {tramo.etiqueta}
+    </span>
+  );
+}
 
 // D10 — px-1.5 compacta el padding horizontal (override del px-2 de ui/table
 // vía tailwind-merge): a 1440px con sidebar de 256px las 10 columnas caben
@@ -100,6 +217,15 @@ const MESAS_VACIAS: Mesa[] = [];
 
 interface PuestosTableProps {
   puestos: Puesto[];
+  /**
+   * Conjunto del día SIN filtros de columna/búsqueda — de donde salen
+   * las opciones de los filtros de columna (ver FiltroColumna).
+   */
+  puestosBase: Puesto[];
+  /** Filtros activos — marca los embudos de «Cierre COL» y «Tiempo». */
+  filtros: FiltrosPuestos;
+  /** Actualización parcial de filtros desde los encabezados. */
+  onFiltroColumna: (parcial: Partial<FiltrosPuestos>) => void;
   /** Mesas del store del shell (kit SUP-3 T4 — ya no se piden al repo
    * directamente desde la fila: los datos viven en el store cliente). */
   mesasPorPuesto: Record<string, Mesa[]>;
@@ -111,6 +237,9 @@ interface PuestosTableProps {
 
 export function PuestosTable({
   puestos,
+  puestosBase,
+  filtros,
+  onFiltroColumna,
   mesasPorPuesto,
   expandidoInicialId,
   mesaEnAccionId,
@@ -132,6 +261,23 @@ export function PuestosTable({
       }),
     []
   );
+
+  // Filtro de columna «Cierre COL»: valores distintos del día, ordenados
+  // cronológicamente (minutosDeReloj), no lexicográficamente.
+  const opcionesCierre = useMemo<OpcionFiltro[]>(() => {
+    const minutos = new Map<string, number>();
+    for (const puesto of puestosBase) {
+      if (!minutos.has(puesto.horaCierreColombia)) {
+        minutos.set(
+          puesto.horaCierreColombia,
+          minutosDeReloj(puesto.horaCierreColombia)
+        );
+      }
+    }
+    return [...minutos.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .map(([hora]) => ({ valor: hora, etiqueta: hora }));
+  }, [puestosBase]);
 
   if (puestos.length === 0) {
     return (
@@ -169,7 +315,25 @@ export function PuestosTable({
                 COLUMNAS[indice].align === "right" && "text-right"
               )}
             >
-              {encabezado}
+              <span className="inline-flex items-center gap-1">
+                {encabezado}
+                {indice === INDICE_CIERRE && opcionesCierre.length > 0 && (
+                  <FiltroColumna
+                    label="Cierre COL"
+                    valor={filtros.cierreCol}
+                    opciones={opcionesCierre}
+                    onFiltro={(valor) => onFiltroColumna({ cierreCol: valor })}
+                  />
+                )}
+                {indice === INDICE_TIEMPO && (
+                  <FiltroColumna
+                    label="Tiempo"
+                    valor={filtros.tiempo}
+                    opciones={OPCIONES_TIEMPO}
+                    onFiltro={(valor) => onFiltroColumna({ tiempo: valor })}
+                  />
+                )}
+              </span>
             </TableHead>
           ))}
         </TableRow>
@@ -258,16 +422,22 @@ const PuestoRow = memo(function PuestoRow({
             <TableCell className="body-md px-1.5 text-right">
               {puesto.numeroMesas}
             </TableCell>
-            <TableCell className="body-md px-1.5 whitespace-nowrap">
+            <TableCell
+              className="body-md px-1.5 whitespace-nowrap"
+              title="Hora de cierre en hora de Colombia (cierre 4:00 p. m. hora local del país)"
+            >
               {puesto.horaCierreColombia}
             </TableCell>
             <TableCell className="body-md px-1.5">
-              <span className="inline-block rounded-[4px] border border-(--success) px-1.5 py-0.5 whitespace-nowrap">
+              <span
+                className="inline-block rounded-[4px] border border-(--success) px-1.5 py-0.5 whitespace-nowrap"
+                title="Hora local del país del puesto de digitalización"
+              >
                 {puesto.horaActualLocal}
               </span>
             </TableCell>
-            <TableCell className="body-md px-1.5 whitespace-nowrap text-muted-foreground">
-              {puesto.diferenciaTiempo}
+            <TableCell className="body-md px-1.5">
+              <SenalTiempo minutos={puesto.minutosDesdeCierre} />
             </TableCell>
             <TableCell className="text-right px-1.5">
               <MiniProgreso pct={puesto.pctDelegado} color={acento} />
