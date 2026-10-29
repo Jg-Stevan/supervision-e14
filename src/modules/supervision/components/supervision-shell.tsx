@@ -49,18 +49,14 @@ import { DatosProvider, useDatos } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
 import { VistaRecepcion } from "./vista-recepcion";
-import { VistaCargaMasiva } from "./vista-carga-masiva";
 // Reactivadas (D20): las vistas NOTIFICACIONES e INFORMES están COMPLETAS
 // en este repo (componente + lógica del store) — hoy SÍ navegan.
 import { VistaNotificaciones } from "./vista-notificaciones";
 import { VistaInformes } from "./vista-informes";
-// NOTA de trasplante (sandbox): el PERFIL DEL DISPOSITIVO (módulo
-// perfil-dispositivo) sigue vivo en el repo completo del proyecto y queda
-// DORMIDO vía MODULOS_INACTIVOS (D20). La CARGA MASIVA fue REACTIVADA con
-// una vista NATIVA (vista-carga-masiva) sobre el seam real
-// publicarActaMasiva — el pipeline OCR/QR completo del digitalizador
-// sigue en el repo completo; reactivarlo = traer sus módulos.
-// reactivar PERFIL = traer su módulo y quitar su id de la lista.
+// NOTA de trasplante (sandbox): la vista CARGA MASIVA (módulo digitalizador)
+// y el PERFIL DEL DISPOSITIVO (módulo perfil-dispositivo) viven en el repo
+// completo del proyecto. Aquí quedan DORMIDOS vía MODULOS_INACTIVOS (D20) —
+// reactivarlos = traer sus módulos y quitar sus ids de la lista.
 
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
  * (el export estático sigue siendo trivial: una sola página).
@@ -83,14 +79,16 @@ type VistaId =
  * dormidas queda intacto en el repo («llegada la integración con el
  * digitalizador, reactivar debe costar editar esta lista» — hoy la
  * promesa es CIERTA: VistaActual ya sabe renderizar cualquier vista
- * activable; solo perfil espera su módulo).
+ * activable; solo carga-masiva y perfil esperan su módulo).
  *
- * NOTIFICACIONES, INFORMES y CARGA MASIVA fueron REACTIVADAS: sus vistas
- * viven y funcionan en este repo (centro de notificaciones con badge real,
- * informes con descarga .md/.csv y la cola masiva nativa sobre el seam
- * publicarActaMasiva).
+ * NOTIFICACIONES e INFORMES fueron REACTIVADAS: sus vistas viven y
+ * funcionan en este repo (centro de notificaciones con badge real e
+ * informes con descarga .md/.csv).
  */
-export const MODULOS_INACTIVOS: readonly VistaId[] = ["perfil"];
+export const MODULOS_INACTIVOS: readonly VistaId[] = [
+  "carga-masiva",
+  "perfil",
+];
 
 interface ItemNav {
   Icono: LucideIcon;
@@ -119,8 +117,9 @@ const ITEMS_NAV: ItemNav[] = [
   {
     Icono: Upload,
     etiqueta: "Carga masiva",
-    // D27 — REACTIVADA: vista nativa (vista-carga-masiva) sobre el seam
-    // real publicarActaMasiva; recepción (D28) y monitor consumen en vivo.
+    // D27 — DORMIDO aquí: el módulo digitalizador (módulo masiva) vive en
+    // el repo completo del proyecto; su publicación (publicarActaMasiva)
+    // ya tiene consumidor en este repo (D28/recepción + monitor en vivo).
     vista: "carga-masiva",
   },
   {
@@ -376,10 +375,6 @@ function VistaActual({
       return <VistaNotificaciones />;
     case "informes":
       return <VistaInformes />;
-    case "carga-masiva":
-      // D27 — REACTIVADA: el productor nativo sobre publicarActaMasiva;
-      // VER EN MONITOR aterriza el acta publicada en el visor (mismo seam).
-      return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
     default:
       // monitor + los módulos dormidos (imposible alcanzarlos hoy).
       return <VistaMonitor />;
