@@ -37,6 +37,10 @@ import type {
 } from "../domain/types";
 import type { PuestoDivipola } from "../domain/divipola";
 import { zonaParaUI } from "../domain/divipola";
+import {
+  CIERRE_LOCAL_MIN,
+  tramoDeMinutos,
+} from "../domain/tiempo-cierre";
 import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
 import { consultarActaRuntime } from "./actas-runtime";
 import { ID_ENLACE_ROMA, CARGAR_CATALOGO } from "./divipola-adapter";
@@ -101,12 +105,21 @@ function estadoPorSeed(random: number): EstadoGlobal {
 }
 
 const CIERRES_COL_MIN = [9 * 60, 10 * 60, 11 * 60, 12 * 60, 13 * 60];
-const DESFASES: { etiqueta: string; minutos: number }[] = [
-  { etiqueta: "—", minutos: 0 },
-  { etiqueta: "< 1 hr", minutos: 45 },
-  { etiqueta: "1-2 hrs", minutos: 90 },
-  { etiqueta: "> 3 hrs", minutos: 200 },
-];
+
+/**
+ * TIEMPO transcurrido desde el cierre (pedido del dueño): la columna
+ * «Tiempo» es el tiempo desde el cierre de 4:00 p. m. HORA LOCAL del
+ * país del puesto de digitalización (regla del kit monitor-jornada-v1:
+ * «cierre 4:00 p. m. hora local»); > 3 hrs es crítico. Distribución del
+ * demo moldeada por tramos (30% / 25% / 20% / 25%) — mapea UN draw
+ * uniforme a un minuto concreto dentro del tramo.
+ */
+function transcurridoPorSeed(r: number): number {
+  if (r < 0.3) return Math.floor((r / 0.3) * 59); // < 1 hr: 0-58 min
+  if (r < 0.55) return 60 + Math.floor(((r - 0.3) / 0.25) * 59); // 1-2 hrs
+  if (r < 0.75) return 120 + Math.floor(((r - 0.55) / 0.2) * 59); // 2-3 hrs
+  return 180 + Math.floor(((r - 0.75) / 0.25) * 175); // > 3 hrs: 180-354
+}
 
 /** "19:08" → "7:08 PM" (formato del mockup). */
 function relojDeMinutos(minutos: number): string {
@@ -118,29 +131,53 @@ function relojDeMinutos(minutos: number): string {
   return `${h12}:${mm} ${sufijo}`;
 }
 
-/** Horarios creíbles + determinísticos por seed (el demo no conoce
+/**
+ * Horarios creíbles + determinísticos por seed (el demo no conoce
  * zonas horarias reales; la coherencia EXACTA solo la exige el kit para
- * el ancla Roma — §4.9). */
+ * el ancla Roma — §4.9).
+ *
+ * Pedido del dueño (semántica de las columnas de tiempo):
+ * - «Hora actual» = hora del PAÍS del puesto de digitalización — queda
+ *   coherente por construcción: 16:00 local (cierre) + transcurrido.
+ * - «Tiempo» = transcurrido desde el cierre de 4:00 p. m. LOCAL, con la
+ *   etiqueta del tramo canónico (domain/tiempo-cierre).
+ *
+ * D43 — el horario consume EXACTAMENTE 3 draws como antes (cierre COL,
+ * transcurrido, jitter quemado) para NO desplazar la posición del draw
+ * de estado en la secuencia determinística: los estados sembrados y los
+ * KPIs del demo quedan idénticos.
+ */
 function horarioPorSeed(random: () => number): {
   cierre: string;
   local: string;
   diferencia: string;
+  minutosDesdeCierre: number;
 } {
+  // 1) Cierre en hora de Colombia (16:00 local convertido al huso).
   const cierre = CIERRES_COL_MIN[Math.floor(random() * CIERRES_COL_MIN.length)];
-  const desfase = DESFASES[Math.floor(random() * DESFASES.length)];
-  const local = cierre + desfase.minutos + Math.floor(random() * 60);
+  // 2) Transcurrido desde el cierre local 4:00 p. m. (0–354 min).
+  const transcurrido = transcurridoPorSeed(random());
+  // 3) Tercer draw CONSERVADO (antes: jitter de minutos) — se quema para
+  //    mantener la secuencia de seeds estable (estados/KPIs inalterados).
+  void random();
+  const local = CIERRE_LOCAL_MIN + transcurrido;
+  const tramo = tramoDeMinutos(transcurrido);
   return {
     cierre: relojDeMinutos(cierre),
     local: relojDeMinutos(local),
-    diferencia: desfase.etiqueta,
+    diferencia: tramo.etiqueta,
+    minutosDesdeCierre: transcurrido,
   };
 }
 
-/** Valores EXACTOS del horario del ancla Roma (mockup original). */
+/** Valores EXACTOS del horario del ancla Roma (mockup original). 7:08 PM
+ * local − 4:00 PM de cierre = 188 min → tramo «> 3 hrs» (coherente con
+ * su estadoGlobal CRÍTICO). */
 const HORARIO_ROMA = {
   cierre: "9:00 AM",
   local: "7:08 PM",
   diferencia: "> 3 hrs",
+  minutosDesdeCierre: 188,
 } as const;
 
 /** Registro canónico → fila de la tabla (`Puesto`). El `id` ES el
@@ -172,6 +209,7 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
     numeroMesas: registro.totalMesas,
     horaCierreColombia: horario.cierre,
     horaActualLocal: horario.local,
+    minutosDesdeCierre: horario.minutosDesdeCierre,
     diferenciaTiempo: horario.diferencia,
     // Los pcts se recalculan al inicializar (derivación de mesas, D16).
     pctDelegado: 0,
