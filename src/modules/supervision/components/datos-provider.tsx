@@ -420,13 +420,28 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     setVisorActa((prev) => (prev ? { ...prev, tipo, pagina: 1 } : prev));
   }, []);
 
-  const cambiarPagina = useCallback((pagina: number) => {
-    setVisorActa((prev) => {
-      if (!prev) return prev;
-      const maxima = prev.tipo === "TRANSMISION" ? 2 : 1;
-      return { ...prev, pagina: Math.min(Math.max(1, pagina), maxima) };
-    });
-  }, []);
+  const cambiarPagina = useCallback(
+    (pagina: number) => {
+      setVisorActa((prev) => {
+        if (!prev) return prev;
+        // BLOQUEADA-1 resuelta (actas-reales-v2 / D44): el techo de páginas
+        // es el largo REAL del formulario del acta ABIERTA (el CÓNSUL/
+        // EMBAJADOR real trae 2 páginas — D26/D44; el supuesto «DELEGADOS
+        // = 1 página» del kit SUP-4 quedó atrás). Sin acta cargada aún →
+        // techo 1 (conservador; el clamp se afloja al aterrizar el acta).
+        const propia =
+          actaCargada !== null &&
+          actaCargada.acta !== null &&
+          actaCargada.puestoId === prev.puestoId &&
+          actaCargada.mesaId === prev.mesaId
+            ? actaCargada.acta.formularios[prev.tipo]
+            : null;
+        const maxima = Math.max(1, propia?.length ?? 1);
+        return { ...prev, pagina: Math.min(Math.max(1, pagina), maxima) };
+      });
+    },
+    [actaCargada]
+  );
 
   // ── KIT SUP-4 — acciones del visor (patrón vida-v1, D19) ─────────────
   const aprobarActaVisor = useCallback(

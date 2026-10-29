@@ -1,6 +1,6 @@
 {
   "version": "actas-reales-v1",
-  "fuente": "digitalizador — muestras de práctica reales (Consulado El Cairo, Egipto)",
+  "fuente": "digitalizador — muestras de práctica reales (Consulados El Cairo, Roma y Barcelona-Girona)",
   "nota": "El módulo NO lee votos ni interpreta el contenido de la imagen. Solo ubica cada foto en su ranura (idEnlace + mesa + formulario + página) y la muestra junto a la información impresa.",
   "actas": [
     {
@@ -39,6 +39,44 @@
       "paginas": [
         { "pagina": 1, "archivo": "E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.png" },
         { "pagina": 2, "archivo": "E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.png" }
+      ]
+    },
+    {
+      "idEnlace": "88_495_010_02",
+      "mesa": "001",
+      "formulario": "DELEGADOS",
+      "etiquetaImpresa": "CÓNSUL/EMBAJADOR",
+      "barcodeImpreso": "710009822010102",
+      "impresion": {
+        "consulado": "88",
+        "pais": "495 - ITALIA",
+        "zona": "10",
+        "puesto": "02",
+        "mesa": "001",
+        "lugar": "Roma - Consulado"
+      },
+      "paginas": [
+        { "pagina": 1, "archivo": "E14_88_495_010_02_001_DELEGADOS-1.png" },
+        { "pagina": 2, "archivo": "E14_88_495_010_02_001_DELEGADOS-2.png" }
+      ]
+    },
+    {
+      "idEnlace": "88_355_003_08",
+      "mesa": "001",
+      "formulario": "DELEGADOS",
+      "etiquetaImpresa": "CÓNSUL/EMBAJADOR",
+      "barcodeImpreso": "710012652010102",
+      "impresion": {
+        "consulado": "88",
+        "pais": "355 - ESPAÑA",
+        "zona": "03",
+        "puesto": "08",
+        "mesa": "001",
+        "lugar": "Barcelona - Girona"
+      },
+      "paginas": [
+        { "pagina": 1, "archivo": "E14_88_355_003_08_001_DELEGADOS-1.png" },
+        { "pagina": 2, "archivo": "E14_88_355_003_08_001_DELEGADOS-2.png" }
       ]
     }
   ]
