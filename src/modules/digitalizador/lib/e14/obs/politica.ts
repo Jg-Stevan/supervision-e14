@@ -165,7 +165,7 @@ export function leerOverridesFlags(): Partial<FlagsApp> {
     // `ocrMotor` serían inalcanzables (DOBLE whitelist — cada puerta su
     // línea).
     if (typeof o.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = o.ocrMotorAdaptativo;
-    if (o.ocrMotor === "ppocrv5" || o.ocrMotor === "tesseract-best-psm4") limpio.ocrMotor = o.ocrMotor;
+    if (o.ocrMotor === "ppocrv5" || o.ocrMotor === "tesseract-best-psm4" || o.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = o.ocrMotor;
     return limpio;
   } catch {
     return {};

@@ -151,7 +151,7 @@ export function sanearFlags(o: unknown): Partial<FlagsApp> {
   if (typeof p.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = p.masivaAdaptativoGama;
   // KIT ocr-router-v1 — whitelist aditiva (booleano + enum del motor).
   if (typeof p.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = p.ocrMotorAdaptativo;
-  if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4") limpio.ocrMotor = p.ocrMotor;
+  if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4" || p.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = p.ocrMotor;
   return limpio;
 }
 

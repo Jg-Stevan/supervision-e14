@@ -180,19 +180,22 @@ function fmtN(v: number | null, sufijo: string): string {
 const ETIQUETA_MOTOR: Record<MotorOcr, string> = {
   "tesseract-best-psm4": "Tesseract best + psm 4",
   ppocrv5: "PP-OCRv5 (ONNX)",
+  "tesseract-spa-best-psm4": "Tesseract spa-best + psm 4",
 };
 
-// KIT selector-motor-v1 fase 5 — opciones del selector (D6: la app muestra;
-// el dueño decide). null = Automático: el router recupera la decisión. En
-// este repo el «motor base» son los modelos v4 de RapidOCR (el representante
-// del Tesseract-best del benchmark — ver motorADeModelos en rapidocr.ts).
+// KIT selector-motor-v1 fase 5 + 5b — opciones del selector (D6: la app
+// muestra; el dueño decide). null = Automático: el router recupera la
+// decisión. «Motor base» son los modelos v4 de RapidOCR (producción actual);
+// «Tesseract spa-best» es el Tesseract REAL del benchmark (tesseract.js v5 +
+// spa.traineddata best — 94,4 % dígitos, ~67 MB, 13,5 MB gz) — fase 5b.
 const OPCIONES_MOTOR: Array<{
   valor: MotorOcr | null;
   etiqueta: string;
   sub: string;
 }> = [
   { valor: null, etiqueta: "Automático", sub: "el router decide · recomendado" },
-  { valor: "tesseract-best-psm4", etiqueta: "Motor base", sub: "Tesseract psm 4 · ~67 MB · 94,4 %" },
+  { valor: "tesseract-best-psm4", etiqueta: "Motor base", sub: "RapidOCR v4 · producción" },
+  { valor: "tesseract-spa-best-psm4", etiqueta: "Tesseract spa-best", sub: "psm 4 · 13,5 MB · 94,4 %" },
   { valor: "ppocrv5", etiqueta: "PP-OCRv5", sub: "precisión · 100 % · ~487 MB pico" },
 ];
 
@@ -690,7 +693,7 @@ export function VistaPerfil() {
                 <div
                   role="radiogroup"
                   aria-label="Motor OCR a utilizar"
-                  className="mt-3 grid gap-2 sm:grid-cols-3"
+                  className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
                 >
                   {OPCIONES_MOTOR.map((op) => {
                     const activo = auto.overrideManual === op.valor;
@@ -719,9 +722,11 @@ export function VistaPerfil() {
                 <p className="body-md mt-3 text-muted-foreground">
                   {auto.overrideManual === "ppocrv5"
                     ? "Fijado a mano (D6): el próximo arranque descarga los modelos v5 (~13 MB) y corre la sonda de carga (≤ 30 s en override manual). Si la sonda falla, esa corrida sigue con el motor base — sin riesgo; el castigo de 7 días solo afecta al modo automático (tu decisión manda)."
-                    : auto.overrideManual === "tesseract-best-psm4"
-                      ? "Fijado a mano (D6): motor base (~67 MB · 94,4 % de dígitos impresos) en todos los arranques — el router no decide."
-                      : `Automático (recomendado): el router elige por tier + sondas de carga. La decisión vigente correría «${ETIQUETA_MOTOR[auto.motor.motor]}» (${auto.motor.origen}).`}
+                    : auto.overrideManual === "tesseract-spa-best-psm4"
+                      ? "Fijado a mano (D6): el Tesseract REAL del benchmark (spa-best + psm 4, 94,4 % de dígitos, ~67 MB) vía tesseract.js — la primera vez descarga ~12 MB (traineddata gz). El modo automático jamás lo elige; la init del worker es la prueba y si falla (o falla en vuelo), esa corrida sigue con el motor base — sin riesgo."
+                      : auto.overrideManual === "tesseract-best-psm4"
+                        ? "Fijado a mano (D6): motor base — RapidOCR v4, la producción de siempre — en todos los arranques; el router no decide."
+                        : `Automático (recomendado): el router elige por tier + sondas de carga. La decisión vigente correría «${ETIQUETA_MOTOR[auto.motor.motor]}» (${auto.motor.origen}).`}
                 </p>
                 {auto.overrideManual === "ppocrv5" &&
                  auto.motorSinOverride &&

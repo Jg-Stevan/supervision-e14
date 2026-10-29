@@ -231,3 +231,35 @@ elegibilidad ni siquiera evaluaba en el arranque real (informe con motivo
 Pendiente honesto (igual que fase 4): que el `benchmark.score` viaje del
 provider al perfil headless — con el selector ya no bloquea al dueño (puede
 fijar el motor a mano); solo refinaría el origen `medio-elegible-upgrade`.
+
+## Fase 5b — tesseract-spa-best-v1: el Tesseract REAL del benchmark, elegible
+
+Pedido del dueño tras probar el selector: «faltó el modelo de gama baja,
+Tesseract spa-best + psm 4». Hasta hoy el router NOMBRABA ese motor como
+base, pero el repo lo representaba con modelos v4 de RapidOCR
+(motorADeModelos) — el Tesseract verdadero no existía en la app.
+
+1. **Motor nuevo SOLO por override** (`MotorOcr +
+   "tesseract-spa-best-psm4"`): jamás sale del modo automático — el router
+   sigue decidiendo v4/v5 por tier; el dueño puede FIJARLO en el selector
+   (4.ª opción «Tesseract spa-best · psm 4 · 13,5 MB · 94,4 %»).
+2. **Implementación** (`ocr/tesseract-ocr.ts`): tesseract.js v5 (WASM
+   LSTM-only) + `spa.traineddata` de tessdata_best vendorizado
+   (`public/models/tesseract/spa.traineddata.gz`, ~12 MB) + núcleos
+   (`public/vendor/tesseract` — simd-lstm con fallback sin SIMD). Config
+   EXACTA del benchmark: OEM LSTM_ONLY + PSM 4. Salida con el MISMO
+   contrato que RapidOCR (lineas/texto/confMedia 0-1/box polígono) — el
+   pipeline no cambia una línea.
+3. **Doble whitelist ampliada** (flags.ts + politica.ts + tipos.ts): sin
+   esas líneas el override `tesseract-spa-best-psm4` se descartaría en
+   silencio.
+4. **D6-safe**: la init del worker ES la prueba (≤ 20 s, sin sonda aparte —
+   motor ligero y benchmark-probado). Fallo de init o de reconocimiento en
+   vuelo ⇒ red de seguridad v4 con sello honesto en el informe (`motor:
+   "tesseract-spa-best-psm4"` con `modelos: "v4"` — decisión vs realidad,
+   cero maquillaje). Las sesiones v4 se crean SIEMPRE como red — costo: una
+   descarga doble una sola vez (HTTP-cached).
+5. **Etiqueta honesta del base**: «Motor base» deja de decir «Tesseract» —
+   es RapidOCR v4 (la producción de siempre). El informe distingue:
+   `tesseract-best-psm4` (base v4) ≠ `tesseract-spa-best-psm4` (Tesseract
+   real).
