@@ -21,7 +21,7 @@ import { sincronizarRemota } from "../data/puente-remoto";
 
 /** Estado observable del puente para la UI (badge del sidebar). */
 export interface EstadoPuenteRemoto {
-  /** Última sincronización contactó al hub (por el proxy). */
+  /** Última sincronización contactó al hub (fetch directo). */
   conectado: boolean;
   /** Actas nuevas vistas en la ÚLTIMA sincronización. */
   nuevas: number;

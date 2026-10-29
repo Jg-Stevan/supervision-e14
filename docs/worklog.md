@@ -4,6 +4,38 @@
 > (ver REPORTE-actas-reales-v2.md) — este archivo retoma la bitácora:
 > una entrada por kit, fecha, qué hace, archivos y gates.
 
+## 2026-10-29 — kit `puente-remoto-v2` (fetch DIRECTO al hub + Pages git-conectado)
+
+**Qué hace:** elimina el proxy `/api/supervision/remotas` (requería backend
+Node — incompatible con el export estático de Cloudflare Pages; en el deploy
+direct-upload anterior las API routes respondían HTML) y el poller ahora
+habla DIRECTO con el hub `e14-puente` (workers.dev), cuyo CORS reflect con
+allowlist incluye `supervision-e14.pages.dev`. Override simétrico con la
+PWA: `localStorage["e14-puente-url"]` (misma clave en ambos lados — cambiar
+el hub no exige recargar). El proyecto Pages `supervision-e14` pasa de
+direct-upload a GIT-CONECTADO (auto-deploy en cada push a `main`, mismo
+comando de build estático que digielect14: `BUILD_STATIC=1 … next build`
+→ `out/`). Resultado: push a GitHub = panel actualizado en la nube; cero
+procesos locales.
+
+**Archivos:**
+- ELIMINADO `src/app/api/` completo (`route.ts` hello-world +
+  `supervision/remotas/route.ts` proxy — su trabajo lo hace el fetch directo).
+- MODIFICADO `infra/e14-puente/src/index.ts` — allowlist CORS del hub:
+  `(digielect14|supervision-e14)\.pages\.dev` (el panel ahora es origen
+  permitido para el fetch directo; desplegado al workers.dev).
+- MODIFICADO `next.config.ts` — switch `BUILD_STATIC=1` → `output: "export"`
+  + `trailingSlash: true` + `images.unoptimized` (patrón de digielect14).
+- MODIFICADO `src/modules/supervision/data/puente-remoto.ts` —
+  `urlDelHub()` (HUB_DEFAULT + override `e14-puente-url`) y fetch
+  `${hub}/actas?desde=…`; contrato del hub sin cambios.
+- MODIFICADO `src/modules/supervision/components/use-puente-remoto.ts` —
+  comentario (proxy → fetch directo).
+- MODIFICADO `docs/worklog.md` — esta entrada.
+
+**Gates:** `bunx tsc --noEmit` = mismo baseline del kit v1 (11 errores
+preexistentes ajenos, 0 en archivos tocados) · `bun run lint` limpio.
+
 ## 2026-10-29 — kit `puente-remoto-v1` (productor remoto de actas)
 
 **Qué hace:** el supervisor ahora TRAE las actas que el digitalizador

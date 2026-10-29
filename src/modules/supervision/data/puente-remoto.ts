@@ -1,6 +1,6 @@
 /**
  * KIT puente-remoto-v1 — PRODUCTOR REMOTO de actas: trae del HUB
- * (e14-puente, workers.dev — vía el proxy `/api/supervision/remotas`)
+ * (e14-puente, workers.dev — fetch DIRECTO del navegador)
  * las actas que el digitalizador publicó y las inyecta en el pipeline
  * local `publicarActaMasiva()` (actas-runtime).
  *
@@ -22,9 +22,11 @@
  * todo el runtime desde el hub: mismo comportamiento del resto del
  * dashboard, sin persistencia).
  *
- * CLIENT-SAFE: fetch RELATIVO al proxy propio — NUNCA fetch absoluto al
- * workers.dev desde el cliente (el proxy resuelve el hub en el servidor
- * con `E14_PUENTE_URL`). Sin libs nuevas (patrón del módulo).
+ * CLIENT-SAFE: fetch DIRECTO al hub — el dashboard es 100% estático
+ * (Cloudflare Pages, sin backend Node) y el hub `e14-puente` resuelve
+ * CORS con reflect + allowlist (incluye supervision-e14.pages.dev).
+ * Override simétrico con la PWA: localStorage["e14-puente-url"] se lee
+ * en CADA ciclo (cambiar el hub no exige recargar). Sin libs nuevas.
  */
 
 import type { FormularioTipo } from "../domain/acta";
@@ -57,6 +59,27 @@ interface RespuestaHub {
   ahora?: number;
   total?: number;
   actas?: ActaRemota[];
+}
+
+/** Hub por defecto (mismo contracto que envio.ts del digitalizador). */
+const HUB_DEFAULT = "https://e14-puente.julistevan02.workers.dev";
+/** Misma clave de override que la PWA — una sola llave controla ambos lados. */
+const CLAVE_OVERRIDE = "e14-puente-url";
+
+/** URL del hub: override de localStorage leído en cada ciclo (http(s) solo
+ *  — una clave corrupta cae al default; localStorage bloqueado → default). */
+function urlDelHub(): string {
+  try {
+    if (typeof window !== "undefined") {
+      const override = window.localStorage.getItem(CLAVE_OVERRIDE);
+      if (override && /^https?:\/\//i.test(override)) {
+        return override.replace(/\/+$/, "");
+      }
+    }
+  } catch {
+    /* privado/iOS/SSR → default */
+  }
+  return HUB_DEFAULT;
 }
 
 /** Desenlace de una sincronización (el poller del hook lo consume). */
@@ -96,7 +119,7 @@ function estrecharFormulario(
 export async function sincronizarRemota(): Promise<ResumenSincronizacion> {
   try {
     const res = await fetch(
-      `/api/supervision/remotas?desde=${encodeURIComponent(String(ULTIMO_TS))}`,
+      `${urlDelHub()}/actas?desde=${encodeURIComponent(String(ULTIMO_TS))}`,
       { cache: "no-store" }
     );
     if (!res.ok) {

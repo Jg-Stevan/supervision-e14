@@ -24,7 +24,7 @@ export interface Env {
 // ─── CORS (reflect con allowlist) ───────────────────────────────────────────
 
 const ORIGEN_OK =
-  /^(https?:\/\/([a-z0-9-]+\.)*digielect14\.pages\.dev|https?:\/\/([a-z0-9-]+\.)*julistevan02\.workers\.dev|https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|https?:\/\/([a-z0-9-]+\.)*jg-stevan\.github\.io)$/i;
+  /^(https?:\/\/([a-z0-9-]+\.)*(digielect14|supervision-e14)\.pages\.dev|https?:\/\/([a-z0-9-]+\.)*julistevan02\.workers\.dev|https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|https?:\/\/([a-z0-9-]+\.)*jg-stevan\.github\.io)$/i;
 
 function cabecerasCors(request: Request): Record<string, string> {
   const origen = request.headers.get("origin") ?? "";
