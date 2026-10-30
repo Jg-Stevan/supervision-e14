@@ -52,10 +52,9 @@ const runner = await import("../runner");
 const runnerDedup = await import("../runner-dedup");
 const prescan = await import("../prescan-qr");
 const storeE14 = await import("@/modules/digitalizador/store/store-e14");
-const tipos = await import("../tipos");
 const { useMasivaStore } = store;
 const { useE14Store } = storeE14;
-const { procesarUno, rearrancarTrasEncolar: _rearrancar, iniciarRunner: _iniciar } = runner;
+const { procesarUno, iniciarRunner, __resetAparcadasDedupParaTest } = runner;
 
 type Fila = {
   id: string;
@@ -167,6 +166,7 @@ beforeEach(async () => {
   reiniciarControl();
   secuenciaId = 0;
   PIXELES.clear();
+  __resetAparcadasDedupParaTest(); // C5 — sin aparcadas entre tests
   await useMasivaStore.getState().vaciar();
   useMasivaStore.setState({
     filas: [],
@@ -828,6 +828,104 @@ describe("R8 · D — esperarDesenlaceOriginal (contrato que el fix C5 conserva)
       });
     }, 500);
     expect(await promesa).toBe(true);
+  });
+});
+
+// ═════════ F · C5 — APARCADO + RE-VISITA (fin de la ola, caller en runner) ═
+// El aparcado nace en el CALLER (rama DUPLICADA de runner.ts): copiable con
+// original DETRÁS en FIFO → aparca (slot liberado, sin OCR) y la ola la
+// re-visita al terminar (copia si la original aterrizó, o fallback honesto).
+// La sección D prueba esperarDesenlaceOriginal DIRECTO (contrato intacto);
+// esta prueba el comportamiento NUEVO de la rama DUPLICADA a través de
+// procesarUno + bucle real (iniciarRunner).
+describe("R8 · F — C5: aparcado + re-visita al terminar la ola", () => {
+  test("original copiable DETRÁS en FIFO → la rama DUPLICADA APARCA (slot liberado, cero OCR)", async () => {
+    const original = filaFixture({ agregadaEn: 500, estado: "PENDIENTE" }); // detrás — patológico
+    const esta = filaFixture({ estado: "DUPLICADA", dupOf: original.id, agregadaEn: 100 });
+    prepararFila(esta, fileFixture("f1-esta.jpg"));
+    prepararFila(original, fileFixture("f1-orig.jpg"));
+
+    await procesarUno(esta as never);
+
+    // APARCADA: procesarUno resuelve sin pipeline — el puente JAMÁS sonó y
+    // la fila vuelve a DUPLICADA en la bandeja (honesto: espera SU original).
+    expect(CONTROL.llamadasPuente.filter((x) => x === "escanearActa").length).toBe(0);
+    expect(filaDe(esta.id).estado).toBe("DUPLICADA");
+    expect(filaDe(esta.id).dupOf).toBe(original.id);
+  });
+
+  test("re-visita al terminar la ola: original aterrizó → copia LISTA (cero OCR) y la ola se cierra", async () => {
+    const original = filaFixture({ agregadaEn: 500, estado: "PENDIENTE" });
+    const esta = filaFixture({ estado: "DUPLICADA", dupOf: original.id, agregadaEn: 100 });
+    prepararFila(esta, fileFixture("f2-esta.jpg"));
+    prepararFila(original, fileFixture("f2-orig.jpg"));
+
+    // 1. Aparcamiento (la original sigue PENDIENTE detrás).
+    await procesarUno(esta as never);
+    expect(filaDe(esta.id).estado).toBe("DUPLICADA");
+    expect(CONTROL.llamadasPuente.filter((x) => x === "escanearActa").length).toBe(0);
+
+    // 2. La original aterriza DURANTE la ola (el pool la procesa → LISTA).
+    REGISTROS.set(original.id, {
+      id: original.id,
+      nombre: original.nombre,
+      agregadaEn: original.agregadaEn,
+      estado: "LISTA",
+      archivo: fileFixture("f2-orig.jpg"),
+      acta: actaFixture({ status: "OPTIMA", score: 9.1 }),
+      thumb: "data:image/jpeg;base64,ORIG-F2",
+    });
+    useMasivaStore.setState({
+      filas: useMasivaStore.getState().filas.map((f) =>
+        f.id === original.id ? { ...f, estado: "LISTA" } : f,
+      ),
+    });
+
+    // 3. FIN DE LA OLA → re-visita: el bucle REAL (iniciarRunner) re-visita
+    // la aparcada, copia el desenlace (DUPLICADA — regla e66) y se cierra.
+    iniciarRunner();
+    const copiada = await esperarHasta(() => filaDe(esta.id).estado === "LISTA");
+    expect(copiada).toBe(true);
+    expect(filaDe(esta.id).statusActa).toBe("DUPLICADA"); // hereda sin envío propio
+    expect(filaDe(esta.id).dupOf).toBe(original.id);
+    // La copia JAMÁS paga OCR (kit e71 literal) — ni en el aparcado ni en la
+    // re-visita: escanearActa sigue en cero.
+    expect(CONTROL.llamadasPuente.filter((x) => x === "escanearActa").length).toBe(0);
+    const registroCopia = registroDe(esta.id);
+    expect((registroCopia.acta as Record<string, unknown>).status).toBe("DUPLICADA");
+    expect(registroCopia.thumb).toBe("data:image/jpeg;base64,ORIG-F2");
+    // La ola se drena sola (no queda trabajo — la corrida se cierra).
+    await esperarHasta(() => useMasivaStore.getState().corriendo === false);
+    expect(useMasivaStore.getState().corriendo).toBe(false);
+  });
+
+  test("re-visita sin desenlace: la aparcada cae al fallback honesto → PENDIENTE (reproceso completo)", async () => {
+    const original = filaFixture({ agregadaEn: 500, estado: "PENDIENTE" });
+    const esta = filaFixture({ estado: "DUPLICADA", dupOf: original.id, agregadaEn: 100 });
+    prepararFila(esta, fileFixture("f3-esta.jpg"));
+    prepararFila(original, fileFixture("f3-orig.jpg"));
+
+    // 1. Aparcamiento.
+    await procesarUno(esta as never);
+    expect(filaDe(esta.id).estado).toBe("DUPLICADA");
+
+    // 2. La original QUITADA durante la ola (la voluntad del dueño manda).
+    useMasivaStore.setState({
+      filas: useMasivaStore.getState().filas.filter((f) => f.id !== original.id),
+    });
+    REGISTROS.delete(original.id);
+
+    // 3. Fin de la ola → re-visita: sin original → fallback honesto (la fila
+    // se des-marca a PENDIENTE y la MISMA ola la reprocesa — con el puente
+    // SIN fixture el reproceso cae a ERROR, jamás tumba la cola).
+    CONTROL.escanearActa = async () => {
+      throw new Error("PUENTE_SIN_FIXTURE");
+    };
+    iniciarRunner();
+    const reprocesada = await esperarHasta(() => filaDe(esta.id).estado === "ERROR");
+    expect(reprocesada).toBe(true);
+    expect(filaDe(esta.id).dupOf ?? null).toBeNull(); // dupOf des-marca en el fallback
+    await esperarHasta(() => useMasivaStore.getState().corriendo === false);
   });
 });
 

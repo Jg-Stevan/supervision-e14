@@ -37,6 +37,29 @@
  */
 import { mock } from "bun:test";
 
+// ─── veneno cross-file de bun (todos los *.test.ts corren en UN proceso) ───
+// flags-schema.test.ts deja un window FALSO en globalThis ({ localStorage }
+// sin navigator ni addEventListener). Este suite importa el store-e14 REAL y
+// su evaluación de módulo (1) lee `window.navigator.onLine` en onlineInicial()
+// y (2) registra `window.addEventListener("online"…)` — con el window ajeno
+// incompleto eso truena a nivel de MÓDULO (unhandled error entre tests y el
+// file entero aborta en la corrida completa; solo el file que definió el
+// window falso pasa). Completamos el MÍNIMO honesto: onLine=true (el MISMO
+// default del guard SSR) y listeners no-op (headless: no hay red que
+// escuche). NUNCA se pisa lo que el window falso ya trae.
+const windowFalsoGlobal = (globalThis as unknown as {
+  window?: Record<string, unknown>;
+}).window;
+if (windowFalsoGlobal) {
+  if (!windowFalsoGlobal.navigator) windowFalsoGlobal.navigator = { onLine: true };
+  if (typeof windowFalsoGlobal.addEventListener !== "function") {
+    windowFalsoGlobal.addEventListener = (): void => {};
+  }
+  if (typeof windowFalsoGlobal.removeEventListener !== "function") {
+    windowFalsoGlobal.removeEventListener = (): void => {};
+  }
+}
+
 // ─── controles mutables por test ────────────────────────────────────────────
 export const CONTROL = {
   /** escanearActa: fixture | throw | colgado. null = PUENTE_SIN_FIXTURE. */

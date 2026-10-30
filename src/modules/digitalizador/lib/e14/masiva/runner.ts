@@ -202,6 +202,24 @@ function procesamientoConcurrenteEfectivo(): 1 | 2 {
  *  reserva, el segundo worker tomaría la MISMA fila). */
 const reservadas = new Set<string>();
 
+// ─── C5 — DUPLICADAS APARCADAS (espera del dedup sin bloquear el pool) ────
+// La rama DUPLICADA de procesarUno APARCA una copiable cuya original NO va
+// delante en la FIFO (guard agregadaEn — ver el bloque C5 allí): el id entra
+// AQUÍ y siguientePendiente lo salta (el slot del pool queda LIBERADO). El
+// FIN DE LA OLA (bucle) RE-VISITA las aparcadas: copia si la original
+// aterrizó durante la ola, o fallback honesto a PENDIENTE (reproceso) —
+// cada aparcada se resuelve UNA vez (jamás reaparca: sin bucles). El set
+// muere en esa re-visita; si la ola muere antes (pausa), la próxima ola (o
+// rearrancarTrasEncolar) la re-visita igual.
+const dedupAparcadas = new Set<string>();
+
+/** Reset SOLO-TEST (masiva-caracterizacion.test.ts) — knip tiene los
+ *  *.test.ts como entry (cero export muerto; mismo precedente de
+ *  historico.__resetIndicePayloadParaTest). */
+export function __resetAparcadasDedupParaTest(): void {
+  dedupAparcadas.clear();
+}
+
 /** Mutex simple (kit Opt-3: «Mutex simple o encolar la verificación de
  *  dedup en un solo hilo») — promesa-cadena FIFO: cada sección crítica se
  *  encola detrás de la anterior y JAMÁS se intercala. Solo la protege lo
@@ -248,7 +266,10 @@ export function siguientePendiente(): FilaMasiva | null {
         // e71 (Opt-3): una fila RESERVADA por otro worker del pool jamás
         // se toma dos veces (la reserva nace ANTES del pipeline y muere en
         // el finally del vuelo).
-        !reservadas.has(f.id),
+        !reservadas.has(f.id) &&
+        // C5: las APARCADAS (original detrás en FIFO) no se toman — su
+        // slot quedó liberado; el FIN DE LA OLA las re-visita.
+        !dedupAparcadas.has(f.id),
     )
     .sort((a, b) => a.agregadaEn - b.agregadaEn);
   return pendientes[0] ?? null;
@@ -457,12 +478,57 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // (32 s de OCR pagados + desenlace ENVIADA propio). Si la original está
     // EN COLA o EN VUELO → ESPERAR su desenlace (sondeo ligero, techo
     // generoso) y copiar: el duplicado JAMÁS paga OCR (kit e71 literal —
-    // totalMs de la copia ≈ 0, criterio del dueño). La original SIEMPRE va
-    // delante en la FIFO (agregadaEn menor) → el otro slot del pool la
-    // alcanza — sin deadlock por construcción; QUITAR/ERROR/techo → el
+    // totalMs de la copia ≈ 0, criterio del dueño). QUITAR/ERROR/techo → el
     // fallback honesto de abajo queda intacto.
-    if (fila.dupOf && (await esperarDesenlaceOriginal(fila.id, fila.dupOf))) {
-      if (await reutilizarResultado(fila, t0)) return;
+    //
+    // C5 — GUARD agregadaEn de la espera (MISMO patrón del guard P2.1-v2 de
+    // la resolución post-OCR de abajo): la original SOLO se espera si va
+    // DELANTE en la FIFO (agregadaEn menor). Antes se esperaba a CUALQUIER
+    // original viva: si la original estaba DETRÁS (o la cola congelada/
+    // pausada — post-mortem 20261020-122235), el slot del pool quedaba
+    // BLOQUEADO hasta el techo (10 min) por un desenlace que no llegaba.
+    // Ahora, original copiable pero NO delante → APARCAR (abajo): la fila
+    // vuelve a DUPLICADA, el slot se libera YA, la ola sigue y la aparcada
+    // se RE-VISITA al terminar la ola (revisitarDuplicadaAparcada — copia si
+    // la original aterrizó, o el fallback honesto de abajo). El techo de la
+    // espera activa NO cambia (esperarDesenlaceOriginal, 10 min): el
+    // comportamiento observable SOLO cambia en el caso patológico (original
+    // detrás / cola congelada): antes slot bloqueado ×10 min; ahora slot
+    // liberado al instante + re-visita al cierre de la ola.
+    if (fila.dupOf) {
+      const original = useMasivaStore
+        .getState()
+        .filas.find((f) => f.id === fila.dupOf);
+      // Whitelist COPIABLE (T-5 e65 — la MISMA de esperarDesenlaceOriginal):
+      // AUSENTE/ERROR/ya-enviada quedan fuera por construcción (sin acta
+      // copiable no hay resolución posible — esa espera responde rápido).
+      const copiable =
+        original != null &&
+        (original.estado === "PENDIENTE" ||
+          original.estado === "PROCESANDO" ||
+          original.estado === "LISTA" ||
+          original.estado === "DUPLICADA");
+      if (
+        copiable &&
+        // LISTA ya ES desenlace: si reutilizar falló arriba el registro no
+        // tiene acta (IDB inconsistente) — el sondeo de la espera jamás la
+        // vería llegar (estado terminal) → aparcado, no espera.
+        original.estado !== "LISTA" &&
+        original.agregadaEn >= fila.agregadaEn
+      ) {
+        // APARCAR: soltar el slot (procesarUno resuelve → el finally del
+        // vuelo libera la reserva) y dejar la fila DUPLICADA en la bandeja
+        // (honesto: ES una duplicada esperando a SU original).
+        dedupAparcadas.add(fila.id);
+        marcarFila(fila.id, { estado: "DUPLICADA", error: null });
+        logger.info(
+          `[e14] dedup fila=${fila.id} dupOf=${fila.dupOf} aparcada original-detras slot-liberado`,
+        );
+        return;
+      }
+      if (await esperarDesenlaceOriginal(fila.id, fila.dupOf)) {
+        if (await reutilizarResultado(fila, t0)) return;
+      }
     }
     // Fallback: des-marcar y reprocesar como fila normal (mismo pase).
     fila = { ...fila, estado: "PENDIENTE", dupOf: null };
@@ -1825,6 +1891,29 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   }
 }
 
+/** C5 — RE-VISITA de UNA duplicada aparcada (fin de la ola — la llama
+ *  bucle()). Copia si la original ya aterrizó durante la ola; si sigue sin
+ *  desenlace, cae al fallback HONESTO de la rama DUPLICADA (des-marcar a
+ *  PENDIENTE — la MISMA ola la reprocesa completa por la puerta de siempre).
+ *  JAMÁS espera ni reaparca: una aparcada se resuelve exactamente UNA vez
+ *  (terminación garantizada del bucle). QUITADA en el aparcado → nada (la
+ *  voluntad del dueño manda — misma regla de esperarDesenlaceOriginal). */
+async function revisitarDuplicadaAparcada(fila: FilaMasiva): Promise<void> {
+  if (!useMasivaStore.getState().filas.some((f) => f.id === fila.id)) return;
+  marcarFila(fila.id, { estado: "PROCESANDO", error: null });
+  if (await reutilizarResultado(fila, Date.now())) return;
+  marcarFila(fila.id, { estado: "PENDIENTE", dupOf: null });
+  try {
+    // D41 — lectura RAW: solo spread base del re-save (sin dataURLs que
+    // materializar — idéntico al fallback de la rama DUPLICADA).
+    const registro = await leerRegistroRaw(fila.id);
+    await guardarRegistro({ ...registro, estado: "PENDIENTE", dupOf: undefined });
+  } catch {
+    /* IDB caído — la fila ya está PENDIENTE en memoria (honesto) */
+  }
+  logger.info(`[e14] dedup fila=${fila.id} sin-original reprocesa-completo`);
+}
+
 async function bucle(): Promise<void> {
   // e71 (Opt-3) — PARALELISMO 2 WORKERS (kit e71-consolidación, benchmark
   // aprobado): pool de PROCESAMIENTO_CONCURRENTE actas EN VUELO. La fila se
@@ -1839,7 +1928,26 @@ async function bucle(): Promise<void> {
       await Promise.race(enVuelo);
     }
     const fila = siguientePendiente();
-    if (!fila) break;
+    if (!fila) {
+      // C5 — FIN DE LA OLA con aparcadas: RE-VISITA antes de romper (en
+      // FIFO). Cada una copia (original aterrizada) o cae al fallback
+      // honesto → PENDIENTE, que el `continue` re-entra a ESTA misma ola.
+      // La re-visita jamás reaparca: siguiente pasada o rompe (todo
+      // resuelto) o toma trabajo real — terminación garantizada.
+      if (dedupAparcadas.size > 0) {
+        const idsAparcadas = [...dedupAparcadas];
+        dedupAparcadas.clear();
+        const ordenadas = useMasivaStore
+          .getState()
+          .filas.filter((f) => idsAparcadas.includes(f.id))
+          .sort((a, b) => a.agregadaEn - b.agregadaEn);
+        for (const aparcada of ordenadas) {
+          await revisitarDuplicadaAparcada(aparcada);
+        }
+        continue;
+      }
+      break;
+    }
     reservadas.add(fila.id);
     // D66 — KIT e14-decode-unico-precalor-v1: prefetch RE-APUNTADO (D61) —
     // al iniciar N se asegura el MASTER de N+1 (decode oculto tras el OCR
@@ -1927,6 +2035,9 @@ export function rearrancarTrasEncolar(): void {
   if (!colaSesionIniciada || stopFlag) return;
   setTimeout(() => {
     if (stopFlag) return; // pausa llegando tarde — el dueño manda
-    if (siguientePendiente()) iniciarRunner();
+    // C5: las APARCADAS también exigen ola (siguientePendiente las salta) —
+    // el swap temp→id real de su original es exactamente la señal que las
+    // resuelve (la re-visita del fin de ola copia o cae al fallback).
+    if (siguientePendiente() || dedupAparcadas.size > 0) iniciarRunner();
   }, 0);
 }

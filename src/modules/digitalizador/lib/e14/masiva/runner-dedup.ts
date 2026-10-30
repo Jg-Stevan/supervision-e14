@@ -28,6 +28,10 @@ import { useMasivaStore } from "./store";
 // y el fallback honesto de SIEMPRE corre: el dueño nunca pierde la foto).
 // PENDIENTE/PROCESANDO ESPERAN (la original siempre va delante en la FIFO
 // — el otro slot del pool la alcanza; sin deadlock por construcción).
+// C5: el CALLER (rama DUPLICADA de runner.ts) SÓLO llama con la original
+// DELANTE en la FIFO (guard agregadaEn) o MUERTA (respuesta rápida); la
+// copiable DETRÁS se APARCA allí (slot liberado + re-visita al terminar la
+// ola) y jamás llega a esta espera. El contrato AQUÍ no cambia.
 // Sin timers globales — mismo patrón de esperarDesenlaceQr (e63m), techo a
 // escala OCR (15 s del QR no cubren un pipeline completo).
 const ESPERA_ORIGINAL_INTERVALO_MS = 400;
