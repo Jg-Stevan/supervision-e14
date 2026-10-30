@@ -21,13 +21,13 @@ import {
 // e65b — KIT e65b-historico-enviadas-v1 (T-2): LEDGER PERSISTENTE de
 // enviadas (DB separada — historico.ts, solo llaves/L7). El índice del
 // histórico se FUSIONA con el ledger: sobrevive vaciar() y recargas
-// (REVERSA de D-e65-8 → D-e65b-1).
+// (REVERSA de D-e65-8 → D-e65b-1). R8 — split del store: la carga/fusión
+// del índice y el crecimiento del ledger viven en dedup-indice.ts; aquí
+// quedan los consumers directos del ciclo de vida y del índice-payload del
+// sondeo (indiceEnviadasPorPayload — KIT e73 §C).
 import {
   borrarHistorico,
-  listarHistorico,
-  registrarEntradaHistorico,
   // KIT e73-sondeo-qr-precoz-v1 (§C) — índice histórico por payload del sondeo
-  actualizarIndicePayload,
   indiceEnviadasPorPayload,
   // D33 — reiniciar-envios: reset del índice de sesión por payload
   resetearIndicePayload,
@@ -99,7 +99,7 @@ import type { Acta } from "../types";
 // tipos.ts (el núcleo inyectado los consume sin importar este módulo — fin
 // del ciclo store↔runner↔precalor). API PÚBLICA intacta: los tipos que los
 // consumidores ya importaban de aquí siguen exportados desde aquí.
-import type { EtapaVidaKit, FiltroMasiva, MasivaStore } from "./tipos";
+import type { MasivaStore } from "./tipos";
 export type { EtapaVidaKit, FiltroMasiva } from "./tipos";
 
 /** Registro IDB → fila LIVIANA (sin Blob, sin acta — la foto duerme). */
@@ -176,121 +176,25 @@ export {
 } from "./dedup-payloads";
 import { resetearPayloadsSesion } from "./dedup-payloads";
 
-// ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1): MODO PRUEBAS ───────────
-// MODO PRUEBAS (pre-elección): la cola NO sobrevive recargas — revertir a
-// true para producción.
-// Pedido literal del dueño: «que las actas no se guarden en memoria por el
-// momento, porque estamos haciendo pruebas y la gracia es que en cada lote
-// pueda identificar el acta antes de procesarla».
-// Con FALSE (modo pruebas):
-//  · C-1 — cargarFilas() arranca la cola VACÍA (no restaura filas ni
-//    reconstruye Maps desde persistencia) y borra la persistencia vieja
-//    (cola IDB + ledger del histórico — higiene).
-//  · C-2 — vaciar() resetea TODO el ciclo de vida de la memoria de dedup:
-//    mapa de payload (dedup-payloads) + ledger + índice → limpiar el MISMO lote
-//    procesa completo de cero.
-//  · C-3 — el LEDGER de enviadas NO alimenta el índice del histórico (los
-//    Maps de dedup no se alimentan de NADA persistido); la dedup DENTRO del
-//    lote/sesión queda INTACTA (la gracia — gemelas atrapadas en vivo).
-// Con TRUE (producción): byte a byte el comportamiento de siempre —
-// restauración tras recarga/crash + dedup inter-lote + ledger e65b que
-// sobrevive vaciar() (D-e65b-1). Cero código borrado — solo ciclo de vida.
-/** e64p (C-1/C-2 — MODO PRUEBAS). Desde cola-persistente-v1: kill switch del
- *  dueño — el override `colaPersistente: false` (e14-flags-overrides) activa
- *  el modo pruebas (auto-borrado al cargar). Default TRUE: la masiva SOLO se
- *  elimina con vaciar() del dueño — petición literal 2026-10-24. */
-const COLA_PERSISTENTE = leerFlags().colaPersistente ?? true;
+// ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1/C-2/C-3): MODO PRUEBAS ───
+// El kill switch (COLA_PERSISTENTE) y su contrato completo viven AHORA en
+// dedup-indice.ts (R8 — split del store: la decisión de alimentarse del
+// ledger es del índice; el store consume el mismo export).
+import { COLA_PERSISTENTE } from "./dedup-indice";
 
-// ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS (D-e65-3) ────
-// Carga LIVIANA una vez por sesión de encolado: listarMapeados con mapper
-// que NO retiene Blob ni acta (lección L7 / fix C6) — solo las llaves del
-// dedup ({id, hashBytes?, hashDedup?, payloadQr?}). Registros SIN llave
-// quedan FUERA (jamás inventar).
-// e65b (T-2b, D-e65b-1): el índice se FUSIONA con el LEDGER persistente
-// (historico.ts — DB separada): sobrevive vaciar() y recargas. Lo que se
-// ENVÍA después de la carga queda cubierto por (a) las filas VIVAS de la
-// cola (mismas capas, con verificación de registro viva antes de marcar)
-// y (b) registrarEnviadaHistorico — que actualiza el cache EN MEMORIA al
-// instante (mismo gesto de la sesión).
-let indiceEnviadas: EntradaHistorica[] | null = null;
-
-async function indiceEnviadasDe(): Promise<EntradaHistorica[]> {
-  if (indiceEnviadas) return indiceEnviadas;
-  const deCola = await listarMapeados<EntradaHistorica>((r) => {
-    // Solo ENVIADAS (acta propia) o YA-ENVIADA (filas marcadas por el kit).
-    if (r.acta?.status !== "ENVIADA" && r.estado !== "YA-ENVIADA") return null;
-    if (!r.hashBytes && !r.hashDedup && !r.qrPayload) return null; // sin llave → jamás inventar
-    return {
-      id: r.id,
-      ts: r.agregadaEn,
-      hashBytes: r.hashBytes,
-      hashDedup: r.hashDedup,
-      payloadQr: r.qrPayload,
-    };
-  });
-  // e65b (M-e65b-2): el ledger NO es fatal — si cae, el índice se construye
-  // SOLO con la cola viva (exactamente el comportamiento e65; conservador
-  // RL-e65b-3 — jamás tumba la cadena de dedup).
-  // e64p (C-3 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ledger NO
-  // alimenta el índice — cero memoria ENTRE lotes (el histórico de sesiones
-  // anteriores jamás marca YA-ENVIADA); solo la cola viva de ESTA sesión.
-  let deLedger: EntradaHistorica[] = [];
-  if (COLA_PERSISTENTE) {
-    try {
-      deLedger = await listarHistorico(); // llaves chicas — getAll seguro (L7)
-    } catch {
-      deLedger = [];
-    }
-  }
-  const porId = new Map<string, EntradaHistorica>();
-  for (const e of deLedger) porId.set(e.id, e);
-  for (const e of deCola) porId.set(e.id, e); // la cola viva manda (más fresca)
-  indiceEnviadas = [...porId.values()];
-  return indiceEnviadas;
-}
-
-/** e65b (T-2c): el ÚNICO punto donde el ledger crece — alimenta el histórico
- *  con TODO desenlace ENVIADO (envío propio del runner T-3a, gemela
- *  reutilizada T-3b, envíos manuales T-3c, marca YA-ENVIADA T-2d) —
- *  fire-and-forget desde el runner (RL-e65b-2/3). Si el cache del índice ya
- *  está construido, se actualiza EN MEMORIA al instante (mismo gesto — la
- *  re-subida de ESTA sesión ya matchea sin recargar). */
-export async function registrarEnviadaHistorico(e: EntradaHistorica): Promise<void> {
-  try {
-    await registrarEntradaHistorico(e);
-  } catch {
-    return; // IDB caída — conservador, jamás tumba el envío (RL-e65b-3)
-  }
-  if (indiceEnviadas) {
-    const entrada: EntradaHistorica = {
-      id: e.id,
-      ts: e.ts,
-      hashBytes: e.hashBytes,
-      hashDedup: e.hashDedup,
-      payloadQr: e.payloadQr,
-    };
-    const i = indiceEnviadas.findIndex((x) => x.id === e.id);
-    if (i >= 0) indiceEnviadas[i] = entrada;
-    else indiceEnviadas.push(entrada);
-  }
-  // KIT e73-sondeo-qr-precoz-v1 (§C) — hook al MISMO punto de invalidación:
-  // el índice por payload del sondeo ve el MISMO gesto de sesión (no-op si
-  // aún no cargó — se construirá con TODO dentro al primer uso).
-  actualizarIndicePayload(e);
-}
-
-/** e65b (T-2e): lookup O(n) sobre el índice cacheado (n = enviadas; miles OK).
- *  El índice SOLO contiene enviadas por construcción → hit = YA-ENVIADA.
- *  Igualdad EXACTA del payload (llave opaca — jamás prefijos, RL-e65b-8).
- *  Fallo del índice → null conservador: la fila sigue su curso (RL-e65b-3). */
-export async function enviadaPorPayload(payload: string): Promise<EntradaHistorica | null> {
-  if (!payload) return null;
-  try {
-    return (await indiceEnviadasDe()).find((h) => h.payloadQr === payload) ?? null;
-  } catch {
-    return null;
-  }
-}
+// ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS: MOVIDO a
+// dedup-indice.ts (R8 — split del store, rol «ledger/índice»). La API
+// pública se conserva: re-exports byte a byte (el runner y el prescan
+// importan desde aquí hasta sus propios re-apuntes).
+export {
+  enviadaPorPayload,
+  registrarEnviadaHistorico,
+} from "./dedup-indice";
+import {
+  indiceEnviadasDe,
+  registrarEnviadaHistorico,
+  resetearIndiceEnviadas,
+} from "./dedup-indice";
 
 /** e65 (T-4): marca YA-ENVIADA con el MISMO patrón anti-zombi de la marca
  *  DUPLICADA (fila viva + PENDIENTE + registro leíble + write IDB OK).
@@ -988,7 +892,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
           /* conservador — el ledger se re-borra en el próximo vaciar/carga */
         }
         resetearPayloadsSesion(); // e64p C-1 — el mapa de payload de la sesión muere aquí
-        indiceEnviadas = null;
+        resetearIndiceEnviadas();
         set({ filas: [], colaDisponible: true, avisoCola: null });
         return;
       }
@@ -1398,7 +1302,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         /* conservador — el índice ya no lo verá en esta sesión */
       }
     }
-    indiceEnviadas = null;
+    resetearIndiceEnviadas();
     set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
   },
 
@@ -1425,7 +1329,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
       /* conservador — IDB caída: los índices de sesión ya no la verán */
     }
     resetearIndicePayload();
-    indiceEnviadas = null;
+    resetearIndiceEnviadas();
     set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
   },
 
