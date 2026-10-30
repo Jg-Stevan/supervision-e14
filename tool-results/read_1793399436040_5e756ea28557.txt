@@ -1,0 +1,675 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→/**
+     4→     4→ * KIT e14-carga-masiva-v1 (T4): vista MASIVA — desktop-first, UNA vista con
+     5→     5→ * todo adentro (kit §6). Sueltas/seleccionas N fotos → cola persistente
+     6→     6→ * (IndexedDB) → runner secuencial con el MISMO pipeline real de siempre →
+     7→     7→ * bandeja de resultados con estados, envío automático de ÓPTIMAS y
+     8→     8→ * revisión del resto (ABRIR → modal de revisión propio del módulo).
+     9→     9→ * Copy corto del repo (mono, uppercase, sin guías — D1/gate-v2). Sin toasts
+    10→    10→ * (redesign-stitch D2): píldoras/banner. Listas largas: max-h + overflow-y-auto.
+    11→    11→ *
+    12→    12→ * KIT carga-masiva-supervision-v1 (D27): vista embebida en el dashboard de
+    13→    13→ * SUPERVISION (módulo digitalizador trasplantado). Los envíos se PUBLICAN
+    14→    14→ * en el monitor vía el adaptador (store/store-e14.ts → actas-runtime); el
+    15→    15→ * modal de revisión añade VER EN MONITOR para aterrizar el acta publicada
+    16→    16→ * en el visor del dashboard (seam por props — sin contexto cruzado).
+    17→    17→ *
+    18→    18→ * R6 (SPLIT — reporte 03b M-2): este archivo es el ORQUESTADOR de la vista
+    19→    19→ * tras el split move-only de MasivaView.tsx; helpers/píldoras en helpers.tsx,
+    20→    20→ * modal en modal-revisor.tsx, chip en publicacion-chip.tsx. La ruta pública
+    21→    21→ * `screens/MasivaView.tsx` queda como barrel de compatibilidad.
+    22→    22→ */
+    23→    23→import { useEffect, useMemo, useRef, useState } from "react";
+    24→    24→import {
+    25→    25→  cerrarActaMasiva,
+    26→    26→  useE14Store,
+    27→    27→} from "@/modules/digitalizador/store/store-e14";
+    28→    28→import {
+    29→    29→  refrescarEnviosTrasDrenaje,
+    30→    30→  useMasivaStore,
+    31→    31→} from "@/modules/digitalizador/lib/e14/masiva/store";
+    32→    32→import { rapidOcrPrecalentar } from "@/modules/digitalizador/lib/e14/ocr/rapidocr";
+    33→    33→// KIT e107-prescan-qr-cola-v1 (§D.3): el botón PROCESAR COLA delega en el
+    34→    34→// pre-scan QR (fases 1-2 del dueño) y el orquestador llama iniciar() con la
+    35→    35→// lista ya filtrada (flag OFF ⇒ iniciar() byte-idéntico — kill-switch).
+    36→    36→import { prescanYIniciar, usePrescanQrEstado } from "@/modules/digitalizador/lib/e14/masiva/prescan-qr";
+    37→    37→// KIT e14-gama-adaptativa-v1 (D74): chip de gama adaptada — el tier detectado
+    38→    38→// consume presupuestos de recursos en BAJO/MEDIO (transparencia del dueño).
+    39→    39→import { planGamaActual, refrescarPlanGama, type PlanGama } from "@/modules/digitalizador/lib/e14/gama";
+    40→    40→// D34 — KIT e14-metricas-corrida-v1: informe de comportamiento de la carga
+    41→    41→// (corrida viva + historial + export JSON) — datos reales para diagnosticar.
+    42→    42→import InformeCorrida from "../InformeCorrida";
+    43→    43→// R6 — SPLIT move-only (reporte 03b M-2): helpers/píldoras puras ahora viven
+    44→    44→// en masiva/helpers.tsx (verbatim — sin cambio de lógica).
+    45→    45→import { esDuplicada } from "./helpers";
+    46→    46→// R6 — SPLIT move-only: los bloques de la vista ahora viven en masiva/*
+    47→    47→// (fila, bandeja, progreso, dropzone) — verbatim, sin cambio de lógica.
+    48→    48→import { BandejaFiltros, BandejaFilas } from "./bandeja";
+    49→    49→import { ProgresoLote } from "./progreso-lote";
+    50→    50→import { OverlayDragGlobal, ZonaCarga } from "./dropzone";
+    51→    51→// R6 — SPLIT move-only: modal de revisión (con editor) vive en masiva/
+    52→    52→// (verbatim — sin cambio de lógica); PublicacionChip lo consume el modal.
+    53→    53→import { ModalRevisor } from "./modal-revisor";
+    54→    54→import { StitchStackIcon } from "../../icons";
+    55→    55→
+    56→    56→/** Seam de UI (D27): props que el shell de supervision entrega a la vista.
+    57→    57→ * `onVerEnMonitor` aterriza un acta publicada en el visor del dashboard
+    58→    58→ * (cambia a MONITOR y abre el modal del acta de esa mesa). Opcional: sin
+    59→    59→ * ella, el modal de revisión funciona igual (solo sin el salto al monitor). */
+    60→    60→export interface PropsMasivaView {
+    61→    61→  onVerEnMonitor?: (
+    62→    62→    puestoId: string,
+    63→    63→    mesaId: string,
+    64→    64→    tipo?: "TRANSMISION" | "DELEGADOS"
+    65→    65→  ) => void;
+    66→    66→}
+    67→    67→
+    68→    68→export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
+    69→    69→  const filas = useMasivaStore((s) => s.filas);
+    70→    70→  const corriendo = useMasivaStore((s) => s.corriendo);
+    71→    71→  const progreso = useMasivaStore((s) => s.progreso);
+    72→    72→  const filtro = useMasivaStore((s) => s.filtro);
+    73→    73→  const guardando = useMasivaStore((s) => s.guardando);
+    74→    74→  const colaDisponible = useMasivaStore((s) => s.colaDisponible);
+    75→    75→  const avisoCola = useMasivaStore((s) => s.avisoCola);
+    76→    76→  const enviandoLote = useMasivaStore((s) => s.enviandoLote);
+    77→    77→  // KIT e73 (§E): contadores del chip del sondeo QR en ingesta (SOLO-LECTURA
+    78→    78→  // — derivados de las filas; jamás tocan la cola ni el runner).
+    79→    79→  // KIT e107-prescan-qr-cola-v1 (§D.3): estado del banner del pre-scan
+    80→    80→  // («SONDEANDO QR… k/N») — SOLO-LECTURA, como el chip del sondeo e73.
+    81→    81→  const prescan = usePrescanQrEstado();
+    82→    82→  const {
+    83→    83→    cargarFilas,
+    84→    84→    sincronizarAlVolver,
+    85→    85→    agregarFiles,
+    86→    86→    pausar,
+    87→    87→    abrirActa,
+    88→    88→    quitar,
+    89→    89→    vaciar,
+    90→    90→    reiniciarEnvios, // D33 — KIT e14-reiniciar-envios-v1
+    91→    91→    enviarLote,
+    92→    92→    setFiltro,
+    93→    93→    procesarIgual,
+    94→    94→    reintentar, // D59 — KIT e14-info-acta-filas-v1 (T4)
+    95→    95→  } = useMasivaStore.getState();
+    96→    96→
+    97→    97→  const inputRef = useRef<HTMLInputElement>(null);
+    98→    98→  const [isDraggingGlobal, setIsDraggingGlobal] = useState(false);
+    99→    99→  const dragCounterRef = useRef(0);
+   100→   100→  const [vaciarArmado, setVaciarArmado] = useState(false);
+   101→   101→  // D33 — KIT e14-reiniciar-envios-v1: armado del botón REINICIAR ENVÍOS
+   102→   102→  // (2 toques — el borrado del ledger NUNCA es accidental).
+   103→   103→  const [resetArmado, setResetArmado] = useState(false);
+   104→   104→
+   105→   105→  // ── D27 — modal de revisión (ABRIR): el adaptador carga el acta de IDB
+   106→   106→  // (abrirActaMasiva) y esta vista la muestra. Al cerrar, sincronizarAlVolver
+   107→   107→  // re-persiste (thumb/ledger e65b) ANTES de limpiar actaActual.
+   108→   108→  const actaAbierta = useE14Store((s) => s.actaActual);
+   109→   109→  const publicaciones = useE14Store((s) => s.publicaciones);
+   110→   110→  const publicacionAbierta = actaAbierta
+   111→   111→    ? publicaciones[actaAbierta.id]
+   112→   112→    : undefined;
+   113→   113→  const [revisorAbierto, setRevisorAbierto] = useState(false);
+   114→   114→  useEffect(() => {
+   115→   115→    if (actaAbierta) setRevisorAbierto(true);
+   116→   116→  }, [actaAbierta]);
+   117→   117→  const cerrarRevisor = () => {
+   118→   118→    setRevisorAbierto(false);
+   119→   119→    void sincronizarAlVolver().finally(() => cerrarActaMasiva());
+   120→   120→  };
+   121→   121→
+   122→   122→  // Al montar: cargarFilas() (incluye recuperarCola — zombis fuera) +
+   123→   123→  // sincronizarAlVolver() al regresar de REVISIÓN (kit §6). Acciones de
+   124→   124→  // zustand estables → deps correctas.
+   125→   125→  useEffect(() => {
+   126→   126→    void cargarFilas().then(() => sincronizarAlVolver());
+   127→   127→  }, [cargarFilas, sincronizarAlVolver]);
+   128→   128→
+   129→   129→  // KIT e14-prowarm-ocr-v1 (T2): pre-warm del OCR al montar MASIVA — el dueño
+   130→   130→  // prepara la cola y el wasm queda caliente ANTES de pulsar PROCESAR.
+   131→   131→  // Fire-and-forget: sin UI, sin toasts (D2), sin estados (§0.7).
+   132→   132→  useEffect(() => {
+   133→   133→    void rapidOcrPrecalentar();
+   134→   134→  }, []);
+   135→   135→
+   136→   136→  // KIT e14-gama-adaptativa-v1 (D74): plan de gama para el chip — el sync
+   137→   137→  // manda al montar y `refrescarPlanGama()` re-clasifica con la versión
+   138→   138→  // COMPLETA (batería + storage — puede BAJAR el tier). Fire-and-forget.
+   139→   139→  const [gama, setGama] = useState<PlanGama>(() => planGamaActual());
+   140→   140→  useEffect(() => {
+   141→   141→    void refrescarPlanGama().then(setGama);
+   142→   142→  }, []);
+   143→   143→
+   144→   144→  // Confirmación inline de 2 toques — se desarma sola (kit §6, sin window.confirm).
+   145→   145→  // D33: el desarme cubre AMBOS armados (VACIAR y REINICIAR ENVÍOS).
+   146→   146→  useEffect(() => {
+   147→   147→    if (!vaciarArmado && !resetArmado) return;
+   148→   148→    const t = window.setTimeout(() => {
+   149→   149→      setVaciarArmado(false);
+   150→   150→      setResetArmado(false);
+   151→   151→    }, 3000);
+   152→   152→    return () => window.clearTimeout(t);
+   153→   153→  }, [vaciarArmado, resetArmado]);
+   154→   154→
+   155→   155→  // Listener global de drag & drop (estilo DeepSeek / Slack):
+   156→   156→  // Permite arrastrar archivos desde el explorador y soltarlos en cualquier
+   157→   157→  // parte de la ventana mientras el módulo MASIVA está activo.
+   158→   158→  useEffect(() => {
+   159→   159→    const handleDragEnter = (e: DragEvent) => {
+   160→   160→      e.preventDefault();
+   161→   161→      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+   162→   162→        dragCounterRef.current++;
+   163→   163→        setIsDraggingGlobal(true);
+   164→   164→      }
+   165→   165→    };
+   166→   166→
+   167→   167→    const handleDragLeave = (e: DragEvent) => {
+   168→   168→      e.preventDefault();
+   169→   169→      dragCounterRef.current--;
+   170→   170→      if (dragCounterRef.current <= 0) {
+   171→   171→        dragCounterRef.current = 0;
+   172→   172→        setIsDraggingGlobal(false);
+   173→   173→      }
+   174→   174→    };
+   175→   175→
+   176→   176→    const handleDragOver = (e: DragEvent) => {
+   177→   177→      e.preventDefault();
+   178→   178→      if (e.dataTransfer) {
+   179→   179→        e.dataTransfer.dropEffect = "copy";
+   180→   180→      }
+   181→   181→    };
+   182→   182→
+   183→   183→    const handleDrop = (e: DragEvent) => {
+   184→   184→      e.preventDefault();
+   185→   185→      dragCounterRef.current = 0;
+   186→   186→      setIsDraggingGlobal(false);
+   187→   187→      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+   188→   188→        void agregarFiles(Array.from(e.dataTransfer.files));
+   189→   189→      }
+   190→   190→    };
+   191→   191→
+   192→   192→    window.addEventListener("dragenter", handleDragEnter);
+   193→   193→    window.addEventListener("dragleave", handleDragLeave);
+   194→   194→    window.addEventListener("dragover", handleDragOver);
+   195→   195→    window.addEventListener("drop", handleDrop);
+   196→   196→
+   197→   197→    return () => {
+   198→   198→      window.removeEventListener("dragenter", handleDragEnter);
+   199→   199→      window.removeEventListener("dragleave", handleDragLeave);
+   200→   200→      window.removeEventListener("dragover", handleDragOver);
+   201→   201→      window.removeEventListener("drop", handleDrop);
+   202→   202→    };
+   203→   203→  }, [agregarFiles]);
+   204→   204→
+   205→   205→  // KIT e14-masiva-ux-v1 (T3.2): reconciliar filas «EN COLA» contra la
+   206→   206→  // conexión actual — tanto al montar (el toggle pudo usarse en REVISIÓN o
+   207→   207→  // la app recargarse: online=true + hashSha256 "EN COLA" ⇒ el drenaje ya
+   208→   208→  // ocurrió en el store principal, la fila solo pinta tarde) como en el
+   209→   209→  // toggle offline→online con la vista viva. Idempotente (solo toca filas
+   210→   210→  // con hashSha256 === "EN COLA" que sigan así en IDB).
+   211→   211→  const online = useE14Store((s) => s.online);
+   212→   212→  useEffect(() => {
+   213→   213→    if (online) void refrescarEnviosTrasDrenaje();
+   214→   214→  }, [online]);
+   215→   215→
+   216→   216→  // R6 — FIX (reporte 03b §M-2, «~12 filter() por render»): sondeadas,
+   217→   217→  // conPayload, pendientes, duplicadas, terminadas, yaEnviadas,
+   218→   218→  // advertenciasPend, enviadas, enCola y errores eran 10 filter() + 2 más
+   219→   219→  // re-ejecutados en CADA render (la vista re-renderiza por señal de vida,
+   220→   220→  // throttle 250 ms). Mismo resultado en UNA pasada memoizada — la
+   221→   221→  // dependencia es estrecha: solo cambia cuando cambia `filas`.
+   222→   222→  // KIT e73 (§E): sondeadas/conPayload alimentan el chip del sondeo QR.
+   223→   223→  const conteos = useMemo(() => {
+   224→   224→    let sondeadas = 0;
+   225→   225→    let conPayload = 0;
+   226→   226→    let pendientes = 0;
+   227→   227→    let duplicadas = 0;
+   228→   228→    let terminadas = 0;
+   229→   229→    let yaEnviadas = 0;
+   230→   230→    let advertenciasPend = 0;
+   231→   231→    let enviadas = 0;
+   232→   232→    let enCola = 0;
+   233→   233→    let errores = 0;
+   234→   234→    for (const f of filas) {
+   235→   235→      if (f.sondeoQrMs != null) sondeadas++;
+   236→   236→      if (f.sondeoQrTier != null) conPayload++;
+   237→   237→      switch (f.estado) {
+   238→   238→        case "PENDIENTE":
+   239→   239→          // FIX M13: las temps no cuentan como PENDIENTES (mueren al
+   240→   240→          // aterrizar sus ids reales).
+   241→   241→          if (!f.id.startsWith("masiva-temp-")) pendientes++;
+   242→   242→          break;
+   243→   243→        case "DUPLICADA":
+   244→   244→          // KIT e14-masiva-tiempos-v1 (PR-1): las DUPLICADAS son cola también
+   245→   245→          // (su procesamiento es la copia rápida).
+   246→   246→          duplicadas++;
+   247→   247→          break;
+   248→   248→        case "LISTA":
+   249→   249→          terminadas++;
+   250→   250→          if (f.statusActa === "ADVERTENCIA") advertenciasPend++;
+   251→   251→          // KIT e14-masiva-ux-v1 (T3.4): conteos del encabezado del lote.
+   252→   252→          else if (f.statusActa === "ENVIADA") {
+   253→   253→            if (f.envioEnCola) enCola++;
+   254→   254→            else enviadas++;
+   255→   255→          }
+   256→   256→          break;
+   257→   257→        case "YA-ENVIADA":
+   258→   258→          // e65: la YA-ENVIADA está terminada (cero pipeline) — contador
+   259→   259→          // T-7 de la línea de resumen.
+   260→   260→          terminadas++;
+   261→   261→          yaEnviadas++;
+   262→   262→          break;
+   263→   263→        case "ERROR":
+   264→   264→          terminadas++;
+   265→   265→          errores++;
+   266→   266→          break;
+   267→   267→      }
+   268→   268→    }
+   269→   269→    return {
+   270→   270→      sondeadas,
+   271→   271→      conPayload,
+   272→   272→      pendientes,
+   273→   273→      duplicadas,
+   274→   274→      terminadas,
+   275→   275→      yaEnviadas,
+   276→   276→      advertenciasPend,
+   277→   277→      enviadas,
+   278→   278→      enCola,
+   279→   279→      errores,
+   280→   280→    };
+   281→   281→  }, [filas]);
+   282→   282→  const {
+   283→   283→    sondeadas,
+   284→   284→    conPayload,
+   285→   285→    pendientes,
+   286→   286→    duplicadas,
+   287→   287→    terminadas,
+   288→   288→    yaEnviadas,
+   289→   289→    advertenciasPend,
+   290→   290→    enviadas,
+   291→   291→    enCola,
+   292→   292→    errores,
+   293→   293→  } = conteos;
+   294→   294→  const hayCola = filas.length > 0;
+   295→   295→
+   296→   296→  const visibles = useMemo(
+   297→   297→    () =>
+   298→   298→      filtro === "TODAS"
+   299→   299→        ? filas
+   300→   300→        : filas.filter((f) =>
+   301→   301→            filtro === "ERROR" ? f.estado === "ERROR" : f.statusActa === filtro,
+   302→   302→          ),
+   303→   303→    [filas, filtro],
+   304→   304→  );
+   305→   305→
+   306→   306→  // KIT e64v — Cambio B: duplicadas AL FINAL de la bandeja. SOLO orden de
+   307→   307→  // RENDER (useMemo): el array del store JAMÁS se reordena — es la fuente
+   308→   308→  // de verdad de la cola (e63g watchdog, espera APLAZADA, persistencia,
+   309→   309→  // orden de envío). filter preserva el orden de llegada dentro de cada
+   310→   310→  // grupo; el render usa key=id → React reordena por clave sin re-montar.
+   311→   311→  const visiblesOrdenadas = useMemo(() => {
+   312→   312→    const originales = visibles.filter((f) => !esDuplicada(f));
+   313→   313→    const duplicadas = visibles.filter((f) => esDuplicada(f));
+   314→   314→    return [...originales, ...duplicadas];
+   315→   315→  }, [visibles]);
+   316→   316→
+   317→   317→  // R6 — FIX O(n²) (reporte 03b §M-2): `filas.find((f) => f.id === progreso.id)`
+   318→   318→  // por render → Map id→fila precalculado.
+   319→   319→  const porId = useMemo(() => new Map(filas.map((f) => [f.id, f])), [filas]);
+   320→   320→  const activa = progreso ? (porId.get(progreso.id) ?? null) : null;
+   321→   321→  const filaActiva = activa && activa.estado === "PROCESANDO" ? activa : null;
+   322→   322→
+   323→   323→  // D65 (T3.3): cola REAL del runner (MISMA orden que siguientePendiente:
+   324→   324→  // PENDIENTE/DUPLICADA sin temps por agregadaEn) + la fila EN CURSO al
+   325→   325→  // frente → «EN COLA #N de M» honesto (N = posición 1-based; M = total por
+   326→   326→  // procesar + en curso). DUPLICADA también va en cola (su procesamiento es
+   327→   327→  // la copia rápida — el runner la toma igual).
+   328→   328→  const enCursoId = progreso?.id ?? null;
+   329→   329→  const colaVida = useMemo(() => {
+   330→   330→    const ordenadas = filas
+   331→   331→      .filter(
+   332→   332→        (f) =>
+   333→   333→          (f.estado === "PENDIENTE" || f.estado === "DUPLICADA") &&
+   334→   334→          !f.id.startsWith("masiva-temp-"),
+   335→   335→      )
+   336→   336→      .sort((a, b) => a.agregadaEn - b.agregadaEn)
+   337→   337→      .map((f) => f.id);
+   338→   338→    return enCursoId ? [enCursoId, ...ordenadas] : ordenadas;
+   339→   339→  }, [filas, enCursoId]);
+   340→   340→
+   341→   341→  // R6 — FIX O(n²) (reporte 03b §M-2): `colaVida.indexOf(f.id)` POR FILA en
+   342→   342→  // el render de la bandeja — con un zip de 500 entradas son ~250k
+   343→   343→  // comparaciones por señal de vida (throttle 250 ms). Map de posiciones
+   344→   344→  // (1-based; PRIMERA aparición — misma semántica que indexOf) precalculado
+   345→   345→  // en O(n).
+   346→   346→  const posicionesCola = useMemo(() => {
+   347→   347→    const pos = new Map<string, number>();
+   348→   348→    for (let i = 0; i < colaVida.length; i++) {
+   349→   349→      const id = colaVida[i];
+   350→   350→      if (!pos.has(id)) pos.set(id, i + 1);
+   351→   351→    }
+   352→   352→    return pos;
+   353→   353→  }, [colaVida]);
+   354→   354→  const totalCola = colaVida.length;
+   355→   355→
+   356→   356→  // R6 — FIX O(n²) (reporte 03b §M-2): `filas.find((o) => o.id === f.dupOf)`
+   357→   357→  // por fila DUPLICADA en el render → Map id→nombre precalculado.
+   358→   358→  const nombrePorId = useMemo(
+   359→   359→    () => new Map(filas.map((f) => [f.id, f.nombre])),
+   360→   360→    [filas],
+   361→   361→  );
+   362→   362→
+   363→   363→  // D65 (T3.3): destello 100% verde al LISTAR («un instante, luego pasa al
+   364→   364→  // estado normal»). Transitorio en memoria — nada a IDB. La 1.ª pasada
+   365→   365→  // (montaje/recarga: LISTA restauradas de IDB) NO destella (sin % fantasma).
+   366→   366→  const [recienListas, setRecienListas] = useState<Set<string>>(() => new Set());
+   367→   367→  const listasVistosRef = useRef<Set<string> | null>(null);
+   368→   368→  useEffect(() => {
+   369→   369→    const listas = new Set(filas.filter((f) => f.estado === "LISTA").map((f) => f.id));
+   370→   370→    if (listasVistosRef.current === null) {
+   371→   371→      listasVistosRef.current = listas;
+   372→   372→      return;
+   373→   373→    }
+   374→   374→    const nuevas: string[] = [];
+   375→   375→    for (const id of listas) {
+   376→   376→      if (!listasVistosRef.current.has(id)) nuevas.push(id);
+   377→   377→    }
+   378→   378→    listasVistosRef.current = listas;
+   379→   379→    if (!nuevas.length) return;
+   380→   380→    setRecienListas((prev) => {
+   381→   381→      const next = new Set(prev);
+   382→   382→      for (const id of nuevas) next.add(id);
+   383→   383→      return next;
+   384→   384→    });
+   385→   385→    // Sin cleanup: cada timer se limpia solo al disparar (1.2 s).
+   386→   386→    for (const id of nuevas) {
+   387→   387→      window.setTimeout(() => {
+   388→   388→        setRecienListas((prev) => {
+   389→   389→          const next = new Set(prev);
+   390→   390→          next.delete(id);
+   391→   391→          return next;
+   392→   392→        });
+   393→   393→      }, 1200);
+   394→   394→    }
+   395→   395→  }, [filas]);
+   396→   396→
+   397→   397→  return (
+   398→   398→    <section
+   399→   399→      className="flex-1 min-h-0 overflow-y-auto bg-[#090d12] relative flex flex-col"
+   400→   400→      aria-label="MASIVA — carga masiva de actas"
+   401→   401→    >
+   402→   402→      {/* ---------- OVERLAY DRAG & DROP GLOBAL (ESTILO DEEPSEEK) ---------- */}
+   403→   403→      {isDraggingGlobal && (
+   404→   404→        <OverlayDragGlobal
+   405→   405→          dragCounterRef={dragCounterRef}
+   406→   406→          setIsDraggingGlobal={setIsDraggingGlobal}
+   407→   407→          agregarFiles={agregarFiles}
+   408→   408→        />
+   409→   409→      )}
+   410→   410→
+   411→   411→      {/* ---------- HEADER FIJO / STICKY SUPERIOR CON BOTÓN PROCESAR COLA ---------- */}
+   412→   412→      <header className="sticky top-0 z-30 w-full bg-[#090d12]/92 backdrop-blur-xl border-b border-slate-800/80 px-4 py-3 shadow-lg shadow-black/40">
+   413→   413→        <div className="w-full max-w-6xl mx-auto flex items-center justify-between gap-3">
+   414→   414→          {/* Título + estado visual */}
+   415→   415→          <div className="min-w-0 flex items-center gap-2.5">
+   416→   416→            <div className="w-8 h-8 rounded-xl bg-[#10b981]/15 border border-[#10b981]/40 flex items-center justify-center text-[#10b981] shrink-0">
+   417→   417→              <StitchStackIcon className="w-4 h-4" />
+   418→   418→            </div>
+   419→   419→            <div className="min-w-0">
+   420→   420→              {/* KIT e14-gama-adaptativa-v1 — flex-wrap: en móvil el chip de
+   421→   421→                  gama ENVUELVE a la línea siguiente (jamás tapa el título ni
+   422→   422→                  desborda sobre los botones de la derecha). */}
+   423→   423→              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   424→   424→                <h1 className="font-mono text-sm md:text-base font-black tracking-wider text-white uppercase truncate">
+   425→   425→                  CARGA MASIVA
+   426→   426→                </h1>
+   427→   427→                {hayCola && (
+   428→   428→                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-slate-800 bg-[#10161f] font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">
+   429→   429→                    {terminadas}/{filas.length}
+   430→   430→                  </span>
+   431→   431→                )}
+   432→   432→                {/* KIT e14-gama-adaptativa-v1 (D74) — chip SOLO con
+   433→   433→                    adaptaciones activas (BAJO/MEDIO + flag ON): transparencia
+   434→   434→                    del dueño (el espíritu D6 — detectar Y reportar). Con el
+   435→   435→                    detalle completo en el title (ajustes aplicados + cómo
+   436→   436→                    desactivar). `hidden sm:inline-flex` — MISMO patrón del
+   437→   437→                    contador {terminadas}/{filas}: en móvil (<640 px) la fila
+   438→   438→                    de acciones derecha ya ocupa el ancho y el chip no cabe
+   439→   439→                    sin tapar el título/botón (verificado en 390 px); desde sm
+   440→   440→                    sí hay sitio. El detalle del plan SIEMPRE queda en la
+   441→   441→                    traza `[e14] gama plan …` de consola. */}
+   442→   442→                {gama.activo && (
+   443→   443→                  <span
+   444→   444→                    className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-300 whitespace-nowrap"
+   445→   445→                    title={`Gama ${gama.tier} detectada${gama.tierInferido ? " (inferida)" : ""} — modo adaptado (KIT e14-gama-adaptativa-v1 · D74): ${gama.ajustes.join(" · ")}. Desactivable con el flag masivaAdaptativoGama=false.`}
+   446→   446→                  >
+   447→   447→                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mr-1" />
+   448→   448→                    GAMA {gama.tier} · ADAPTADO
+   449→   449→                  </span>
+   450→   450→                )}
+   451→   451→              </div>
+   452→   452→              <p className="font-mono text-[9px] md:text-[10px] tracking-wider text-slate-400 uppercase truncate">
+   453→   453→                {corriendo ? (
+   454→   454→                  <span className="text-[#10b981] font-bold flex items-center gap-1.5">
+   455→   455→                    <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-ping" />
+   456→   456→                    PROCESANDO EN COLA…
+   457→   457→                  </span>
+   458→   458→                ) : pendientes > 0 ? (
+   459→   459→                  `${pendientes} PENDIENTES DE ENVÍO`
+   460→   460→                ) : hayCola ? (
+   461→   461→                  "COLA COMPLETADA"
+   462→   462→                ) : (
+   463→   463→                  "ARRASTRA ARCHIVOS O SELECCIONA"
+   464→   464→                )}
+   465→   465→              </p>
+   466→   466→            </div>
+   467→   467→          </div>
+   468→   468→
+   469→   469→          {/* Acciones principales fijas: PROCESAR / PAUSAR + VACIAR */}
+   470→   470→          <div className="relative flex items-center gap-2 shrink-0">
+   471→   471→            {corriendo ? (
+   472→   472→              <button
+   473→   473→                type="button"
+   474→   474→                onClick={pausar}
+   475→   475→                aria-label="Pausar la cola"
+   476→   476→                className="min-h-[44px] px-4 rounded-xl border border-amber-500/50 bg-amber-500/15 text-amber-300 font-mono text-[11px] font-bold uppercase tracking-wider hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+   477→   477→              >
+   478→   478→                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+   479→   479→                PAUSAR
+   480→   480→              </button>
+   481→   481→            ) : (
+   482→   482→              <button
+   483→   483→                type="button"
+   484→   484→                // KIT e107 (§D.3): el clic pasa por el pre-scan QR —
+   485→   485→                // prescanYIniciar llama iniciar() con la lista filtrada
+   486→   486→                // (flag OFF/abort honesto ⇒ byte-idéntico al de hoy).
+   487→   487→                onClick={() => void prescanYIniciar()}
+   488→   488→                disabled={!colaDisponible || (pendientes === 0 && duplicadas === 0) || prescan.corriendo}
+   489→   489→                aria-label="Procesar la cola"
+   490→   490→                className="min-h-[44px] px-4 md:px-5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-[#090d12] font-mono text-[11px] md:text-xs font-black uppercase tracking-wider shadow-md shadow-[#10b981]/25 hover:shadow-[#10b981]/40 active:scale-[0.98] transition cursor-pointer disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed flex items-center gap-1.5"
+   491→   491→              >
+   492→   492→                <span className="w-2 h-2 rounded-full bg-[#090d12]" />
+   493→   493→                PROCESAR COLA
+   494→   494→                {pendientes + duplicadas > 0 && (
+   495→   495→                  <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[#090d12]/20 font-extrabold text-[10px]">
+   496→   496→                    {pendientes + duplicadas}
+   497→   497→                  </span>
+   498→   498→                )}
+   499→   499→              </button>
+   500→   500→            )}
+   501→   501→
+   502→   502→            <button
+   503→   503→              type="button"
+   504→   504→              onClick={() => {
+   505→   505→                if (!vaciarArmado) {
+   506→   506→                  setVaciarArmado(true);
+   507→   507→                  return;
+   508→   508→                }
+   509→   509→                setVaciarArmado(false);
+   510→   510→                void vaciar();
+   511→   511→              }}
+   512→   512→              disabled={!hayCola || corriendo}
+   513→   513→              aria-label={
+   514→   514→                vaciarArmado ? "Confirmar vaciar toda la cola" : "Vaciar toda la cola"
+   515→   515→              }
+   516→   516→              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+   517→   517→                vaciarArmado
+   518→   518→                  ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
+   519→   519→                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
+   520→   520→              }`}
+   521→   521→            >
+   522→   522→              {vaciarArmado ? "¿SEGURO?" : "VACIAR"}
+   523→   523→            </button>
+   524→   524→
+   525→   525→            {/* D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO (cola + ledger
+   526→   526→                de enviadas). El VACIAR de arriba respeta el ledger POR DISEÑO
+   527→   527→                (RL-e65b-5) — este es el corte explícito que pidió el dueño
+   528→   528→                para re-probar el MISMO lote y medir. 2 toques — nunca
+   529→   529→                accidental; disabled si la cola corre (doble guard en store). */}
+   530→   530→            <button
+   531→   531→              type="button"
+   532→   532→              onClick={() => {
+   533→   533→                if (!resetArmado) {
+   534→   534→                  setResetArmado(true);
+   535→   535→                  return;
+   536→   536→                }
+   537→   537→                setResetArmado(false);
+   538→   538→                void reiniciarEnvios();
+   539→   539→              }}
+   540→   540→              disabled={corriendo}
+   541→   541→              aria-label={
+   542→   542→                resetArmado
+   543→   543→                  ? "Confirmar reiniciar envíos: borra la cola y el historial de enviadas"
+   544→   544→                  : "Reiniciar envíos: borra la cola y el historial de enviadas"
+   545→   545→              }
+   546→   546→              title="Borra la cola y el historial de enviadas — re-procesa el mismo lote desde cero"
+   547→   547→              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+   548→   548→                resetArmado
+   549→   549→                  ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
+   550→   550→                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
+   551→   551→              }`}
+   552→   552→            >
+   553→   553→              {resetArmado ? "¿SEGURO?" : "REINICIAR ENVÍOS"}
+   554→   554→            </button>
+   555→   555→
+   556→   556→            {/* KIT e107-prescan-qr-cola-v1 (§D.3): banner del pre-scan —
+   557→   557→                hermano visual del chip «Sondeo QR» de e73 (overlay sobre el
+   558→   558→                header, SIN mover el layout). fase "boot" → «Preparando
+   559→   559→                lector…»; al "fin" desaparece (el % por-fila de la Fase 3 es
+   560→   560→                el sistema de siempre — cero trabajo extra). */}
+   561→   561→            {prescan.corriendo && (
+   562→   562→              <div
+   563→   563→                className="absolute right-0 top-full mt-2 z-40 min-w-[230px] rounded-xl border border-[#10b981]/40 bg-[#090d12]/95 px-3.5 py-2 shadow-lg shadow-black/40 backdrop-blur-md"
+   564→   564→                role="status"
+   565→   565→                aria-live="polite"
+   566→   566→                aria-label={
+   567→   567→                  prescan.fase === "boot"
+   568→   568→                    ? "Preparando lector de códigos QR"
+   569→   569→                    : `Sondeando QR: ${prescan.listo} de ${prescan.total}`
+   570→   570→                }
+   571→   571→              >
+   572→   572→                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#10b981] whitespace-nowrap">
+   573→   573→                  {prescan.fase === "boot"
+   574→   574→                    ? "PREPARANDO LECTOR…"
+   575→   575→                    : `SONDEANDO QR… ${prescan.listo}/${prescan.total}`}
+   576→   576→                </p>
+   577→   577→                <p className="font-mono text-[9px] uppercase tracking-wider text-slate-400 whitespace-nowrap">
+   578→   578→                  {`${prescan.leidos} leídos · los no leídos pasan al OCR`}
+   579→   579→                </p>
+   580→   580→              </div>
+   581→   581→            )}
+   582→   582→          </div>
+   583→   583→        </div>
+   584→   584→      </header>
+   585→   585→
+   586→   586→      {/* ---------- CUERPO DE LA VISTA (SCROLL PRINCIPAL) ---------- */}
+   587→   587→      <div className="w-full max-w-6xl mx-auto px-4 py-5 flex flex-col gap-4 pb-24">
+   588→   588→        {/* ---------- FALLBACK IDB ---------- */}
+   589→   589→        {!colaDisponible && (
+   590→   590→          <p
+   591→   591→            role="alert"
+   592→   592→            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
+   593→   593→          >
+   594→   594→            TU NAVEGADOR NO SOPORTA LA COLA — IMPORTA DE A UNA EN ESCANEAR
+   595→   595→          </p>
+   596→   596→        )}
+   597→   597→        {colaDisponible && avisoCola && (
+   598→   598→          <p
+   599→   599→            role="alert"
+   600→   600→            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
+   601→   601→          >
+   602→   602→            {avisoCola}
+   603→   603→          </p>
+   604→   604→        )}
+   605→   605→
+   606→   606→        {/* ---------- ZONA DE CARGA (input + botón manual + hint) ---------- */}
+   607→   607→        <ZonaCarga
+   608→   608→          inputRef={inputRef}
+   609→   609→          agregarFiles={agregarFiles}
+   610→   610→          guardando={guardando}
+   611→   611→          sondeadas={sondeadas}
+   612→   612→          conPayload={conPayload}
+   613→   613→        />
+   614→   614→
+   615→   615→        {/* ---------- BARRA DE PROGRESO DEL LOTE + AVISO HEIC (fila activa) ---------- */}
+   616→   616→        <ProgresoLote
+   617→   617→          hayCola={hayCola}
+   618→   618→          terminadas={terminadas}
+   619→   619→          total={filas.length}
+   620→   620→          filaActiva={filaActiva}
+   621→   621→          progreso={progreso}
+   622→   622→          corriendo={corriendo}
+   623→   623→          pendientes={pendientes}
+   624→   624→        />
+   625→   625→
+   626→   626→        {/* ---------- BANDEJA: FILTROS + LOTE ---------- */}
+   627→   627→        {hayCola && (
+   628→   628→          <BandejaFiltros
+   629→   629→            filtro={filtro}
+   630→   630→            setFiltro={setFiltro}
+   631→   631→            enviadas={enviadas}
+   632→   632→            enCola={enCola}
+   633→   633→            pendientes={pendientes}
+   634→   634→            duplicadas={duplicadas}
+   635→   635→            yaEnviadas={yaEnviadas}
+   636→   636→            errores={errores}
+   637→   637→            advertenciasPend={advertenciasPend}
+   638→   638→            enviandoLote={enviandoLote}
+   639→   639→            corriendo={corriendo}
+   640→   640→            enviarLote={enviarLote}
+   641→   641→          />
+   642→   642→        )}
+   643→   643→
+   644→   644→        {/* ---------- D34 — INFORME DE CARGA (se oculta solo sin datos) ---------- */}
+   645→   645→        <InformeCorrida />
+   646→   646→
+   647→   647→        {/* ---------- BANDEJA: FILAS (SIN RESTRICCIÓN RÍGIDA DE ALTURA PARA SCROLL FLUIDO) ---------- */}
+   648→   648→        {hayCola && (
+   649→   649→          <BandejaFilas
+   650→   650→            visibles={visibles}
+   651→   651→            visiblesOrdenadas={visiblesOrdenadas}
+   652→   652→            progreso={progreso}
+   653→   653→            posicionesCola={posicionesCola}
+   654→   654→            totalCola={totalCola}
+   655→   655→            nombrePorId={nombrePorId}
+   656→   656→            recienListas={recienListas}
+   657→   657→            procesarIgual={procesarIgual}
+   658→   658→            abrirActa={abrirActa}
+   659→   659→            reintentar={reintentar}
+   660→   660→            quitar={quitar}
+   661→   661→          />
+   662→   662→        )}
+   663→   663→      </div>
+   664→   664→
+   665→   665→      {/* ── D27 — modal de revisión (ABRIR) + publicación en el monitor ── */}
+   666→   666→      <ModalRevisor
+   667→   667→        acta={revisorAbierto ? actaAbierta : null}
+   668→   668→        publicacion={publicacionAbierta}
+   669→   669→        onVerEnMonitor={onVerEnMonitor}
+   670→   670→        onCerrar={cerrarRevisor}
+   671→   671→      />
+   672→   672→    </section>
+   673→   673→  );
+   674→   674→}
+   675→   675→

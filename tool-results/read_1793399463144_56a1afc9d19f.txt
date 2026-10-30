@@ -1,0 +1,571 @@
+     1→     1→/** KIT e14-carga-masiva-v1: tipos del módulo MASIVA — cola de fotos que
+     2→     2→ *  alimenta al bridge REAL (mismo pipeline §5, mismo gate). Sin duplicación:
+     3→     3→ *  aquí SOLO vive la orquestación. */
+     4→     4→import type { Acta } from "../types";
+     5→     5→import type { FasesCapa0 } from "./capa0-qr.worker"; // R1.4-b — tipo puro (se borra al compilar)
+     6→     6→// KIT e14-quad-streaming-v1 (P4): forma canónica del quad del core — SOLO
+     7→     7→// tipo (se borra en compile: cero dependencia runtime desde los tipos).
+     8→     8→import type { Quad } from "@jg-stevan/scanner-core/types";
+     9→     9→
+    10→    10→/** KIT e14-masiva-tiempos-v1 (PR-1): DUPLICADA = gemela por hash perceptual
+    11→    11→ *  (dhash Hamming ≤ 6, dedup.ts) — estado SOLO visual: al procesar REUTILIZA
+    12→    12→ *  el resultado de la original (runner) sin correr el pipeline. «PROCESAR
+    13→    13→ *  IGUAL» la devuelve a PENDIENTE (reproceso completo — kit §2). */
+    14→    14→export type EstadoEntrada = "PENDIENTE" | "PROCESANDO" | "LISTA" | "ERROR" | "DUPLICADA"
+    15→    15→  | "YA-ENVIADA"; // e65-dedup-enviadas-v1 — SOLO-VISUAL (D-e65-2): sin acta propia, sin envío, sin runner (valor NUEVO AL FINAL — contrato D57)
+    16→    16→
+    17→    17→/** Fila LIVIANA en memoria (lo que pinta la bandeja) — NUNCA trae la foto:
+    18→    18→ *  RAM acotada (lección L7). El acta completa duerme en IndexedDB. */
+    19→    19→export interface FilaMasiva {
+    20→    20→  id: string;
+    21→    21→  nombre: string;
+    22→    22→  agregadaEn: number;
+    23→    23→  estado: EstadoEntrada;
+    24→    24→  /** Presente cuando estado === "LISTA". */
+    25→    25→  statusActa?: Acta["status"];
+    26→    26→  score?: number;
+    27→    27→  nivel?: string | null; // clasificacion?.nivel
+    28→    28→  pagina?: string | null; // "1/2" · "-/-"
+    29→    29→  /** Copy corto del motivo de rechazo (acta.rechazo?.tipo). */
+    30→    30→  motivo?: string | null;
+    31→    31→  thumb?: string; // dataURL JPEG ≤320px, ~20-40 KB
+    32→    32→  enviadaAuto?: boolean; // ÓPTIMA → envío automático del runner
+    33→    33→  /** KIT e14-masiva-ux-v1 (T3): el envío quedó «EN COLA» (offline —
+    34→    34→   *  acta.hashSha256 === "EN COLA"); se drena al reactivar conexión. */
+    35→    35→  envioEnCola?: boolean;
+    36→    36→  error?: string | null; // estado ERROR (decode/IDB/pipeline)
+    37→    37→  /** KIT e14-masiva-tiempos-v1 (PR-1): hash perceptual dhash 64-bit (hex 16,
+    38→    38→   *  dedup.ts) calculado al ENCOLAR en background — null si falló el decode. */
+    39→    39→  hashDedup?: string | null;
+    40→    40→  /** KIT e14-masiva-tiempos-v1 (PR-1): id de la fila ORIGINAL cuando la fila
+    41→    41→   *  está DUPLICADA (Hamming ≤ 6) — el runner copia SU resultado. */
+    42→    42→  dupOf?: string | null;
+    43→    43→  /** D59 — KIT e14-info-acta-filas-v1 (T1): título compuesto con la info
+    44→    44→   *  reconocida del acta (idea del dueño, mockup Stitch corregido).
+    45→    45→   *  string|null: null = sin datos → la fila solo pinta el nombre de archivo
+    46→    46→   *  (honestidad, jamás inventar). */
+    47→    47→  infoTitulo?: string | null;
+    48→    48→  /** D66 — KIT e14-decode-unico-precalor-v1 (T3.2/T3.5): flag TRANSITORIO
+    49→    49→   *  del precalor — esta fila PENDIENTE ya tiene master (blob JPEG a escala
+    50→    50→   *  de trabajo) esperando en el mapa del precalor. SOLO memoria del
+    51→    51→   *  mini-store: NUNCA viaja a IDB (al recargar se pierde y el precalor
+    52→    52→   *  vuelve a precalentar si aplica — kit T3.2 literal). El chip PREPARADA
+    53→    53→   *  de la bandeja lo pinta; consumirMaestro/descartarMaestro lo limpian. */
+    54→    54→  precalentada?: boolean;
+    55→    55→  /** D63-A2 — KIT e14-d63a2-deskew-pipeline-v1 (T1): la fila nació de la
+    56→    56→   *  extracción de un PDF (D60 — página renderizada a JPEG). Campo aditivo:
+    57→    57→   *  SOLO nace en la rama PDF del store (fotos/WhatsApp/ZIP jamás lo traen
+    58→    58→   *  — prueba de lectura en el REPORTE del kit). Persiste en IDB (T1) para
+    59→    59→   *  que el override de origen sobreviva la recarga a mitad de corrida. */
+    60→    60→  viaPdf?: boolean;
+    61→    61→  /** e63f — KIT e63f-autoenvio-v1 (F2): el desenlace pasó por la RE-LECTURA
+    62→    62→   *  INTERNA pre-«repetir-primero» (1 pasada OCR extra sobre el MISMO bitmap
+    63→    63→   *  — intento de LECTURA, NO de captura). true = corrió (auto | sin-cambio,
+    64→    64→   *  el detalle en la traza ` RelecturaInterna=`); ausente = no aplicó. */
+    65→    65→  relectura?: boolean;
+    66→    66→  // ---------- e63k — KIT e63k-capa2-identidad-v1 (F1) — campos ADITIVOS AL FINAL (contrato D57) ----------
+    67→    67→  /** Serie impresa 15 dígitos (consenso del código 1D — clasificacion.
+    68→    68→   *  codigoUnico.crudo, capa 2 identidad.ts). null/ausente = sin lectura
+    69→    69→   *  consensuada (jamás inventar — RED LINE 2). Sirve al mapa de identidad
+    70→    70→   *  de la cola y al informe. */
+    71→    71→  serie?: string | null;
+    72→    72→  /** El dueño pulsó PROCESAR IGUAL: capas 1 (visual) y 2 (identidad) lo
+    73→    73→   *  respetan — jamás marcar esta fila de nuevo. Persistente (IDB).
+    74→    74→   *  Ausente = sin override (comportamiento de siempre). */
+    75→    75→  forzarDedupOff?: boolean;
+    76→    76→  // ---------- e64-qr-v1 — KIT PLAN-e64-qr (T-0.2) — campos ADITIVOS AL FINAL (contrato D57) ----------
+    77→    77→  /** KIT e64-qr-v1 (T-0.2): estado de la CAPA 0 QR — SOLO-VISUAL (la decisión
+    78→    78→   *  de dedup sigue siendo la igualdad EXACTA del payload, red line 10).
+    79→    79→   *  "n/d" = aún sin intentar (fila en cola) · "leido" = payload EXACTO obtenido
+    80→    80→   *  · "sin-payload" = la cadena terminó en null. */
+    81→    81→  qrEstado?: "n/d" | "leido" | "sin-payload";
+    82→    82→  // ---------- e65-dedup-enviadas-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+    83→    83→  /** e65-dedup-enviadas-v1: SHA-256 de los bytes del archivo (dedup.ts,
+    84→    84→   *  hashBytesDeArchivo) — estampado en cadenaDedup. null = falló el hash
+    85→    85→   *  (conservador). Sobrevive la recarga vía RegistroMasiva. SOLO llave de
+    86→    86→   *  dedup — jamás identidad del acta ni viaja al envío (RL-e65-1). */
+    87→    87→  hashBytes?: string | null;
+    88→    88→  /** e65-dedup-enviadas-v1: id del registro YA ENVIADO cuyo contenido matcheó
+    89→    89→   *  esta fila (bytes exactos o dhash cinta cierta). SOLO-VISUAL (chip).
+    90→    90→   *  Ausente/null = match contra fila viva NO enviada → DUPLICADA de siempre. */
+    91→    91→  enviadaDe?: string | null;
+    92→    92→  // ---------- KIT e73-sondeo-qr-precoz-v1 (§E) — campos ADITIVOS AL FINAL (contrato D57) ----------
+    93→    93→  /** (§E) telemetría del sondeo QR en ingesta — espejo de RegistroMasiva
+    94→    94→   *  (chip «Sondeo QR N/M» en vivo + supervivencia de recarga). */
+    95→    95→  sondeoQrMs?: number;
+    96→    96→  /** (§E) tier que leyó el payload — SOLO cuando hubo lectura (jamás inventar). */
+    97→    97→  sondeoQrTier?: string;
+    98→    98→  // ---------- KIT e14-quad-streaming-v1 (P4/P5) — campos ADITIVOS AL FINAL (contrato D57) ----------
+    99→    99→  /** (P5) ESTADO-VIVO del pre-scan en «PROCESAR COLA» (e107): esta fila YA
+   100→   100→   *  fue decidida por él — veredicto aplicado (registrar/nada) o lectura
+   101→   101→   *  imposible (stamp del barrido de cierre). Mientras el TURNO de
+   102→   102→   *  clasificación está abierto, el runner con masivaStreaming ON solo
+   103→   103→   *  consume filas con esta marca (DUPLICADA/nacidas-después del arranque
+   104→   104→   *  están exentas por sí solas — ver siguientePendiente): cierra la carrera
+   105→   105→   *  clasificación-vs-pool (la gemela que el pre-scan va a marcar jamás
+   106→   106→   *  reserva slot ni paga OCR). RAM del lote — NUNCA viaja a IDB
+   107→   107→   *  (sobrevivir recarga no es requisito; el turno muere con la corrida).
+   108→   108→   *  Ausente = fila que el pre-scan no vio (nueva / streaming OFF). */
+   109→   109→  prescanOk?: boolean;
+   110→   110→  /** (P4) quad del acta detectado por el pre-scan sobre el bitmap de la
+   111→   111→   *  clase 400 — MISMA convención del core (4 puntos normalizados 0-1,
+   112→   112→   *  TL,TR,BR,BL — tipo Quad de @jg-stevan/scanner-core; el bitmap es un
+   113→   113→   *  downscale PROPORCIONAL del full, las fracciones viajan sin re-escalar).
+   114→   114→   *  El runner lo pasa al bridge como quadPrecomputado (flag masivaQuad ON)
+   115→   115→   *  para saltar la re-detección (resuelve la desviación D66 — precalor.ts:
+   116→   116→   *  «el bridge no acepta un quad precomputado»); el bridge RE-VALIDA
+   117→   117→   *  (plausibilidad — guard conservador, jamás confiar). Ausente = el
+   118→   118→   *  pre-scan no detectó quad (o el flag estaba OFF). RAM del lote. */
+   119→   119→  quad?: Quad;
+   120→   120→  // ---------- W1 — KIT k1-obs-prioridad (brief Agente A) — campo ADITIVO AL FINAL (contrato D57) ----------
+   121→   121→  /** W1 (KIT k1-obs-prioridad — brief Agente A): PRIORIDAD de la fila para el
+   122→   122→   *  sort del runner (paso 4 del dueño — flag masivaPrioridad ON): 1 = la
+   123→   123→   *  fila quedó decidida CON QR leído + quad OK (las mejores — pagan OCR
+   124→   124→   *  primero); 2 = quedó sin QR (lectura imposible) o sin estampado (warp
+   125→   125→   *  falló / fila sin decisión). Default EFECTIVO 2 (ausente = 2 en el sort).
+   126→   126→   *  NUNCA se estampa 3: la DUPLICADA se deriva del `estado` (una sola
+   127→   127→   *  fuente de verdad — el sort la calcula). Estampado solo por el pre-scan
+   128→   128→   *  con flag ON (estampado del camino lento; el barrido de cierre y las
+   129→   129→   *  filas sin decisión NO se estampan — jamás inventar). RAM del lote.
+   130→   130→   *  (Integración K1+K2: campo de K1 PRIMERO — orden temporal D57, ver
+   131→   131→   *  REPORTE-flujo-dueno-k2-v1 §7.) */
+   132→   132→  prioridadProceso?: 1 | 2;
+   133→   133→  // ---------- KIT flujo-dueno-v1 (K2 — brief Agente B) — campos ADITIVOS AL FINAL (contrato D57) ----------
+   134→   134→  /** (K2/paso 5) rotación SUGERIDA por el cuadrante del QR en el warp de
+   135→   135→   *  INGESTA (≤2048 — solo para decidir): centroide de la lectura →
+   136→   136→   *  orientacion-qr.rotacionDesdeCentroide (mapeo bench v8.3 4/4). El
+   137→   137→   *  runner la pasa al bridge como rotacionPrecomputada (flag
+   138→   138→   *  masivaRotacionQr ON) para rotar el warp full-res POST-warp y OMITIR
+   139→   139→   *  el sondeo de orientación (mismo trato que cuando la brújula decide).
+   140→   140→   *  null EXPLÍCITO = el warp corrió pero la lectura del QR falló (el
+   141→   141→   *  instrumento llegó, no decidió — honesto). AUSENTE = el warp de
+   142→   142→   *  ingesta no llegó a producirse (sin bytes/decode/detect/warp — jamás
+   143→   143→   *  inventar). RAM del lote (NUNCA viaja a IDB — sobrevivir recarga no
+   144→   144→   *  es requisito; el asegurador (e107) re-decide tras recargar). */
+   145→   145→  rotacionSugerida?: 0 | 90 | 180 | 270 | null;
+   146→   146→  // ---------- KIT e14-solo-warp-qr-v1 (DRY RUN del dueño) — campo ADITIVO AL FINAL (contrato D57) ----------
+   147→   147→  /** Veredicto QR del PRE-SCAN en modo DRY RUN (flag masivaSoloWarpQr ON):
+   148→   148→   *  true = el warp produjo un payload legible (BarcodeDetector → jsQR);
+   149→   149→   *  false = el pre-scan llegó a la lectura y el QR no salió (o el warp no
+   150→   150→   *  se produjo); AUSENTE = el pre-scan no llegó a leer (sin bytes/decode/
+   151→   151→   *  corrupto/abort honesto del worker — jamás inventar, regla de oro 4).
+   152→   152→   *  Es el ESPEJO del payload del veredicto — SOLO-VISUAL (la UI pinta el
+   153→   153→   *  chip QR ✓/✗); cero OCR, cero envío. RAM del lote — NUNCA viaja a IDB
+   154→   154→   *  (mismo trato que prescanOk: sobrevivir recarga no es requisito). */
+   155→   155→  qrLeido?: boolean;
+   156→   156→  // ---------- KIT e14-qr-heredado-v1 (D30 — tiempos del masiva) — campo ADITIVO AL FINAL (contrato D57) ----------
+   157→   157→  /** (D30) Payload QR ya leído para ESTA fila por una capa temprana: el
+   158→   158→   *  SONDEO de ingesta (worker e73 — cadenaDedup) o el PRE-SCAN de
+   159→   159→   *  «PROCESAR COLA» (e107). La capa 0 del runner lo HEREDA (identidad
+   160→   160→   *  por igualdad EXACTA de payload — misma llave de siempre, RED LINE 10)
+   161→   161→   *  sin fileToCaptureDataUrl ni ladder (peor caso documentado sin QR:
+   162→   162→   *  ~15-17 s SYNC por fila). Solo se estampa CON lectura (jamás null
+   163→   163→   *  explícito); AUSENTE = sin lectura previa → decode de siempre
+   164→   164→   *  (kill-switches intactos: sondeo/prescan OFF ⇒ nunca se estampa).
+   165→   165→   *  RAM del lote — NUNCA viaja a IDB (el prescan vive en la misma sesión
+   166→   166→   *  que el runner; tras recargar la capa 0 re-decodifica como hoy). */
+   167→   167→  qrPrevio?: string;
+   168→   168→  // ---------- R1.2 — KIT qr-cache-negativa-v1 — campo ADITIVO AL FINAL (contrato D57) ----------
+   169→   169→  /** true = la cadena COMPLETA de capa 0 (worker jsQR + fallback zxing) ya
+   170→   170→   *  corrió sobre los bytes de esta fila y terminó null SIN presupuesto
+   171→   171→   *  vencido — la capa 0 se salta el ladder (2-3 ms). Espejo de
+   172→   172→   *  RegistroMasiva.qrSinPayload (sobrevive la recarga vía filaDeRegistro).
+   173→   173→   *  "PROCESAR IGUAL" (forzarDedupOff) la IGNORA SIEMPRE. Ausente = la capa
+   174→   174→   *  0 no corrió / registro previo / payload leído (jamás inventar). */
+   175→   175→  qrSinPayload?: boolean;
+   176→   176→}
+   177→   177→
+   178→   178→/** Registro PERSISTENTE en IndexedDB — el Blob original + el acta completa. */
+   179→   179→export interface RegistroMasiva {
+   180→   180→  id: string;
+   181→   181→  nombre: string;
+   182→   182→  agregadaEn: number;
+   183→   183→  estado: EstadoEntrada;
+   184→   184→  archivo?: Blob; // el File original (queda en IDB, no en RAM)
+   185→   185→  acta?: Acta; // desenlace completo (recortable en REVISIÓN)
+   186→   186→  /** DESVIACIÓN ADITIVA documentada (kit §3 no lo trae): la miniatura
+   187→   187→   *  persiste junto al registro para pintar la bandeja tras recargar —
+   188→   188→   *  mismo dataURL ≤320px (~20-40 KB), sigue durmiendo en IDB, no en RAM. */
+   189→   189→  thumb?: string;
+   190→   190→  /** KIT e14-masiva-ux-v1 (T2): motivo corto de las filas ERROR SIN acta
+   191→   191→   *  (guards de extracción/formato — PROTEGIDO_O_CORRUPTO, etc.). */
+   192→   192→  error?: string;
+   193→   193→  /** KIT e14-masiva-tiempos-v1 (PR-1): dedup persistente — sobrevive la
+   194→   194→   *  recarga (la fila sigue DUPLICADA y el runner puede copiar igual). */
+   195→   195→  hashDedup?: string;
+   196→   196→  dupOf?: string;
+   197→   197→  /** D59 — KIT e14-info-acta-filas-v1 (T1): el título compuesto PERSISTE
+   198→   198→   *  junto al registro (misma desviación aditiva documentada de thumb) —
+   199→   199→   *  la bandeja lo repinta tras recargar sin re-procesar nada. */
+   200→   200→  infoTitulo?: string | null;
+   201→   201→  // ─── D65 — KIT e14-progreso-watchdog-dedup-v1: trazas aditivas (kit T1.4/T2.3) ───
+   202→   202→  // Contrato D57: campos NUEVOS AL FINAL — los previos no cambian de nombre
+   203→   203→  // ni de lugar. Ausente = registro pre-D65 (el instrumento no existía);
+   204→   204→  // JAMÁS se inventa un valor.
+   205→   205→
+   206→   206→  /** (T1) intentos consumidos por el watchdog: 0 = ningún intento murió;
+   207→   207→   *  1 = el 1.º venció a los 75 s y el reintento tomó el desenlace;
+   208→   208→   *  2 = ambos vencieron → rechazo de siempre con trazas. Solo filas que
+   209→   209→   *  pasaron por el pipeline (la gemela copiada no corre pipeline → sin campo). */
+   210→   210→  watchdog?: number;
+   211→   211→  /** (T1) etapa del pipeline al morir el ÚLTIMO intento vencido — vocabulario
+   212→   212→   *  del kit: "decodificando" | "deteccion" | "ocr" | "verificacion". El
+   213→   213→   *  recorte/realce caen en "deteccion" (cola de la fase de encuadre).
+   214→   214→   *  null/ausente = sin señal de progreso antes de morir (jamás inventar). */
+   215→   215→  etapaAlMorir?: string | null;
+   216→   216→  /** (T1) duración (ms) del intento que murió — hoy era null y escondía los
+   217→   217→   *  ~175 s del informe 20261020-122235. null/ausente = sin dato. */
+   218→   218→  elapsedMs?: number | null;
+   219→   219→  /** (T2) dedup v2 por CONTENIDO: "v2" = gemela matcheada (Hamming ≤ 6);
+   220→   220→   *  "sin-match" = hasheada sin gemela. Ausente = pre-D65 o hash falló
+   221→   221→   *  (decode — la fila procesa normal, conservador). e63k: valores NUEVOS
+   222→   222→   *  AL FINAL de la unión (contrato D57) — "visual-aplazada" = banda 3..6
+   223→   223→   *  sin marca pre-OCR (la decide la capa 2 post-OCR); "identidad" = capa 2
+   224→   224→   *  marcó DUPLICADA por serie impresa repetida. e63m: "qr" = CAPA 0
+   225→   225→   *  (identidad-QR pre-OCR — payload EXACTO repetido, OCR jamás se paga). */
+   226→   226→  dedup?: "v2" | "sin-match" | "identidad" | "visual-aplazada" | "qr"
+   227→   227→    | "ya-enviada" // e65-dedup-enviadas-v1 — match contra registro ENVIADO del histórico/cola (bytes/dhash cinta cierta) — valor NUEVO AL FINAL (contrato D57)
+   228→   228→    // WAVE3 C.2 (obs-informe-wave3-v1) — puertas del veto AL FINAL (D57):
+   229→   229→    // distinguen POR DÓNDE llegó el veto ya-enviada (gap real lote 10:
+   230→   230→    // filas YA-ENVIADA con dedup:"sin-match" — la puerta quedaba invisible).
+   231→   231→    | "ya-enviada-postocr" // H1 post-OCR (punto único de envío — el OCR ya se pagó)
+   232→   232→    | "ya-enviada-copia" // la traza visual de cadenaDedup aterrizó sobre un registro YA-ENVIADA (evidencia del veto preservada)
+   233→   233→    | "qr-sondeo"; // KIT e73-sondeo-qr-precoz-v1 (§B) — gemela por payload EXACTO leído en INGESTA (pre-pool; no paga slot/probe/OCR) — valor NUEVO AL FINAL (contrato D57)
+   234→   234→  /** (T2) distancia de Hamming del match v2 (0–64). Solo filas con
+   235→   235→   *  dedup === "v2" lo traen; sin match no hay distancia (no se inventa). */
+   236→   236→  dedupDistancia?: number | null;
+   237→   237→  // ---------- D45 — KIT e14-medicion-faltante-v1 ----------
+   238→   238→  /** Diagnóstico de la comparación del dedup de INGESTA (cadenaDedup):
+   239→   239→   *  con cuántas candidatas (filas vivas + índice histórico) se comparó el
+   240→   240→   *  dhash y la MEJOR distancia de Hamming vista — INCLUSO sobre el umbral
+   241→   241→   *  (afinar DEDUP_HAMMING_MAX con datos). Con dedup:"sin-match" responde
+   242→   242→   *  POR QUÉ no matcheó. Ausente = el dhash no corrió (gama OFF / decode
+   243→   243→   *  falló — jamás inventar). */
+   244→   244→  dedupDetalle?: {
+   245→   245→    candidatas: number;
+   246→   246→    indice: number;
+   247→   247→    mejorDistancia: number | null;
+   248→   248→  };
+   249→   249→  // ---------- D66 — KIT e14-decode-unico-precalor-v1 (T4) ----------
+   250→   250→  /** ms SOLO del decodificado a MASTER (T4: separado de procesoMs, que
+   251→   251→   *  conserva su semántica). Filas precalentadas → 0 (el decode ya pasó en
+   252→   252→   *  el precalor; el coste vive en precalorMs). Sin master (fallback a la
+   253→   253→   *  ruta de siempre / fila ERROR / registros previos) → campo AUSENTE
+   254→   254→   *  (jamás inventar). */
+   255→   255→  decodeMs?: number;
+   256→   256→  /** D66 (T4): quién fabricó el master — el decode nativo del navegador o
+   257→   257→   *  la reserva wasm (heic2any). null/ausente = sin master (fallback). */
+   258→   258→  origenDecode?: "nativo" | "wasm" | null;
+   259→   259→  /** D66 (T4): el desenlace nació de un master PRECALENTADO (el runner lo
+   260→   260→   *  consumió del precalor — decode ≈ 0). Documenta el PROVENANCE del
+   261→   261→   *  desenlace y SÍ persiste (a diferencia del flag transitorio de
+   262→   262→   *  FilaMasiva, que es estado vivo de la cola). */
+   263→   263→  precalentada?: boolean;
+   264→   264→  /** D66 (T4): ms TOTALES del precalor para esta fila (solo precalentadas;
+   265→   265→   *  null = no precalentada). */
+   266→   266→  precalorMs?: number | null;
+   267→   267→  // ---------- D63-A2 — KIT e14-d63a2-deskew-pipeline-v1 (T1) ----------
+   268→   268→  /** La fila nació de la extracción de un PDF (D60 — página renderizada
+   269→   269→   *  a JPEG por extraerPdf). ADITIVO al final del contrato D57: se estampa
+   270→   270→   *  en el PRIMER write (cola.ts — agregarLote) y `filaDeRegistro` lo
+   271→   271→   *  restaura en la recarga. Ausente = no-PDF (fotos/WhatsApp/registros
+   272→   272→   *  previos — jamás inventar). El runner lo consume para el override de
+   273→   273→   *  origen por CONSTRUCCIÓN (T1 — el detector D63-A por señales nunca
+   274→   274→   *  dirá «escaneo» para un E-14 impreso a sangre). */
+   275→   275→  viaPdf?: boolean;
+   276→   276→  // ---------- e63k — KIT e63k-capa2-identidad-v1 (F1) — campos ADITIVOS AL FINAL (contrato D57) ----------
+   277→   277→  /** Serie impresa 15 dígitos (consenso del código 1D — capa 2 identidad.ts,
+   278→   278→   *  regla general de persistencia del runner). null/ausente = sin lectura
+   279→   279→   *  consensuada (jamás inventar). Sirve al mapa de identidad de la cola. */
+   280→   280→  serie?: string | null;
+   281→   281→  /** El dueño pulsó PROCESAR IGUAL — persistente: sobrevive la recarga y
+   282→   282→   *  manda sobre capas 1 y 2 (el runner ya no pasa por reutilizarResultado
+   283→   283→   *  porque dupOf es null, y la capa 2 tampoco la marcará). */
+   284→   284→  forzarDedupOff?: boolean;
+   285→   285→  /** id del candidato VISUAL cuando la banda fue aplazada (hamming 3..6 —
+   286→   286→   *  traza "visual-aplazada"). Sobrevive la resolución final de la capa 2:
+   287→   287→   *  oro para el post-mortem (el FP 3992/3993 queda evidenciado). */
+   288→   288→  dedupVisualDe?: string;
+   289→   289→  // ---------- e63m — KIT e63m-capa0-qr-identidad-v1 (F2) — campos ADITIVOS AL FINAL (contrato D57) ----------
+   290→   290→  /** Payload QR EXACTO decodificado de la CAPA 0 pre-OCR (identidad-qr.ts —
+   291→   291→   *  base64 de 32 bytes, llave OPACA: NO se parsea, NO se invierte, NO se
+   292→   292→   *  compara por prefijos — RED LINE 10; la decisión vive en la igualdad
+   293→   293→   *  EXACTA del mapa del lote en store.ts). Ausente = sin-payload (el QR no
+   294→   294→   *  decodificó o la fila reutilizó antes de la capa 0 — jamás inventar).
+   295→   295→   *  Viaja al informe (export-only). */
+   296→   296→  qrPayload?: string;
+   297→   297→  // ---------- e64-qr-v1 — KIT PLAN-e64-qr (T-0.2) — campo ADITIVO AL FINAL (contrato D57) ----------
+   298→   298→  /** KIT e64-qr-v1 (T-0.2): estado de la CAPA 0 QR — persiste junto al
+   299→   299→   *  registro para que el chip de la bandeja sobreviva la recarga (misma
+   300→   300→   *  desviación aditiva documentada de thumb/infoTitulo). Solo se estampa
+   301→   301→   *  cuando la capa 0 CORRIÓ (jamás inventar): "leido" con payload, "sin-
+   302→   302→   *  payload" cuando la cadena terminó en null. Ausente = la capa 0 no
+   303→   303→   *  llegó a correr (registros previos a la e64 / filas ERROR pre-capa 0). */
+   304→   304→  qrEstado?: "leido" | "sin-payload";
+   305→   305→  // ---------- e65-dedup-enviadas-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+   306→   306→  /** e65-dedup-enviadas-v1: SHA-256 de los bytes del archivo original.
+   307→   307→   *  Ausente = registro previo al kit o hash falló (jamás inventar).
+   308→   308→   *  SOLO llave de dedup — jamás identidad del acta ni viaja al envío
+   309→   309→   *  ni al informe de contenido (RL-e65-1). */
+   310→   310→  hashBytes?: string;
+   311→   311→  /** e65-dedup-enviadas-v1: id del registro enviado matcheado (SOLO-VISUAL).
+   312→   312→   *  Ausente = la fila no nació YA-ENVIADA (o PROCESAR IGUAL la limpió). */
+   313→   313→  enviadaDe?: string;
+   314→   314→  // ---------- e68-blob-idb-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+   315→   315→  /** e68 — MIGRACIÓN base64 → Blob: la foto ORIGINAL del acta (master
+   316→   316→   *  decodificado a escala de trabajo) duerme aquí como Blob NATIVO — el
+   317→   317→   *  structured clone la serializa SIN la inflación del 33 % del base64 y
+   318→   318→   *  la deserialización es transparente. El acta persistida viaja SIN las
+   319→   319→   *  dataURLs (leerRegistro las MATERIALIZA al vuelo para REVISIÓN/
+   320→   320→   *  recorte — mismo contrato Acta en RAM). Ausente = registro previo a
+   321→   321→   *  e68 con base64 dentro del acta (compatibilidad: el próximo write la
+   322→   322→   *  comparte) o fotoOriginal liberada post-envío (cleanup e68). */
+   323→   323→  fotoOriginalBlob?: Blob;
+   324→   324→  /** e68 — ídem: la foto PROCESADA (warp+realce) como Blob. Se CONSERVA
+   325→   325→   *  tras el envío (la REVISIÓN y el recorte manual la usan — kit e68 §3:
+   326→   326→   *  «No borrar fotoProcesada»). */
+   327→   327→  fotoProcesadaBlob?: Blob;
+   328→   328→  // ---------- WAVE3 §B — ORDEN-WAVE3-remoto-rescate-obs-v1 (feat/rescate-rechazo-v1) ----------
+   329→   329→  /** (§B) traza del RESCATE anti-falso-rechazo: "lanzado" = el reintento
+   330→   330→   *  del paso desenlace corrió (RECHAZADA-BAJO intermitente, intento 1) y
+   331→   331→   *  también rechazó (se acepta el rechazo — honesto); "salvado" = el
+   332→   332→   *  desenlace final ≠ RECHAZADA tras el reintento. Ausente = sin rescate
+   333→   333→   *  (jamás inventar). Aditivo AL FINAL del contrato D57. */
+   334→   334→  rescateRechazo?: "lanzado" | "salvado";
+   335→   335→  // ---------- KIT e73-sondeo-qr-precoz-v1 (§E) — campos ADITIVOS AL FINAL (contrato D57) ----------
+   336→   336→  /** (§E) telemetría del SONDEO QR en INGESTA (e73): ms del sondeo del
+   337→   337→   *  archivo (corre en el worker — se estampa cuando el sondeo CORRIÓ, con
+   338→   338→   *  o sin payload — jamás inventar). Ausente = el sondeo no corrió (flag
+   339→   339→   *  OFF / sin soporte / hard-kill / fila previa al kit). */
+   340→   340→  sondeoQrMs?: number;
+   341→   341→  /** (§E) tier del ladder que LEYÓ el payload ("full" | "recorte" |
+   342→   342→   *  "rot90" | "rot180" | "rot270" | "barrido"). PRESENTE SOLO cuando el
+   343→   343→   *  sondeo leyó payload ("con payload" del informe) — ausente = sondeó sin
+   344→   344→   *  lectura (jamás inventar). */
+   345→   345→  sondeoQrTier?: string;
+   346→   346→  // ---------- KIT e14-tiempos-v2 (D44-R2) — campos ADITIVOS AL FINAL (contrato D57) ----------
+   347→   347→  /** (D44-R2) true = la CAPA 0 del runner HEREDÓ el payload (fila.qrPrevio —
+   348→   348→   *  sondeo de ingesta e73 o pre-scan e107): no pagó fileToCaptureDataUrl ni
+   349→   349→   *  ladder jsQR (peor caso sin-QR ~15-17 s). Ausente = la capa 0 pagó el
+   350→   350→   *  decode/ladder completo (o sin payload — jamás inventar). Gemelo del flag
+   351→   351→   *  del informe (MetricaActa.qrHeredado) — persiste junto a qrPayload para
+   352→   352→   *  el post-mortem de la palanca ① (cobertura del sondeo/prescan). */
+   353→   353→  qrHeredado?: boolean;
+   354→   354→  // ---------- R1.2 — KIT qr-cache-negativa-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+   355→   355→  /** true = la cadena COMPLETA de capa 0 (worker + fallback zxing) corrió
+   356→   356→   *  sobre LOS BYTES de este registro y terminó null SIN presupuesto vencido
+   357→   357→   *  (R1.1 — presupuestoVencido=false). El runner lo consulta antes del
+   358→   358→   *  ladder (skip 2-3 ms) y filaDeRegistro lo restaura a la fila. "PROCESAR
+   359→   359→   *  IGUAL" lo ignora; una lectura posterior de payload lo limpia (el hecho
+   360→   360→   *  cambió — honestidad). Ausente = registro previo / payload leído. */
+   361→   361→  qrSinPayload?: boolean;
+   362→   362→  /** true = la capa 0 de esta corrida se SALTÓ el ladder POR la caché
+   363→   363→   *  negativa (traza de consumo — separa el skip del decode real). Ausente =
+   364→   364→   *  la capa 0 corrió su cadena normal (o heredó qrPrevio). */
+   365→   365→  qrCacheNegativa?: boolean;
+   366→   366→  // ---------- R1.4 — KIT qr-tier-metrica-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+   367→   367→  /** Tier que ganó la cadena de la capa 0 (resp. worker: "base"|"recorte-600"
+   368→   368→   *  |"barrido"|"barrido-nitido"|"barrido-binarizado"|"rotacionN"|"rescate4096"
+   369→   369→   *  |"rescate4096-barrido"). null = la capa 0 corrió SIN worker (camino main
+   370→   370→   *  — su API no expone tier) o terminó null. Ausente = heredó/caché/ERROR
+   371→   371→   *  temprano (jamás inventar). */
+   372→   372→  qrTier?: string | null;
+   373→   373→  /** ms SOLO de la cadena jsQR del worker de capa 0 (RespuestaCapa0.ms).
+   374→   374→   *  null = sin worker / heredado / caché (jamás inventar). */
+   375→   375→  qrMs?: number | null;
+   376→   376→  // ---------- R1.4-b — KIT qr-fases-telemetria-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+   377→   377→  /** Desglose POR FASE de la cadena del worker (solo fases que CORRIERON —
+   378→   378→   *  ausente = saltada por el reló o no alcanzada). Sub-partición de qrMs:
+   379→   379→   *  Σ(qrFases) ≤ qrMs SIEMPRE. Espejo de MetricaActa.qrFases. Ausente =
+   380→   380→   *  ruta main / heredado / caché / bundle v≤2 (jamás inventar). */
+   381→   381→  qrFases?: FasesCapa0;
+   382→   382→  /** Causa del fin de la cadena: "payload" | "agotado" | "vencido" |
+   383→   383→   *  "sin-decode" — ver MetricaActa.qrFin. Ausente = sin dato honesto. */
+   384→   384→  qrFin?: string;
+   385→   385→  /** ms del rescate zxing de MAIN tras el worker null — ver
+   386→   386→   *  MetricaActa.qrZxingMs (el hueco preOcrQrMs − qrMs). Ausente = no corrió. */
+   387→   387→  qrZxingMs?: number;
+   388→   388→  /** R1.4-b — presupuesto (ms) con el que la escalera CORRIÓ de verdad
+   389→   389→   *  (snapshot del plan AL INICIO de la capa 0 — el gama del informe es un
+   390→   390→   *  snapshot FINAL y tierEfectivo puede bajar a mitad de sesión por la
+   391→   391→   *  degradación preventiva: informe móvil 2026-10-30 16:27 = ALTO/MEDIO
+   392→   392→   *  con qrMs 13,3 s — sin este sello es indecidible). null/ausente = plan
+   393→   393→   *  sin presupuesto (ALTO/base) o no llegó a leerse (jamás inventar). */
+   394→   394→  qrPresupuestoMs?: number | null;
+   395→   395→}
+   396→   396→
+   397→   397→/** KIT e14-carga-masiva-v1 (helper compartido runner/store): página corta del
+   398→   398→ *  acta para la fila — "1/2" cuando el OCR la leyó, "-/-" si viajó null
+   399→   399→ *  (honestidad del kit actas-vivas-paginas-v1, FASE B). */
+   400→   400→export function paginaDeActa(acta: Acta): string {
+   401→   401→  return acta.pagina ? `${acta.pagina.index}/${acta.pagina.total}` : "-/-";
+   402→   402→}
+   403→   403→
+   404→   404→/** D72 — KIT e14-masiva-formato-ancho-v1: título compacto del acta para la fila
+   405→   405→ *  en Carga Masiva: solo código del departamento, país/municipio, lugar/puesto,
+   406→   406→ *  tipo, mesa y página. Formato optimizado para espacio:
+   407→   407→ *  "{dep.codigo} - {país/municipio} - {lugar/puesto} - {tipo} - MESA {nnn} - PAG {i}/{t}"
+   408→   408→ */
+   409→   409→export function tituloDeActa(acta: Acta): string | null {
+   410→   410→  const c = acta.clasificacion;
+   411→   411→  if (!c) return null; // sin clasificación NUNCA hay título (honestidad)
+   412→   412→  const partes: string[] = [];
+   413→   413→
+   414→   414→  // 1. Código del departamento (solo código, e.g. "88" o "11")
+   415→   415→  if (c.departamento?.codigo) {
+   416→   416→    partes.push(c.departamento.codigo.trim());
+   417→   417→  } else if (c.departamento?.nombre && !c.municipio?.nombre) {
+   418→   418→    partes.push(c.departamento.nombre.trim());
+   419→   419→  }
+   420→   420→
+   421→   421→  // 2. País / Municipio / Nombre (e.g. "ALEMANIA", "ITALIA", "MEDELLIN", "BOGOTA D.C.")
+   422→   422→  if (c.municipio?.nombre) {
+   423→   423→    partes.push(c.municipio.nombre.trim());
+   424→   424→  }
+   425→   425→
+   426→   426→  // 3. Lugar / Puesto (e.g. "CONSULADO", "FRANKFURT", "CORFERIAS")
+   427→   427→  const puesto = c.puesto?.nombre?.trim() || acta.titulo?.trim() || null;
+   428→   428→  if (puesto) {
+   429→   429→    const puestoNorm = puesto.toUpperCase();
+   430→   430→    const munNorm = c.municipio?.nombre?.trim().toUpperCase();
+   431→   431→    if (!munNorm || puestoNorm !== munNorm) {
+   432→   432→      partes.push(puesto);
+   433→   433→    }
+   434→   434→  }
+   435→   435→
+   436→   436→  // 4. Tipo (e.g. "TRANSMISION", "DELEGADOS")
+   437→   437→  if (c.tipo) {
+   438→   438→    partes.push(c.tipo);
+   439→   439→  }
+   440→   440→
+   441→   441→  // 5. Mesa (zero-pad 3, e.g. "MESA 002")
+   442→   442→  if (c.mesa != null) {
+   443→   443→    partes.push(`MESA ${String(c.mesa).padStart(3, "0")}`);
+   444→   444→  }
+   445→   445→
+   446→   446→  // 6. Página (e.g. "PAG 1/2")
+   447→   447→  if (c.pagina && c.pagina.index != null && c.pagina.total != null) {
+   448→   448→    partes.push(`PAG ${c.pagina.index}/${c.pagina.total}`);
+   449→   449→  } else if (acta.pagina && acta.pagina.index != null && acta.pagina.total != null) {
+   450→   450→    partes.push(`PAG ${acta.pagina.index}/${acta.pagina.total}`);
+   451→   451→  }
+   452→   452→
+   453→   453→  const t = partes.join(" - ").toUpperCase();
+   454→   454→  return t.length > 0 ? t : null;
+   455→   455→}
+   456→   456→
+   457→   457→
+   458→   458→// ─── R8 — SPLIT del store (etapa 2): TIPOS del mini-store movidos de
+   459→   459→// store.ts a tipos.ts ─── El núcleo inyectado (store-api.ts / runner /
+   460→   460→// precalor / dedup-*) tipa su dependencia SIN importar store.ts (fin del
+   461→   461→// ciclo store↔runner↔precalor). El store Zustand conserva su API EXACTA:
+   462→   462→// store.ts re-exporta los tipos públicos (FiltroMasiva · EtapaVidaKit) que
+   463→   463→// sus consumidores (components/e14/screens/masiva — zona R6) ya importaban.
+   464→   464→
+   465→   465→export type FiltroMasiva =
+   466→   466→  | "TODAS"
+   467→   467→  | "OPTIMA"
+   468→   468→  | "ADVERTENCIA"
+   469→   469→  | "RECHAZADA"
+   470→   470→  | "EN_REVISION_HUMANA"
+   471→   471→  | "ERROR";
+   472→   472→
+   473→   473→/** D65 — KIT e14-progreso-watchdog-dedup-v1 (T3): vocabulario del kit para
+   474→   474→ *  la señal de vida de la fila ACTIVA. La fracción SOLO existe en OCR y es
+   475→   475→ *  REAL (reconocedor por lotes de rec — §2-C4 del kit ocr-escalonado); las
+   476→   476→ *  demás etapas van SIN número (barra animada — jamás inventar %). */
+   477→   477→export type EtapaVidaKit = "preparando" | "deteccion" | "ocr" | "verificacion";
+   478→   478→
+   479→   479→/** Progreso de la fila ACTIVA (throttled por el runner 250 ms — D65 T3.1).
+   480→   480→ *  Estado TRANSITORIO: NO se persiste en IndexedDB (kit T3.4 — cada tick a
+   481→   481→ *  IDB sería caro); al recargar la página las filas vuelven a PENDIENTE como
+   482→   482→ *  hoy y no queda % fantasma.
+   483→   483→ *
+   484→   484→ *  CAMBIO (pedido del dueño): UN % para TODO el proceso del acta — antes el
+   485→   485→ *  chip de la fila saltaba por tramos fijos por fase y el OCR escalonado
+   486→   486→ *  (2 pasadas) hacía que el número RETROCEDIERA (95→50→95). Ahora el runner
+   487→   487→ *  computa `fracGlobal` (0..1): cada fase del pipeline mapea a un tramo del
+   488→   488→ *  TOTAL, las 2 pasadas del OCR reparten sub-tramos y el valor es MONOTÓNICO
+   489→   489→ *  (jamás baja dentro de la misma acta — Math.max por señal). */
+   490→   490→// knip C3: de-export — uso SOLO interno (estado del mini-store).
+   491→   491→interface ProgresoFila {
+   492→   492→  id: string;
+   493→   493→  etapa: EtapaVidaKit;
+   494→   494→  /** 0..1 SOLO cuando etapa === "ocr" — dato REAL del reconocedor. */
+   495→   495→  ocrFraccion?: number;
+   496→   496→  /** 0..1 del PROCESO COMPLETO del acta (todas las fases sumadas) —
+   497→   497→   *  monotónico: nunca baja dentro de la misma acta. 1 = LISTA. */
+   498→   498→  fracGlobal?: number;
+   499→   499→}
+   500→   500→
+   501→   501→export interface MasivaStore {
+   502→   502→  filas: FilaMasiva[];
+   503→   503→  corriendo: boolean;
+   504→   504→  progreso: ProgresoFila | null;
+   505→   505→  filtro: FiltroMasiva;
+   506→   506→  /** Acta abierta en REVISIÓN desde la bandeja (T3.4) — la identidad para
+   507→   507→   *  sincronizar al volver. null = ninguna abierta. */
+   508→   508→  origenAbierto: string | null;
+   509→   509→  /** «GUARDANDO N…» — copia async de files → IDB (zona de carga). */
+   510→   510→  guardando: number;
+   511→   511→  /** false → píldora de fallback (IndexedDB no disponible — kit §3/§6). */
+   512→   512→  colaDisponible: boolean;
+   513→   513→  /** FIX (auditoría 2-c C5): true mientras corre «ENVIAR ADVERTENCIAS» —
+   514→   514→   *  guard de re-entrancia del lote (doble tap = doble envío). */
+   515→   515→  enviandoLote: boolean;
+   516→   516→
+   517→   517→  /** FIX M9 (auditoría 2-c): aviso específico de QUOTA — antes cualquier
+   518→   518→   *  fallo de escritura (casi siempre almacenamiento lleno con actas de
+   519→   519→   *  ~15 MB/registro) degradaba a «TU NAVEGADOR NO SOPORTA LA COLA» (falso)
+   520→   520→   *  y mataba el botón PROCESAR para TODA la bandeja. null = sin aviso. */
+   521→   521→  avisoCola: string | null;
+   522→   522→
+   523→   523→  /** Al montar: lista IDB → filas livianas + recuperarCola() (zombis fuera). */
+   524→   524→  cargarFilas: () => Promise<void>;
+   525→   525→  /** Suelta/selección de fotos: filas PENDIENTES al instante (ids temp) +
+   526→   526→   *  copia async a IDB — al resolver, los ids reales reemplazan a los temp. */
+   527→   527→  agregarFiles: (files: File[]) => Promise<void>;
+   528→   528→  iniciar: () => void;
+   529→   529→  pausar: () => void;
+   530→   530→  /** ABRIR: auto-pausa del runner + REVISIÓN del acta (vía T3.4). */
+   531→   531→  abrirActa: (id: string) => Promise<void>;
+   532→   532→  /** Al volver de REVISIÓN: si la identidad coincide, re-persiste el acta
+   533→   533→   *  ACTUALIZADA (recorte/filtro/envío — F5) y refresca la fila. Si no,
+   534→   534→   *  SOLO limpia origenAbierto (no escribe nada). */
+   535→   535→  sincronizarAlVolver: () => Promise<void>;
+   536→   536→  quitar: (id: string) => Promise<void>;
+   537→   537→  vaciar: () => Promise<void>;
+   538→   538→  /** D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO de envíos (cola +
+   539→   539→   *  ledger del histórico + índices de sesión). El corte explícito que pide
+   540→   540→   *  el dueño para re-probar el MISMO lote — botón de 2 toques (MasivaView);
+   541→   541→   *  vaciar() queda byte a byte (RL-e65b-5 intacto). */
+   542→   542→  reiniciarEnvios: () => Promise<void>;
+   543→   543→  /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
+   544→   544→   *  DUPLICADA (→ PENDIENTE, dupOf fuera) para que el runner la reprocese
+   545→   545→   *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
+   546→   546→  procesarIgual: (id: string) => Promise<void>;
+   547→   547→  /** D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» de una fila ERROR —
+   548→   548→   *  la re-encola (PENDIENTE, error fuera, persistente) para que el dueño
+   549→   549→   *  pulse PROCESAR. NO auto-procesa (misma doctrina D45: extraer/re-encolar
+   550→   550→   *  NO procesa). Sin archivo original en IDB → la fila SIGUE en ERROR con
+   551→   551→   *  SIN_ARCHIVO_ORIGINAL (honesto — registros viejos o filas de formato). */
+   552→   552→  reintentar: (id: string) => Promise<void>;
+   553→   553→  /** Envío en lote SECUENCIAL de ADVERTENCIAS (cada una vía registrarEnvio
+   554→   554→   *  real). NO toca RECHAZADAS ni EN_RH (kit §6). */
+   555→   555→  enviarLote: (estado: "ADVERTENCIA") => Promise<void>;
+   556→   556→  /** D65 (T3.1): señal de vida de la fila en curso — action NUEVO del kit;
+   557→   557→   *  el runner emite con throttle 250 ms vía bucketDeVida. Transitorio
+   558→   558→   *  (NUNCA a IDB — kit T3.4). `fracGlobal` = % ÚNICO del proceso completo
+   559→   559→   *  del acta (monotónico — ver ProgresoFila). */
+   560→   560→  marcarProgreso: (
+   561→   561→    id: string,
+   562→   562→    progreso: { etapa: EtapaVidaKit; ocrFraccion?: number; fracGlobal?: number },
+   563→   563→  ) => void;
+   564→   564→  setFiltro: (filtro: FiltroMasiva) => void;
+   565→   565→  /** e64-qr-v1 (T-0.2): estampar campos SOLO-VISUALES sobre UNA fila viva
+   566→   566→   *  (el chip qrEstado de la CAPA 0 QR se pinta a mitad de proceso, cuando
+   567→   567→   *  el runner acaba de decodificar). Patch INMUTABLE — el MISMO patrón del
+   568→   568→   *  patchFila interno (el kit llama a este mutador desde el runner). */
+   569→   569→  actualizarFila: (id: string, patch: Partial<FilaMasiva>) => void;
+   570→   570→}
+   571→   571→
