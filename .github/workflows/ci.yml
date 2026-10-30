@@ -5,8 +5,7 @@ name: CI
 #   2. bunx tsc --noEmit           (tipado estricto)
 #   3. bun run lint                (eslint flat config; reglas relajadas solo
 #                                   para src/modules/digitalizador/**)
-#   4. bun test                    (bun:test; mientras no haya suite, el paso
-#                                   va con continue-on-error — ver comentario)
+#   4. bun test                    (bun:test — la suite de datos R3 bloquea)
 #
 # NO reemplaza los workflows de deploy (pages.yml / cloudflare-pages.yml):
 # este workflow solo verifica, no construye ni publica.
@@ -56,10 +55,9 @@ jobs:
         # vista-recepcion.tsx:208 y el dueño asigne panel-perfil.tsx:360.
         continue-on-error: true
 
-      # bun:test — mientras la suite esté vacía este paso no puede fallar
-      # (bun test sin tests termina 0); continue-on-error queda como red de
-      # seguridad. TODO(equipo datos): quitar continue-on-error cuando la
-      # suite tenga tests reales que deban bloquear el merge.
+      # bun:test — la suite de datos de R3 (src/modules/supervision/data/
+      # __tests__: invariantes del catálogo DIVIPOLA, determinismo D21/D43,
+      # anclas, golden de KPIs) YA BLOQUEA el merge (R3 — sin
+      # continue-on-error).
       - name: Test
         run: bun test
-        continue-on-error: true
