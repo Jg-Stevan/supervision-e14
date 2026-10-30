@@ -258,6 +258,21 @@ let corridaIdViva: string | null = null;
 let actasVivas: MetricaActa[] = [];
 const suscritos = new Set<() => void>();
 
+// D45-R1 — parking de roundtrips de publicación que aterrizaron ANTES del
+// desenlace. Carrera real, medida en el informe 2026-10-30-14-13 (6/6 actas
+// sin envioRoundMs): entre el despacho de la publicación (runner, fire-
+// and-forget) y registrarMetricaDesenlace corren awaits (sha256 del payload
+// + envío remoto + thumb ~30-80 ms + guardarRegistro/IDB) — el roundtrip de
+// red local gana, el re-put no encontraba la métrica (findIndex −1) y se
+// perdía en silencio. Park-and-drain: si la métrica aún no existe se aparca
+// aquí y el desenlace (o el ERROR) la recoge al construir m. Map ≤ filas
+// vivas, drenado en los 3 destinos y limpiado con los resets. Observador
+// pasivo — cero cambios de comportamiento.
+const envioRoundPendiente = new Map<
+  string,
+  { envioRoundMs: number; envioEstado: string }
+>();
+
 function notificar(): void {
   for (const cb of suscritos) {
     try {
@@ -320,6 +335,7 @@ export function iniciarCorridaMetrica(): void {
       };
       corridaIdViva = corrida.id;
       actasVivas = [];
+      envioRoundPendiente.clear(); // D45-R1 — sin huérfanos de la corrida anterior
       await put(STORE_CORRIDAS, corrida);
       await podarCorridasViejas();
       notificar();
@@ -459,7 +475,12 @@ export function registrarMetricaDesenlace(args: {
         ...(muroMs != null ? { muroMs } : {}),
         ...(gapMs != null ? { gapMs } : {}),
         ...(args.dedupDetalle ? { dedupDetalle: args.dedupDetalle } : {}),
+        // D45-R1 — el roundtrip de publicación aterrizó ANTES que este
+        // desenlace (carrera despacho→registro): se recoge del parking y
+        // viaja en m (el callback del store puede ganarle al registro).
+        ...(envioRoundPendiente.get(args.filaId) ?? {}),
       };
+      envioRoundPendiente.delete(args.filaId); // D45-R1 — drenado
       await persistirActa(m);
     } catch {
       /* conservador — fire-and-forget */
@@ -538,7 +559,18 @@ export function registrarMetricaEnvioRound(args: {
   void (async () => {
     try {
       const i = actasVivas.findIndex((a) => a.id === args.filaId);
-      if (i < 0) return; // sin métrica previa (desenlace no registrado) — nada que parchear
+      if (i < 0) {
+        // D45-R1 — carrera despacho→desenlace: el roundtrip aterrizó antes
+        // de que exista la métrica (el runner tiene awaits en medio: sha256
+        // del payload + envío remoto + thumb + IDB). Se aparca — el
+        // desenlace/ERROR lo drena al construir m (jamás se pierde, jamás
+        // se inventa).
+        envioRoundPendiente.set(args.filaId, {
+          envioRoundMs: Math.round(args.envioRoundMs),
+          envioEstado: args.envioEstado,
+        });
+        return;
+      }
       const m: MetricaActa = {
         ...actasVivas[i],
         envioRoundMs: Math.round(args.envioRoundMs),
@@ -595,7 +627,11 @@ export function registrarMetricaError(args: {
         ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),
+        // D45-R1 — el despacho de la publicación pudo ocurrir antes del
+        // throw (el roundtrip aterrizó sin dueño): se drena igual.
+        ...(envioRoundPendiente.get(args.filaId) ?? {}),
       };
+      envioRoundPendiente.delete(args.filaId); // D45-R1 — drenado
       await persistirActa(m);
     } catch {
       /* conservador */
@@ -718,6 +754,7 @@ export async function limpiarMetricas(): Promise<void> {
     });
     corridaIdViva = null;
     actasVivas = [];
+    envioRoundPendiente.clear(); // D45-R1 — sin huérfanos
     notificar();
   } catch {
     /* conservador */

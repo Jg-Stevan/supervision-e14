@@ -559,7 +559,20 @@ Stage Summary:
 - Costo: 0 en el camino feliz (early-exit antes); ~150-600 ms solo en actas donde TODO lo demás falló.
 
 ---
-Task ID: 22 — DOC LABORATORIO-qr-decodificadores-v1: documentación completa del lab de decodificadores QR
+Task ID: 22 — D45-R1: park-and-drain del roundtrip de publicación (el M2 no aterrizaba — carrera despacho→desenlace)
+
+Work Log:
+- Evidencia: informe real 2026-10-30-14-13 (6 actas, misma máquina del 03-28) — muroMs/gapMs/dedupDetalle/procesoBw/procesoOcr/motivoCierre aterrizaron PERFECTOS (4/5 huecos del D45 medidos y coherentes: muroMs = tsFin−tsInicio al ms en 6/6; gap 162–231 ms/acta = muro 99% contabilizado), pero envioRoundMs/envioEstado AUSENTES en 6/6.
+- Causa raíz (traza del código, no corazonada): registrarEnvioMasiva despacha la publicación fire-and-forget (runner L1502) y ENTRE ahí y registrarMetricaDesenlace (L1730) corren awaits del desenlace (sha256 del payload + registrarEnvioRemoto + hacerThumb ~30-80 ms + guardarRegistro/IDB) — el roundtrip de red local resuelve ANTES de que la métrica exista en actasVivas → findIndex −1 → return silencioso. publicarDesdeActa SIEMPRE resuelve (sin-join/publicada/bloqueada/catch), así que el callback SÍ disparó 6/6 — la pérdida era del re-put, no de la red.
+- Fix (metricas.ts SOLO, observador pasivo): Map envioRoundPendiente (parking) — si el re-put no encuentra la métrica, aparca {envioRoundMs, envioEstado}; registrarMetricaDesenlace y registrarMetricaError drenan el parking al construir m (spread + delete). clear() en los 2 resets de actasVivas (nueva corrida / wipe). Ventana de carrera cerrada al 100%: entre el build de m y persistirActa no hay await (persistirActa push es síncrono), así que el callback o llega antes del IIFE (→ parking, drenado) o después del push (→ parcheo directo).
+- Verificación: tsc --noEmit 13 = baseline 13 (0 nuevos) · eslint 0/0. Cero cambios de comportamiento (fire-and-forget intacto, RL-e65b-3).
+
+Stage Summary:
+- El M2 del D45 queda completo: la próxima corrida estampa envioRoundMs/envioEstado en TODAS las actas (publicada|bloqueada|sin-join), venga cuando venga el roundtrip.
+- Lección del informe 14-13 para el análisis (no cambia código): dedup "sin-match" era CORRECTO (candidatas 0→5, mejor distancia Hamming 18–26 vs umbral 6 — actas distintas, no falla del índice) · procesoMs es OCR-bound (el warp bw 2.4–4.2 s SIEMPRE termina antes que el warp lectura) · 085053 (18.9 s) + 084939 (29.8 s) quemaron 48.7 s de ladder QR — el cap del E16 apunta exactamente ahí.
+
+---
+Task ID: 23 — DOC LABORATORIO-qr-decodificadores-v1: documentación completa del lab de decodificadores QR
 
 Work Log:
 - docs/LABORATORIO-qr-decodificadores-v1.md NUEVO: la evidencia completa que sustenta el e75 — cómo funciona un lector QR (binarización/finders 1:1:3:1:1/perspectiva/Reed-Solomon), metodología (12 muestras, GT multi-paso 7/12 legibles, denominador honesto, 3 corridas), Fase 1 (decodificadores por escala 640→1600: 0 aciertos a 640 full-frame; zxing-wasm mejor compromiso 4/7·5.2ms @1024; jsQR 5/7·71ms → worker), Fase 2 (full vs band vs zoom: zoom@1024 6/7·6.1ms, rescata 3 páginas que full-frame no leyó ni a 4000px; zbar complementario p2/p4; unión 10/12), veredicto (escalera 4 pasos ~11ms zxing + ~80ms peor caso con zbar), reglas de oro (px por módulo ≥3-4, jamás up-escalar, resampler decide marginales), dedup entre medios (4 pares byte-a-byte) y validación de campo del informe masiva 2026-10-30 (6/6 ENVIADA con e75 activo, f5 rescatada, 48.7s en las 2 ilegibles).
