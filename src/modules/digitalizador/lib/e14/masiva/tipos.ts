@@ -2,6 +2,7 @@
  *  alimenta al bridge REAL (mismo pipeline §5, mismo gate). Sin duplicación:
  *  aquí SOLO vive la orquestación. */
 import type { Acta } from "../types";
+import type { FasesCapa0 } from "./capa0-qr.worker"; // R1.4-b — tipo puro (se borra al compilar)
 // KIT e14-quad-streaming-v1 (P4): forma canónica del quad del core — SOLO
 // tipo (se borra en compile: cero dependencia runtime desde los tipos).
 import type { Quad } from "@jg-stevan/scanner-core/types";
@@ -372,6 +373,25 @@ export interface RegistroMasiva {
   /** ms SOLO de la cadena jsQR del worker de capa 0 (RespuestaCapa0.ms).
    *  null = sin worker / heredado / caché (jamás inventar). */
   qrMs?: number | null;
+  // ---------- R1.4-b — KIT qr-fases-telemetria-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+  /** Desglose POR FASE de la cadena del worker (solo fases que CORRIERON —
+   *  ausente = saltada por el reló o no alcanzada). Sub-partición de qrMs:
+   *  Σ(qrFases) ≤ qrMs SIEMPRE. Espejo de MetricaActa.qrFases. Ausente =
+   *  ruta main / heredado / caché / bundle v≤2 (jamás inventar). */
+  qrFases?: FasesCapa0;
+  /** Causa del fin de la cadena: "payload" | "agotado" | "vencido" |
+   *  "sin-decode" — ver MetricaActa.qrFin. Ausente = sin dato honesto. */
+  qrFin?: string;
+  /** ms del rescate zxing de MAIN tras el worker null — ver
+   *  MetricaActa.qrZxingMs (el hueco preOcrQrMs − qrMs). Ausente = no corrió. */
+  qrZxingMs?: number;
+  /** R1.4-b — presupuesto (ms) con el que la escalera CORRIÓ de verdad
+   *  (snapshot del plan AL INICIO de la capa 0 — el gama del informe es un
+   *  snapshot FINAL y tierEfectivo puede bajar a mitad de sesión por la
+   *  degradación preventiva: informe móvil 2026-10-30 16:27 = ALTO/MEDIO
+   *  con qrMs 13,3 s — sin este sello es indecidible). null/ausente = plan
+   *  sin presupuesto (ALTO/base) o no llegó a leerse (jamás inventar). */
+  qrPresupuestoMs?: number | null;
 }
 
 /** KIT e14-carga-masiva-v1 (helper compartido runner/store): página corta del

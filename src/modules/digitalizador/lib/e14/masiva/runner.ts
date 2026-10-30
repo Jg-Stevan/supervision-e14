@@ -121,7 +121,10 @@ import {
 // vuelve todo byte-idéntico a hoy.
 import { flagsMasivaEfectivos, planGamaActual } from "../gama";
 import { leerFlags } from "../flags";
-import { decodificarQrCapa0Worker } from "./capa0-qr.client"; // D40 — KIT e14-capa0-qr-worker-v1
+import {
+  decodificarQrCapa0Worker,
+  type FasesCapa0, // R1.4-b — KIT qr-fases-telemetria-v1 (tipo puro — se borra al compilar)
+} from "./capa0-qr.client"; // D40 — KIT e14-capa0-qr-worker-v1
 
 // ─── D65 — KIT e14-progreso-watchdog-dedup-v1 (T1): WATCHDOG HUMANO ───
 // Antes (e14-masiva-ux-v1 T4): presupuesto ÚNICO de 120 s — un colgado moría
@@ -555,6 +558,22 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   // R1.4 — tier/ms del worker de capa 0 (null = sin worker / main / heredado).
   let qrTierCapa0: string | null = null;
   let qrMsCapa0: number | null = null;
+  // R1.4-b — KIT qr-fases-telemetria-v1: desglose por fase del worker +
+  // causa del fin de la cadena + ms del rescate zxing de main (el hueco
+  // preOcrQrMs − qrMs del informe A/B 2026-10-30: 2,5-4,5 s sin dueño).
+  // null/ausente = sin worker / heredado / caché / bundle viejo (jamás inventar).
+  let qrFasesCapa0: FasesCapa0 | null = null;
+  let qrFinCapa0: string | null = null;
+  let qrZxingMs: number | null = null;
+  // R1.4-b — presupuesto (ms) con el que la cadena CORRIÓ de verdad — el
+  // plan de gama se lee AL INICIO de la capa 0 y el informe muestra el
+  // snapshot FINAL (gama.tierEfectivo puede bajar a mitad de sesión por la
+  // degradación preventiva: el informe móvil 2026-10-30 16:27 marcó
+  // ALTO/MEDIO-efectivo con un qrMs de 13,3 s — sin este sello es
+  // imposible saber si la escalera corrió con presupuesto null (ALTO) o
+  // 8000 (MEDIO)). null = plan sin presupuesto (ALTO/base) o no llegó a
+  // leerse el plan (jamás inventar).
+  let qrPresupuestoMsCapa0: number | null = null;
   try {
     // D41 — lectura RAW: el pipeline solo consume `archivo` y escribe el
     // desenlace NUEVO encima (el acta vieja, si existiera, se reemplaza
@@ -672,6 +691,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     } else {
       try {
         const planQr = planGamaActual();
+        // R1.4-b — sello del presupuesto REAL de esta escalera (snapshot al
+        // inicio — el informe de gama puede cambiar después).
+        qrPresupuestoMsCapa0 = planQr.qrPresupuestoMs ?? null;
         // D40 — KIT e14-capa0-qr-worker-v1: el carril pesado de la capa 0
         // (decode del blob + ladder + barridos + nitidez + binarizada +
         // rotaciones + rescate) corre en WORKER dedicado jsQR-only
@@ -698,12 +720,20 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
             presupuestoVencidoCapa0 = rWorker.presupuestoVencido !== false;
             qrTierCapa0 = rWorker.tier ?? null;
             qrMsCapa0 = typeof rWorker.ms === "number" ? rWorker.ms : null;
+            // R1.4-b — telemetría por fase + causa del fin (undefined =
+            // bundle v≤2 / catch — NO se exporta, jamás inventar).
+            qrFasesCapa0 = rWorker.fases ?? null;
+            qrFinCapa0 = rWorker.fin ?? null;
             logger.info(
-              `[e14] capa0-qr worker fila=${fila.id} nombre=${fila.nombre} tier=${rWorker.tier ?? "null"} ms=${rWorker.ms} payload=${qrPayload ? qrCorto(qrPayload) : "-"}`,
+              `[e14] capa0-qr worker fila=${fila.id} nombre=${fila.nombre} tier=${rWorker.tier ?? "null"} ms=${rWorker.ms} fin=${rWorker.fin ?? "-"} fases=${rWorker.fases ? JSON.stringify(rWorker.fases) : "-"} payload=${qrPayload ? qrCorto(qrPayload) : "-"}`,
             );
             if (!qrPayload) {
               // Solo el tier que el worker no puede cargar (wasm) — sin
               // re-pagar los barridos jsQR (ya corrieron en el worker).
+              // R1.4-b — CRONOMETRADO: es el hueco preOcrQrMs − qrMs del
+              // informe (fileToCaptureDataUrl decodifica el original COMPLETO
+              // + la cadena zxing de main — 2,5-4,5 s medidos 2026-10-30).
+              const tZxing = performance.now();
               const captureQr = await fileToCaptureDataUrl(archivo);
               const qrQr = await decodificarQrDeCapture(captureQr, {
                 soloZxing: true,
@@ -713,6 +743,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
                 // donde ya corre el otro tier wasm (cobertura aditiva).
                 zoomTl: leerFlags().qrZoomTl,
               });
+              qrZxingMs = Math.round(performance.now() - tZxing);
               qrPayload = qrQr?.payload ?? null;
             }
           }
@@ -1742,6 +1773,15 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       ...(qrTierCapa0 != null || qrMsCapa0 != null
         ? { qrTier: qrTierCapa0, qrMs: qrMsCapa0 }
         : {}),
+      // R1.4-b — KIT qr-fases-telemetria-v1 (aditivo D57): desglose por
+      // fase + causa del fin + ms del rescate zxing de main. Ausente =
+      // sin worker / heredado / caché / bundle v≤2 (jamás inventar).
+      ...(qrFasesCapa0 ? { qrFases: qrFasesCapa0 } : {}),
+      ...(qrFinCapa0 != null ? { qrFin: qrFinCapa0 } : {}),
+      ...(qrZxingMs != null ? { qrZxingMs } : {}),
+      ...(qrPresupuestoMsCapa0 != null
+        ? { qrPresupuestoMs: qrPresupuestoMsCapa0 }
+        : {}),
       // WAVE3 §B — traza del rescate anti-falso-rechazo (ADITIVA AL FINAL,
       // D57): "salvado" = el desenlace final ≠ RECHAZADA tras el reintento;
       // "lanzado" = el reintento también rechazó (se acepta el rechazo —
@@ -1853,6 +1893,14 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
       ...(qrTierCapa0 != null ? { qrTier: qrTierCapa0 } : {}),
       ...(qrMsCapa0 != null ? { qrMs: qrMsCapa0 } : {}),
+      // R1.4-b — KIT qr-fases-telemetria-v1 (aditivos; ausente = sin dato):
+      // desglose por fase + causa del fin + ms del rescate zxing de main.
+      ...(qrFasesCapa0 ? { qrFases: qrFasesCapa0 } : {}),
+      ...(qrFinCapa0 != null ? { qrFin: qrFinCapa0 } : {}),
+      ...(qrZxingMs != null ? { qrZxingMs } : {}),
+      ...(qrPresupuestoMsCapa0 != null
+        ? { qrPresupuestoMs: qrPresupuestoMsCapa0 }
+        : {}),
       ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
       ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
       dedup: registro?.dedup,
@@ -1893,6 +1941,14 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
       ...(qrTierCapa0 != null ? { qrTier: qrTierCapa0 } : {}),
       ...(qrMsCapa0 != null ? { qrMs: qrMsCapa0 } : {}),
+      // R1.4-b — KIT qr-fases-telemetria-v1 (aditivos; ausente = sin dato):
+      // desglose por fase + causa del fin + ms del rescate zxing de main.
+      ...(qrFasesCapa0 ? { qrFases: qrFasesCapa0 } : {}),
+      ...(qrFinCapa0 != null ? { qrFin: qrFinCapa0 } : {}),
+      ...(qrZxingMs != null ? { qrZxingMs } : {}),
+      ...(qrPresupuestoMsCapa0 != null
+        ? { qrPresupuestoMs: qrPresupuestoMsCapa0 }
+        : {}),
       ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
     });
     if (registro) {
