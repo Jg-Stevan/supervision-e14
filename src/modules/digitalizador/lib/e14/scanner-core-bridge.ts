@@ -57,7 +57,6 @@ import type {
   Quad,
 } from "@jg-stevan/scanner-core/types";
 import { ACTA_MOCK } from "./seed";
-import { statusDeScore } from "./types";
 import { cargarDivipol } from "./divipol";
 import {
   clasificarCabecera,
@@ -93,13 +92,21 @@ import { medirZonaVotos } from "./marcadores";
 // para el gate de escaneos (T2) — fotos y SIM jamás lo invocan (guards).
 import { evaluarMarcoImpreso, type MarcoEscaneo, type MarcoImpreso } from "./marco-escaneo";
 // KIT e14-score-lectura-v1: señal de LECTURA del score v2 (módulo puro — §4-A).
+// (R7a: PISO_LECTURA_FUERTE/TECHO_LECTURA_DEBIL se consumen ahora DENTRO del
+// desenlace unificado — gate.ts; aquí solo quedan sus consumidores directos.)
+import { lazoPerdonadoPorLectura, senalDeLectura, type NivelLectura } from "./senal-lectura";
+// R7a — M3 (revisión 03a-digitalizador-nucleo): DESENLACE unificado del gate.
+// pipeline() y pipelineRecorte() delegan en este módulo PURO (transcripción
+// literal de las ramas gemelas — pitfall §9.9): mismo orden de caps, mismo
+// gate, mismos tokens; el log de auditoría queda EN EL CALLER con el
+// resultado estructurado (SalidaDesenlace).
 import {
-  PISO_LECTURA_FUERTE,
-  TECHO_LECTURA_DEBIL,
-  lazoPerdonadoPorLectura,
-  senalDeLectura,
-  type NivelLectura,
-} from "./senal-lectura";
+  DETALLE_ILEGIBLE,
+  TECHO_SIN_SENAL,
+  evaluarGate as evaluarGateCriterio,
+  resolverDesenlace,
+  type ResultadoGate,
+} from "./gate";
 // §1 (SPEC-ux-real-bn-editor): acta E-14 real del dueño (Galaxy A56 5G) —
 // import estático: Next resuelve el basePath /web-scanner del deploy estático.
 // REFRESCO 2026-10-21 (lote JPG.rar del dueño): el contenido del asset es
@@ -203,34 +210,14 @@ type ParcialRecorte = {
  *  reintento — §3-T1). Vencido el tope se continúa como hoy (fallback
  *  Sobel): la espera JAMÁS bloquea el pipeline más de 5 s por paso. */
 const TOPE_ESPERA_WORKER_MS = 5_000;
-/** Techos/labels del mapeo §4 y el gate §4.2. */
-const DETALLE_ILEGIBLE = "CÓDIGO DE BARRAS Y CABECERA NO DETECTADOS";
 const DETALLE_TIMEOUT = "TIEMPO DE PROCESADO EXCEDIDO";
-const DETALLE_GENERICO = "SCORE INSUFICIENTE PARA TRANSMISIÓN";
-// §F-5 (SPEC-camara-funcional): detalle del rechazo por acta INCOMPLETA —
-// la captura corta el papel aunque la cabecera sea legible.
-const DETALLE_INCOMPLETA = "EL ACTA ESTÁ CORTADA EN EL ENCUADRE — ALÉJATE UN POCO Y CAPTURA EL ACTA COMPLETA";
-// KIT e63d-escaneo-ya-recortado-v1 (F3.4): copy del rechazo INCOMPLETA para
-// ARCHIVO/escaneo — «aléjate un poco» no tiene sentido para un archivo
-// subido (no hay cámara que alejar). Mismo tipo de rechazo, copy del medio.
-const DETALLE_INCOMPLETA_ESCANEO =
-  "EL ESCANEO PARECE CORTADO — REPITE EL ESCANEO INCLUYENDO EL ACTA COMPLETA";
-// KIT e14-gate-v2 (FASE G2): detalle del rechazo por el MARCADOR
-// OBLIGATORIO de votos fallido — copy CORTO y descriptivo (decisión del
-// dueño: SIN guía de cámara). El rechazo directo regresa el flujo a
-// captura (comportamiento existente de RECHAZADA).
-const DETALLE_SIN_VOTOS = "ACTA SIN VOTOS VISIBLES";
-// §D1 (SPEC-e14-score-ocr): modelo del score por RECONOCIMIENTO — techo de
-// una foto SIN SEÑAL de contenido del acta (bolsa de papas, pared, borrosa
-// total): por debajo de RECHAZADA (6.5) → «score bajo» garantizado. El
-// detalle es el rechazo determinista §D3 (repetir, NUNCA RH en 1ª ronda).
-const TECHO_SIN_SENAL = 4.9;
-const DETALLE_BAJO = "NO SE RECONOCE INFORMACIÓN DEL ACTA — REPITA LA FOTO";
-// D10 (SPEC-e14-guard-borde): techo del ESCUDO anti-fondo — el recorte trae
-// fondo/sombra al filo (franjas ≥85% oscuras, NO tinta cortada): el acta pasa
-// al gate pero NUNCA ÓPTIMA (statusDeScore: ≥8 sería ÓPTIMA — el operador
-// puede preferir repetir porque el recorte trae fondo). Sin copy nuevo.
-const TECHO_ESCUDO_FONDO = 7.9;
+// (R7a) Los copies/techos del DESENLACE (DETALLE_ILEGIBLE · DETALLE_GENERICO ·
+// DETALLE_INCOMPLETA(+_ESCANEO) · DETALLE_SIN_VOTOS · DETALLE_BAJO ·
+// TECHO_SIN_SENAL · TECHO_ESCUDO_FONDO) viven AHORA en lib/e14/gate.ts
+// (desenlace unificado, M3) — importados arriba. El bridge conserva SOLO los
+// que aún consume en rutas propias: DETALLE_TIMEOUT (watchdogs de abajo),
+// DETALLE_ILEGIBLE (catch de detección L1284→) y TECHO_SIN_SENAL
+// (scoreDeCalidad). Los comentarios/valores originales viajaron íntegros.
 
 /**
  * §D1 (SPEC-e14-score-ocr): SEÑAL DE CONTENIDO del acta — se calcula DESPUÉS
@@ -930,13 +917,6 @@ export type OpcionesEscaneoConTimeout = OpcionesEscaneo & {
   desdeMasiva?: boolean;
 };
 
-/** Resultado del gate §4 (evaluarGate) — status + rechazo + clasificación. */
-interface ResultadoGate {
-  status: ActaStatus;
-  rechazo: Acta["rechazo"];
-  clasificacion: ClasificacionE14 | null;
-}
-
 /** Traza §4.6: clasif={dep:88,mun:335,zon:05,std:02,mesa:001,tipo:T,nivel:AUTO}. */
 function fmtClasif(c: ClasificacionE14 | null): string {
   if (!c) return "sin-clasificar";
@@ -1627,32 +1607,13 @@ export class RealCoreBridge implements E14Bridge {
     // ORDEN del merge (kit e14-diag-campos-aditivos-v1 §4-A.3):
     // scoreDeCalidad → scoreVisual → bloque C3 → inyección SIM → caps.
     const scoreVisual = score;
-    // KIT e14-score-lectura-v1 (C3): ajuste por LECTURA — el OCR manda (§3):
-    // FUERTE (mesa+4 anclas o 6) sube el score a ≥8.5 (el piso vence al techo
-    // fair pero NUNCA al poor — level del core "poor" es evidencia física
-    // dura); DEBIL techo 5.9; MEDIA no toca. El texto es el POST-banda
-    // (ocrBanda ya sumó — pitfall §9.8; SIN llamada OCR nueva — costo 0).
-    // Va EXACTAMENTE aquí (§4-B3): tras scoreDeCalidad y ANTES de la
-    // inyección SIM (pitfall §9.5 — los chips 8.2/7.0/4.3 mandan) y de los
-    // caps posteriores (escudo fondo/recortada/gate siguen MANDANDO —
-    // pitfall §9.4). Mismo criterio en el pipelineRecorte (pitfall §9.9).
-    // KIT e14-luz-sim-puntos-v1 (T-D): la declaración de `senal` se SUBIÓ
-    // (ahora vive antes de scoreDeCalidad — el piso-10 necesita las anclas
-    // dentro del score). Este bloque C3 queda byte a byte leyendo esa const.
-    if (senal.nivel === "FUERTE" && calidad.level !== "poor") {
-      score = Math.max(score, PISO_LECTURA_FUERTE);
-    } else if (senal.nivel === "DEBIL") {
-      score = Math.min(score, TECHO_LECTURA_DEBIL);
-    }
-    // §D3 (SPEC-e14-simulacion-scores): inyección determinista del chip —
-    // reemplaza el calculado DESPUÉS de scoreDeCalidad y ANTES del gate.
-    // §G3 (KIT e14-gate-v2): SIN re-aplicación del piso de identificada
-    // (la constante ya no existe) — el chip manda: 8.2 → OPTIMA por
-    // statusDeScore (auto-envío normal) · 7.0 → ADVERTENCIA · 4.3 →
-    // RECHAZADA (§D4). Nada se fuerza a mano: `evaluarGate` decide.
-    if (opciones.simular && opciones.scoreSimulado != null) {
-      score = opciones.scoreSimulado;
-    }
+    // R7a (M3): el C3 (piso/techo de LECTURA — kit e14-score-lectura-v1) y la
+    // inyección SIM (§D3 — los chips 8.2/7.0/4.3 mandan, pitfall §9.5) viven
+    // AHORA dentro de resolverDesenlace (lib/e14/gate.ts) — UNA implementación
+    // para AMBOS pipelines (pitfall §9.9). El desenlace completo se resuelve
+    // más abajo, tras las mediciones asíncronas (verificación/marco/votos):
+    // las esperas no alteran el score (observaciones puras) y el orden de
+    // aplicación de caps/gate se conserva byte a byte.
     // §F-2 (SPEC-camara-funcional) + GUARD-BORDE Rev. 2: acta INCOMPLETA →
     // resolución por la vía de rechazo SIN tocar evaluarGate (el veto sigue
     // VIVIENDO FUERA del gate — §7 score-ocr intocado, D6/AC10). La decisión
@@ -1722,70 +1683,34 @@ export class RealCoreBridge implements E14Bridge {
     // líneas impresas: de la suerte). Página desconocida → se mide
     // (conservador). Log: votos=skip-pag2 cuando aplique.
     const votosSkipPag2 = clasificacion.pagina?.index === 2;
-    const marcadoresOk = completa ? (votosSkipPag2 ? true : marcadores.hayVotos) : true;
-    // D10 — escudo anti-fondo: franja(s) ≥85% oscura(s) al filo = fondo/sombra
-    // incluida por el warp (NO tinta cortada) → el acta pasa al gate con
-    // TECHO 7.9 (nunca ÓPTIMA — statusDeScore: ≥8; el recorte trae fondo y el
-    // operador puede preferir repetir) sin copy nuevo. SOLO actas completas
-    // (la condenada por tinta no llega al gate).
-    if (completa && verificacionResuelta?.fondo) {
-      score = Math.min(score, TECHO_ESCUDO_FONDO);
-    }
-    // KIT actas-vivas-paginas-v1 (FASE C): acta RECORTADA (OCR de secciones)
-    // → techo 7.9 — ADVERTENCIA, NO rechazo (conservador en campo). Cap
-    // DESPUÉS de la inyección SIM (mismo sitio que el escudo de fondo — el
-    // recorte físico manda sobre cualquier score).
-    if (recortada) {
-      score = Math.min(score, TECHO_ESCUDO_FONDO);
-    }
-    const gate: ResultadoGate = !completa
-      ? {
-          // intento < maxIntentos → RECHAZADA · al AGOTAR → contingencia
-          // automática C4 (EN_REVISION_HUMANA con el MISMO rechazo).
-          status:
-            opciones.intento >= opciones.maxIntentos
-              ? ("EN_REVISION_HUMANA" as ActaStatus)
-              : ("RECHAZADA" as ActaStatus),
-          // KIT e63d (F3.4): el copy del rechazo depende del ORIGEN — para
-          // escaneos el mensaje de cámara («aléjate») es absurdo: se pide
-          // repetir el ESCANEO. Fotos/cámara conservan el copy de siempre
-          // byte a byte. (pipelineRecorte —rama manual— sin cambios: F2.4.)
-          rechazo: {
-            tipo: "INCOMPLETA",
-            detalle:
-              origenActa === "escaneo" ? DETALLE_INCOMPLETA_ESCANEO : DETALLE_INCOMPLETA,
-          },
-          clasificacion: null,
-        }
-      : !marcadoresOk
-        ? {
-            // KIT e14-gate-v2 (G2): rechazo DIRECTO por marcador
-            // obligatorio fallido — mismo desenlace por intentos que
-            // INCOMPLETA (repetir; al AGOTAR, contingencia C4 con el
-            // MISMO rechazo SIN_VOTOS — un impreso sin votos no puede
-            // quedarse en bucle infinito). Copy CORTO, sin guía.
-            status:
-              opciones.intento >= opciones.maxIntentos
-                ? ("EN_REVISION_HUMANA" as ActaStatus)
-                : ("RECHAZADA" as ActaStatus),
-            rechazo: { tipo: "SIN_VOTOS", detalle: DETALLE_SIN_VOTOS },
-            clasificacion: null,
-          }
-        : this.evaluarGate(score, texto, clasificacion, opciones.intento, opciones.maxIntentos);
-    if (!completa) score = Math.min(score, 6.4);
-    // Cap del veto de votos (mismo patrón del INCOMPLETA): RECHAZADA
-    // implica <6.5 (statusDeScore) — el score queda coherente con el status.
-    if (completa && !marcadoresOk) score = Math.min(score, 6.4);
-
-    // §D3 (SPEC-e14-score-ocr): desenlace «SCORE BAJO» determinista — sin
-    // señal de contenido, el rechazo se sustituye por BAJO SEA CUAL SEA el
-    // status (el status lo sigue decidiendo el gate/los intentos: al agotar,
-    // contingencia C4 con su rechazo BAJO real). Con señal, nada cambia
-    // (INCOMPLETA/ILEGIBLE/GENERICO como hoy). Mismo patrón que INCOMPLETA:
-    // FUERA de evaluarGate (§7 prohibido tocarlo).
-    const rechazoFinal: Acta["rechazo"] = senalActa
-      ? gate.rechazo
-      : { tipo: "BAJO", detalle: DETALLE_BAJO };
+    // R7a (M3) — DESENLACE unificado: caps del sitio (escudo-fondo D10 ·
+    // recortada) → gate (INCOMPLETA · SIN_VOTOS G2 · evaluarGate §4) → caps
+    // post-gate 6.4 → sustitución BAJO §D3 → techosDiag, TODO en
+    // resolverDesenlace (gate.ts — transcripción literal de esta rama; las
+    // diferencias legítimas con pipelineRecorte entran EXPLÍCITAS: escudo-
+    // manual=false, copy INCOMPLETA por origen, chip SIM).
+    const desenlace = resolverDesenlace({
+      score,
+      levelCalidad: calidad.level,
+      nivelLectura: senal.nivel,
+      senalActa,
+      ocrTexto: texto,
+      clasificacion,
+      intento: opciones.intento,
+      maxIntentos: opciones.maxIntentos,
+      scoreSimulado: opciones.simular ? (opciones.scoreSimulado ?? null) : null,
+      completa,
+      vetoIncompleta: !completa,
+      escudoManual: false,
+      fondo: verificacionResuelta?.fondo ?? false,
+      recortada,
+      origenEscaneo: origenActa === "escaneo",
+      votosSkipPag2,
+      hayVotos: marcadores.hayVotos,
+    });
+    score = desenlace.score;
+    const marcadoresOk = desenlace.marcadoresOk;
+    const rechazoFinal: Acta["rechazo"] = desenlace.rechazo;
 
     const evidenciaSim =
       opciones.simular && opciones.scoreSimulado != null ? ` sim=${opciones.scoreSimulado}` : "";
@@ -1815,22 +1740,10 @@ export class RealCoreBridge implements E14Bridge {
     // (techo-fair/poor/sin-senal de scoreDeCalidad → escudo-fondo → recortada
     // → incompleta → sin-votos). Los de lectura-DEBIL/piso-FUERTE llegan con
     // score-lectura (PR #13, §8 — campos aditivos).
-    const techosDiag: string[] = [];
-    if (calidad.level === "fair") techosDiag.push("techo-fair:7.9");
-    if (calidad.level === "poor") techosDiag.push("techo-poor:6.4");
-    if (!senalActa) techosDiag.push(`sin-senal:${TECHO_SIN_SENAL}`);
-    // KIT e14-diag-campos-aditivos-v1 (§8 score-lectura): ajustes de LECTURA
-    // del score v2 — NO son caps: observabilidad del ajuste (piso sube,
-    // techo baja). Condición espejo exacta del C3 (L1050-1055) — el C3
-    // aplica DESPUÉS de scoreDeCalidad y ANTES de los caps del sitio.
-    if (senal.nivel === "FUERTE" && calidad.level !== "poor")
-      techosDiag.push("piso-lectura-FUERTE:8.5");
-    if (senal.nivel === "DEBIL") techosDiag.push("lectura-DEBIL:5.9");
-    if (completa && verificacionResuelta?.fondo)
-      techosDiag.push(`escudo-fondo:${TECHO_ESCUDO_FONDO}`);
-    if (recortada) techosDiag.push(`recortada:${TECHO_ESCUDO_FONDO}`);
-    if (!completa) techosDiag.push("incompleta:6.4");
-    if (completa && !marcadoresOk) techosDiag.push("sin-votos:6.4");
+    // R7a (M3): la lista nace AHORA en resolverDesenlace (gate.ts) — mismas
+    // condiciones y MISMO orden que los caps que aplicó (antes duplicado aquí
+    // y en pipelineRecorte — pitfall §9.9).
+    const techosDiag: string[] = desenlace.techosDiag;
     // C1: el registro nace junto al log (todo en scope — §9.6). SIM nunca
     // (§9.2). Observación PASIVA: si falla, el desenlace NO se toca (§9.7).
     let diag: DiagnosticoActa | null = null;
@@ -1840,7 +1753,7 @@ export class RealCoreBridge implements E14Bridge {
           actaId: "", // se parcha con el id REAL tras construirActa
           intento: opciones.intento,
           maxIntentos: opciones.maxIntentos,
-          status: gate.status,
+          status: desenlace.status,
           rechazo: rechazoFinal,
           scoreVisual,
           scoreFinal: score,
@@ -1874,7 +1787,7 @@ export class RealCoreBridge implements E14Bridge {
               ok: marcadoresOk,
             },
             procesadaVacia,
-            clasifNivel: gate.clasificacion?.nivel ?? "—",
+            clasifNivel: desenlace.clasificacion?.nivel ?? "—",
           },
           captura: {
             motor,
@@ -1933,7 +1846,7 @@ export class RealCoreBridge implements E14Bridge {
         `ocr=rapidocr conf=${confOcr != null ? confOcr.toFixed(2) : "?"} det=${Math.round(detOcr)}ms rec=${Math.round(recOcr)}ms ` +
         // KIT e14-score-lectura-v1 (REBASE): señal de lectura v2 en la traza.
         `lectura=${senal.nivel} anclas=${senal.anclas} piso=${score >= 8.5 && senal.nivel === "FUERTE"} ` +
-        `clasif={${fmtClasif(gate.clasificacion)}} ` +
+        `clasif={${fmtClasif(desenlace.clasificacion)}} ` +
         `crop=${cropLog} ` +
         `metricas={sharpness:${calidad.sharpness} brightness:${calidad.brightness} ` +
         `contrast:${calidad.contrast} contEff:${contrasteEfectivoDe(calidad, ocrLegible)} ` +
@@ -1945,7 +1858,7 @@ export class RealCoreBridge implements E14Bridge {
         // KIT e63f-autoenvio-v1 (F0): balde fino del no-AUTO — token ADITIVO
         // AL FINAL (contrato D51). Ausente si AUTO o sin motivo de los
         // listados (puesto-lugar/tipo/mesa-registro/ruta).
-        `${gate.clasificacion?.clasifDebil ? ` ClasifDebil=${gate.clasificacion.clasifDebil}` : ""}`,
+        `${desenlace.clasificacion?.clasifDebil ? ` ClasifDebil=${desenlace.clasificacion.clasifDebil}` : ""}`,
     );
 
     // KIT e14-diagnostico-autoenvio-v1 (C1): adjuntar el registro con el id
@@ -1969,9 +1882,9 @@ export class RealCoreBridge implements E14Bridge {
       // en el editor — el acta NO pasó por filtro); pipeline normal "bw".
       filtro: filtroActa,
       score,
-      status: gate.status,
+      status: desenlace.status,
       rechazo: rechazoFinal,
-      clasificacion: gate.clasificacion,
+      clasificacion: desenlace.clasificacion,
     });
     if (diag) {
       diag.actaId = acta.id;
@@ -1995,7 +1908,7 @@ export class RealCoreBridge implements E14Bridge {
             },
             scoreVisual,
             scoreFinal: score,
-            gate: gate.status,
+            gate: desenlace.status,
             ocrValido: diag.ocrValido,
           }),
         )
@@ -2360,11 +2273,9 @@ export class RealCoreBridge implements E14Bridge {
     // KIT actas-vivas-paginas-v1 (FASE C): gate de votos SOLO P1 — la pág 2
     // (constancias) NO tiene zona de votos. Página desconocida → se mide
     // (conservador). Log: votos=skip-pag2 cuando aplique.
+    // (R7a: el `marcadoresOk` que vivía aquí nace ahora DENTRO de
+    // resolverDesenlace — gate.ts — y regresa como `desenlace.marcadoresOk`.)
     const votosSkipPag2 = clasificacion.pagina?.index === 2;
-    // KIT e14-esquinas-suaves-v1 (Q2): con escudo-manual el gate de votos
-    // SIGUE corriendo (un rescate sin votos no pasa) — solo el veto del guard
-    // se degrada a techo; el veto por marcador obligatorio queda INTACTO.
-    const marcadoresOk = vetoIncompleta ? true : (votosSkipPag2 ? true : marcadores.hayVotos);
     const ocrLegible = ocrTextIsValid(texto);
     // §D1 (SPEC-e14-score-ocr): señal de contenido — mismo criterio §4.4
     // (helper único, AMBOS pipelines con el MISMO criterio).
@@ -2391,68 +2302,37 @@ export class RealCoreBridge implements E14Bridge {
     // del sitio (misma convención que el escaneo). ORDEN del merge (kit
     // e14-diag-campos-aditivos-v1 §4-A.3): scoreDeCalidad → scoreVisual → C3.
     const scoreVisual = score;
-    // KIT e14-score-lectura-v1 (C3): MISMO ajuste por LECTURA del escaneo
-    // (§4-B3 — mismo criterio en re-análisis, pitfall §9.9). El texto es el
-    // POST-banda (consenso-frankfurt FASE 4); SIN llamada OCR nueva. Va
-    // ANTES de los caps posteriores: escudo fondo/recortada/gate siguen
-    // MANDANDO (pitfall §9.4 — una recortada con lectura FUERTE se queda ≤7.9).
-    // KIT e14-luz-sim-puntos-v1 (T-D): misma subida de `senal` del escaneo
-    // (§4.4 del kit — EXACTAMENTE el mismo patrón en pipelineRecorte).
-    if (senal.nivel === "FUERTE" && calidad.level !== "poor") {
-      score = Math.max(score, PISO_LECTURA_FUERTE);
-    } else if (senal.nivel === "DEBIL") {
-      score = Math.min(score, TECHO_LECTURA_DEBIL);
-    }
-    // D10 — escudo anti-fondo (mismo criterio del escaneo): el rescate trae
-    // fondo/sombra al filo → gate con TECHO 7.9 (nunca ÓPTIMA), sin copy.
-    if (completa && verificacion.fondo) {
-      score = Math.min(score, TECHO_ESCUDO_FONDO);
-    }
-    // KIT e14-esquinas-suaves-v1 (Q2): escudo-MANUAL — el acta pasa al gate
-    // con TECHO 7.9 (ADVERTENCIA como máximo; el operador decide si repetir).
-    // Colocado JUNTO al escudo-fondo (antes del cap de `recortada`; los caps
-    // del sitio mandan sobre el piso-10 — §G3; orden de caps pitfall G3:
-    // techo fair/poor → sin-señal → piso-10 → escudo-fondo → escudo-manual
-    // → recortada → incompleta → sin-votos).
-    if (escudoManual) {
-      score = Math.min(score, TECHO_ESCUDO_FONDO);
-    }
-    // KIT actas-vivas-paginas-v1 (FASE C): acta RECORTADA → techo 7.9 —
-    // ADVERTENCIA, NO rechazo (mismo criterio del escaneo, helper ÚNICO §4.4).
-    if (recortada) {
-      score = Math.min(score, TECHO_ESCUDO_FONDO);
-    }
-    const gate: ResultadoGate = vetoIncompleta
-      ? {
-          status:
-            acta.intento >= acta.maxIntentos
-              ? ("EN_REVISION_HUMANA" as ActaStatus)
-              : ("RECHAZADA" as ActaStatus),
-          rechazo: { tipo: "INCOMPLETA", detalle: DETALLE_INCOMPLETA },
-          clasificacion: null,
-        }
-      : !marcadoresOk
-        ? {
-            // KIT e14-gate-v2 (G2): rechazo directo SIN_VOTOS — mismo
-            // desenlace por intentos que INCOMPLETA (contingencia C4 al
-            // AGOTAR, con el MISMO rechazo). Copy CORTO, sin guía.
-            status:
-              acta.intento >= acta.maxIntentos
-                ? ("EN_REVISION_HUMANA" as ActaStatus)
-                : ("RECHAZADA" as ActaStatus),
-            rechazo: { tipo: "SIN_VOTOS", detalle: DETALLE_SIN_VOTOS },
-            clasificacion: null,
-          }
-        : this.evaluarGate(score, texto, clasificacion, acta.intento, acta.maxIntentos);
-    // KIT e14-esquinas-suaves-v1 (Q2): cap del veto SOLO cuando el veto es
-    // REAL (vetoIncompleta) — con escudo-manual el cap 7.9 ya aplicó arriba.
-    if (vetoIncompleta) score = Math.min(score, 6.4);
-    if (completa && !marcadoresOk) score = Math.min(score, 6.4);
-    // §D3 (SPEC-e14-score-ocr): sustitución BAJO sin señal — igual que el
-    // escaneo (el recorte de una foto sin acta no fabrica señal).
-    const rechazoFinal: Acta["rechazo"] = senalActa
-      ? gate.rechazo
-      : { tipo: "BAJO", detalle: DETALLE_BAJO };
+    // R7a (M3) — DESENLACE unificado (mismo criterio del escaneo, pitfall
+    // §9.9): C3 (piso/techo lectura) → caps del sitio (escudo-fondo D10 ·
+    // escudo-manual Q2 · recortada) → gate (INCOMPLETA · SIN_VOTOS G2 ·
+    // evaluarGate §4) → caps post-gate 6.4 → sustitución BAJO §D3 →
+    // techosDiag, TODO en resolverDesenlace (gate.ts — transcripción literal
+    // de esta rama). Las diferencias legítimas del recorte entran EXPLÍCITAS:
+    // sin chip SIM (scoreSimulado null), vetoIncompleta/escudoManual según
+    // `manual` (Q2 — el recorte MANUAL degrada el veto a escudo) y copy
+    // INCOMPLETA de cámara SIEMPRE (rama manual sin cambios: F2.4).
+    const desenlace = resolverDesenlace({
+      score,
+      levelCalidad: calidad.level,
+      nivelLectura: senal.nivel,
+      senalActa,
+      ocrTexto: texto,
+      clasificacion,
+      intento: acta.intento,
+      maxIntentos: acta.maxIntentos,
+      scoreSimulado: null,
+      completa,
+      vetoIncompleta,
+      escudoManual,
+      fondo: verificacion.fondo,
+      recortada,
+      origenEscaneo: false,
+      votosSkipPag2,
+      hayVotos: marcadores.hayVotos,
+    });
+    score = desenlace.score;
+    const marcadoresOk = desenlace.marcadoresOk;
+    const rechazoFinal: Acta["rechazo"] = desenlace.rechazo;
 
     // §3c (GUARD-BORDE): log de auditoría del guard — SOLO con sospecha
     // geométrica (AC8). Mismos campos que el pipeline de escaneo.
@@ -2472,27 +2352,10 @@ export class RealCoreBridge implements E14Bridge {
     const cropLog = infoCrop.fallback ? "full" : `${infoCrop.w}x${infoCrop.h}`;
     // KIT e14-diagnostico-autoenvio-v1 (C1/§6-B): techos con las MISMAS
     // condiciones que aplicaron los caps (orden real) — sitio recorte.
-    const techosDiag: string[] = [];
-    if (calidad.level === "fair") techosDiag.push("techo-fair:7.9");
-    if (calidad.level === "poor") techosDiag.push("techo-poor:6.4");
-    if (!senalActa) techosDiag.push(`sin-senal:${TECHO_SIN_SENAL}`);
-    // KIT e14-diag-campos-aditivos-v1 (§8 score-lectura): ajustes de LECTURA
-    // del score v2 — NO son caps: observabilidad del ajuste (piso sube,
-    // techo baja). Condición espejo exacta del C3 del recorte (L1503-1508) —
-    // mismo criterio en AMBOS pipelines (pitfall §9.9 score-lectura).
-    if (senal.nivel === "FUERTE" && calidad.level !== "poor")
-      techosDiag.push("piso-lectura-FUERTE:8.5");
-    if (senal.nivel === "DEBIL") techosDiag.push("lectura-DEBIL:5.9");
-    if (completa && verificacion.fondo)
-      techosDiag.push(`escudo-fondo:${TECHO_ESCUDO_FONDO}`);
-    // KIT e14-esquinas-suaves-v1 (Q2): techo del escudo-manual (7.9) — junto
-    // al escudo-fondo, MISMO orden de aplicación de los caps.
-    if (escudoManual) techosDiag.push("escudo-manual:7.9");
-    if (recortada) techosDiag.push(`recortada:${TECHO_ESCUDO_FONDO}`);
-    // KIT e14-esquinas-suaves-v1 (Q2): el token `incompleta:6.4` SOLO con el
-    // veto real (un recorte manual incompleto NO es INCOMPLETA — es escudo).
-    if (vetoIncompleta) techosDiag.push("incompleta:6.4");
-    if (completa && !marcadoresOk) techosDiag.push("sin-votos:6.4");
+    // R7a (M3): la lista nace AHORA en resolverDesenlace (gate.ts) — mismas
+    // condiciones y MISMO orden que los caps que aplicó, escudo-manual
+    // incluido (antes duplicado aquí y en pipeline() — pitfall §9.9).
+    const techosDiag: string[] = desenlace.techosDiag;
     // C1: registro del desenlace junto al log (§9.6). Guard extra §9.2: un
     // recorte de un acta SIMULACION tampoco adjunta (doble guard con el store).
     let diag: DiagnosticoActa | null = null;
@@ -2502,7 +2365,7 @@ export class RealCoreBridge implements E14Bridge {
           actaId: acta.id, // el acta existe — identidad conservada (spread)
           intento: acta.intento,
           maxIntentos: acta.maxIntentos,
-          status: gate.status,
+          status: desenlace.status,
           rechazo: rechazoFinal,
           scoreVisual,
           scoreFinal: score,
@@ -2534,7 +2397,7 @@ export class RealCoreBridge implements E14Bridge {
               ok: marcadoresOk,
             },
             procesadaVacia,
-            clasifNivel: gate.clasificacion?.nivel ?? "—",
+            clasifNivel: desenlace.clasificacion?.nivel ?? "—",
           },
           captura: {
             motor,
@@ -2587,7 +2450,7 @@ export class RealCoreBridge implements E14Bridge {
         `ocr=rapidocr conf=${confOcr != null ? confOcr.toFixed(2) : "?"} det=${Math.round(detOcr)}ms rec=${Math.round(recOcr)}ms ` +
         // KIT e14-score-lectura-v1 (REBASE): señal de lectura v2 en la traza.
         `lectura=${senal.nivel} anclas=${senal.anclas} piso=${score >= 8.5 && senal.nivel === "FUERTE"} ` +
-        `clasif={${fmtClasif(gate.clasificacion)}} ` +
+        `clasif={${fmtClasif(desenlace.clasificacion)}} ` +
         `crop=${cropLog} ` +
         `metricas={sharpness:${calidad.sharpness} brightness:${calidad.brightness} ` +
         `contrast:${calidad.contrast} contEff:${contrasteEfectivoDe(calidad, ocrLegible)} ` +
@@ -2595,7 +2458,7 @@ export class RealCoreBridge implements E14Bridge {
         // KIT e63f-autoenvio-v1 (F0): balde fino del no-AUTO — token ADITIVO
         // AL FINAL (contrato D51). Ausente si AUTO o sin motivo de los
         // listados (puesto-lugar/tipo/mesa-registro/ruta).
-        `${gate.clasificacion?.clasifDebil ? ` ClasifDebil=${gate.clasificacion.clasifDebil}` : ""}`,
+        `${desenlace.clasificacion?.clasifDebil ? ` ClasifDebil=${desenlace.clasificacion.clasifDebil}` : ""}`,
     );
 
     // Acta ACTUALIZADA: identidad intacta (spread), campos reales nuevos y
@@ -2627,12 +2490,12 @@ export class RealCoreBridge implements E14Bridge {
       },
       motor,
       score,
-      status: gate.status,
+      status: desenlace.status,
       rechazo: rechazoFinal,
-      clasificacion: gate.clasificacion ?? undefined,
-      firmas: this.firmasPorStatus(acta.firmas, gate.status),
+      clasificacion: desenlace.clasificacion ?? undefined,
+      firmas: this.firmasPorStatus(acta.firmas, desenlace.status),
     };
-    const titUbi = tituloYUbicacionDe(gate.clasificacion ?? null);
+    const titUbi = tituloYUbicacionDe(desenlace.clasificacion ?? null);
     if (titUbi) {
       actaActualizada.titulo = titUbi.titulo;
       actaActualizada.ubicacion = titUbi.ubicacion;
@@ -2662,6 +2525,12 @@ export class RealCoreBridge implements E14Bridge {
    * PATRON_CABECERA ya NO decide el estado (§4.5) — solo traza en el log.
    * §X (SPEC-score-legible): la clasificación llega calculada desde el
    * pipeline — alimenta el score (piso por identificación).
+   *
+   * R7a (M3): el CRITERIO vive ahora en gate.ts (export `evaluarGate`) y los
+   * pipelines llegan a él vía resolverDesenlace. Este método se conserva como
+   * SEAM de caracterización (__tests__/gate.test.ts lo compara contra el
+   * módulo puro — misma entrada → misma salida) y punto de anclaje para la
+   * partición R7b. SIN llamadores en producción.
    */
   private evaluarGate(
     score: number,
@@ -2670,33 +2539,7 @@ export class RealCoreBridge implements E14Bridge {
     intento: number,
     maxIntentos: number,
   ): ResultadoGate {
-    if (score >= 6.5) {
-      if (clasificacion.nivel === "AUTO") {
-        return { status: statusDeScore(score), rechazo: null, clasificacion };
-      }
-      // SUGERIDA/MANUAL: la CONTINGENCIA (panel) llega SOLO al agotar intentos;
-      // antes, el acta viaja como EN_REVISION_HUMANA «repetir-primero» (§7.3 —
-      // la pantalla distingue por intento; el estado no cambia).
-      return { status: "EN_REVISION_HUMANA", rechazo: null, clasificacion };
-    }
-    // score < 6.5 — rechazo por CALIDAD. Al AGOTAR intentos: contingencia
-    // automática (C4) — el sistema escala solo, sin botón manual.
-    if (intento >= maxIntentos) {
-      return {
-        status: "EN_REVISION_HUMANA",
-        rechazo: ocrTextIsValid(ocrTexto)
-          ? { tipo: "GENERICO", detalle: DETALLE_GENERICO }
-          : { tipo: "ILEGIBLE", detalle: DETALLE_ILEGIBLE },
-        clasificacion: null,
-      };
-    }
-    return {
-      status: "RECHAZADA",
-      rechazo: ocrTextIsValid(ocrTexto)
-        ? { tipo: "GENERICO", detalle: DETALLE_GENERICO }
-        : { tipo: "ILEGIBLE", detalle: DETALLE_ILEGIBLE },
-      clasificacion: null,
-    };
+    return evaluarGateCriterio(score, ocrTexto, clasificacion, intento, maxIntentos);
   }
 
   /**
