@@ -249,6 +249,11 @@ function filaDeRegistro(r: RegistroMasiva): FilaMasiva {
     // FINAL del objeto retornado (contrato D57). Ausentes = registros previos.
     ...(r.sondeoQrMs != null ? { sondeoQrMs: r.sondeoQrMs } : {}),
     ...(r.sondeoQrTier != null ? { sondeoQrTier: r.sondeoQrTier } : {}),
+    // R1.2 — KIT qr-cache-negativa-v1: la traza sin-payload de la capa 0
+    // sobrevive la recarga — la siguiente corrida de ESTE registro salta el
+    // ladder (2-3 ms). Ausente = registro previo / payload leído (jamás
+    // inventar). Aditivo AL FINAL del objeto retornado (contrato D57).
+    ...(r.qrSinPayload ? { qrSinPayload: true } : {}),
   };
 }
 

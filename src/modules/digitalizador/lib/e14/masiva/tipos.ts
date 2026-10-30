@@ -164,6 +164,14 @@ export interface FilaMasiva {
    *  RAM del lote — NUNCA viaja a IDB (el prescan vive en la misma sesión
    *  que el runner; tras recargar la capa 0 re-decodifica como hoy). */
   qrPrevio?: string;
+  // ---------- R1.2 — KIT qr-cache-negativa-v1 — campo ADITIVO AL FINAL (contrato D57) ----------
+  /** true = la cadena COMPLETA de capa 0 (worker jsQR + fallback zxing) ya
+   *  corrió sobre los bytes de esta fila y terminó null SIN presupuesto
+   *  vencido — la capa 0 se salta el ladder (2-3 ms). Espejo de
+   *  RegistroMasiva.qrSinPayload (sobrevive la recarga vía filaDeRegistro).
+   *  "PROCESAR IGUAL" (forzarDedupOff) la IGNORA SIEMPRE. Ausente = la capa
+   *  0 no corrió / registro previo / payload leído (jamás inventar). */
+  qrSinPayload?: boolean;
 }
 
 /** Registro PERSISTENTE en IndexedDB — el Blob original + el acta completa. */
@@ -342,6 +350,28 @@ export interface RegistroMasiva {
    *  del informe (MetricaActa.qrHeredado) — persiste junto a qrPayload para
    *  el post-mortem de la palanca ① (cobertura del sondeo/prescan). */
   qrHeredado?: boolean;
+  // ---------- R1.2 — KIT qr-cache-negativa-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+  /** true = la cadena COMPLETA de capa 0 (worker + fallback zxing) corrió
+   *  sobre LOS BYTES de este registro y terminó null SIN presupuesto vencido
+   *  (R1.1 — presupuestoVencido=false). El runner lo consulta antes del
+   *  ladder (skip 2-3 ms) y filaDeRegistro lo restaura a la fila. "PROCESAR
+   *  IGUAL" lo ignora; una lectura posterior de payload lo limpia (el hecho
+   *  cambió — honestidad). Ausente = registro previo / payload leído. */
+  qrSinPayload?: boolean;
+  /** true = la capa 0 de esta corrida se SALTÓ el ladder POR la caché
+   *  negativa (traza de consumo — separa el skip del decode real). Ausente =
+   *  la capa 0 corrió su cadena normal (o heredó qrPrevio). */
+  qrCacheNegativa?: boolean;
+  // ---------- R1.4 — KIT qr-tier-metrica-v1 — campos ADITIVOS AL FINAL (contrato D57) ----------
+  /** Tier que ganó la cadena de la capa 0 (resp. worker: "base"|"recorte-600"
+   *  |"barrido"|"barrido-nitido"|"barrido-binarizado"|"rotacionN"|"rescate4096"
+   *  |"rescate4096-barrido"). null = la capa 0 corrió SIN worker (camino main
+   *  — su API no expone tier) o terminó null. Ausente = heredó/caché/ERROR
+   *  temprano (jamás inventar). */
+  qrTier?: string | null;
+  /** ms SOLO de la cadena jsQR del worker de capa 0 (RespuestaCapa0.ms).
+   *  null = sin worker / heredado / caché (jamás inventar). */
+  qrMs?: number | null;
 }
 
 /** KIT e14-carga-masiva-v1 (helper compartido runner/store): página corta del

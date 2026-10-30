@@ -263,6 +263,40 @@ export function ladoDeVentana(pix: PixelesQr, fraccion: number): number {
   return Math.max(16, Math.round(pix.width * fraccion));
 }
 
+// ─── R1.1 — KIT qr-presupuesto-real-v1 · GUARD DEL BARRIDO POR CUADRANTE ────
+/** El barrido es UNA llamada síncrona de ~330 intentos jsQR (4 cuadrantes ×
+ *  6 fracciones × grilla) — el guard de presupuesto de los callers (D74)
+ *  solo se chequeaba ANTES de arrancar: entrando con 7.9 s/8 s corre COMPLETO
+ *  (~3-5 s) igual. El guard se INYECTA aquí (módulo-scoped — la llamada
+ *  `barridoQrDePixeles(pix)` queda byte-idéntica: ancla source-scan de
+ *  identidad-qr §T-1 y del sondeo worker) y se chequea:
+ *  · POR CUADRANTE — al iniciar TL/TR/BL/BR (el QR vive en UNO: los
+ *    cuadrantes no alcanzados por el presupuesto eran los de abajo —
+ *    misma cobertura relativa que el corte por reló del tier zxing);
+ *  · POR FRACCIÓN — entre ventanas de distinto tamaño (acota el remanente
+ *    a ≤ 1 fracción ~0.5-1 s en lugar de ~1 cuadrante).
+ *  Sin guard activado (sondeo worker, llamadas sueltas) el comportamiento
+ *  es byte-idéntico a hoy. JAMÁS activo con presupuesto null (vencido()
+ *  siempre false — gama BASE/ALTO queda intacto). */
+let guardBarridoVencido: (() => boolean) | null = null;
+
+/** Activa el guard de reló para las llamadas barridoQrDePixeles que corran
+ *  DENTRO del closure del caller (la cadena de capa 0 es secuencial en SU
+ *  contexto — main o worker — y jsQR es sync: sin reentrancy). null = sin
+ *  guard (byte-idéntico a hoy). El caller DEBE desactivar en finally. */
+export function activarGuardBarrido(vencido: (() => boolean) | null): void {
+  guardBarridoVencido = vencido;
+}
+
+/** Lectura interna del guard (null-safe — jamás lanza). */
+function barridoVencido(): boolean {
+  try {
+    return guardBarridoVencido != null && guardBarridoVencido();
+  } catch {
+    return false; // un guard roto jamás tumba el barrido (honesto)
+  }
+}
+
 /**
  * BARRIDO CEÑIDO jsQR (doc hermano §1.3): grilla de ventanas cuadradas por
  * cuadrante [TL→TR→BL→BR] × BARRIDO_VENTANAS × paso 0.5 (solape de media
@@ -272,11 +306,17 @@ export function ladoDeVentana(pix: PixelesQr, fraccion: number): number {
  * celda final anclada al filo inferior-derecho de cada cuadrante (doc
  * hermano H-5 — la franja de hasta `paso` px que la condición `+ lado <=`
  * dejaba descubierta).
+ *
+ * R1.1 — con guard activado (activarGuardBarrido) el barrido se ABANDONA
+ * entre cuadrantes/fracciones cuando el presupuesto venció (return null —
+ * la cadena sigue a los tiers siguientes, que tienen SU guard).
  */
 export function barridoQrDePixeles(pix: PixelesQr): string | null {
   for (const q of CUADRANTES) {
+    if (barridoVencido()) return null; // R1.1 — guard por cuadrante
     const lim = limitesDeCuadrante(pix, q);
     for (const fraccion of BARRIDO_VENTANAS) {
+      if (barridoVencido()) return null; // R1.1 — guard por fracción
       const lado = ladoDeVentana(pix, fraccion);
       const paso = Math.max(1, Math.round(lado * 0.5));
       for (let y = lim.y0; y + lado <= lim.y1; y += paso) {
@@ -291,6 +331,7 @@ export function barridoQrDePixeles(pix: PixelesQr): string | null {
       // deja una franja descubierta de hasta `paso` px en el filo
       // derecho/inferior (doc hermano H-5); este anclaje la cubre (el clamp
       // de ventanaDePixeles ya existe — jamás inventa píxeles).
+      if (barridoVencido()) return null; // R1.1 — guard antes de la celda del filo
       const winFilo = ventanaDePixeles(pix, lim.x1 - lado, lim.y1 - lado, lado);
       const payloadFilo = winFilo ? jsQrDeVentana(winFilo) : null;
       if (payloadFilo != null) return payloadFilo;

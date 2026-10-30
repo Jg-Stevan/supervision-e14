@@ -30,12 +30,17 @@ import { logger } from "../../logger";
 import { leerFlags } from "../flags";
 import type { RespuestaCapa0 } from "./capa0-qr.worker";
 
-/** Resultado del worker — ESPEJO de RespuestaCapa0 (sin el id). */
+/** Resultado del worker — ESPEJO de RespuestaCapa0 (sin el id).
+ *  R1.1 — presupuestoVencido: el reló de la cadena venció al terminar
+ *  (el null fue CORTE por presupuesto, no agotamiento — la caché negativa
+ *  R1.2 del runner NO cachea cortes). undefined = bundle del worker viejo
+ *  (sin el campo) — tratado como vencido (conservador). */
 export type ResultadoCapa0Worker = {
   corrio: true;
   payload: string | null;
   tier: string | null;
   ms: number;
+  presupuestoVencido?: boolean;
 };
 
 /** Opciones de la cadena (plan de gama D74 — mismos nombres del runner). */
@@ -50,8 +55,11 @@ export type OpcionesCapa0Worker = {
 import { PUBLIC_BASE } from "@/shared/env";
 
 /** Cache-busting del worker precompilado (mismo patrón ?v=N del
- *  detection-worker — bump al regenerar el bundle). */
-const WORKER_URL = `${PUBLIC_BASE}/scanner/capa0-qr.worker.js?v=1`;
+ *  detection-worker — bump al regenerar el bundle).
+ *  R1.1 — v2: presupuesto REAL (guard por cuadrante/fracción en barridos +
+ *  guard por rotación + guard del rescate 4096) y RespuestaCapa0
+ *  .presupuestoVencido (R1.2 — la caché negativa no cachea cortes). */
+const WORKER_URL = `${PUBLIC_BASE}/scanner/capa0-qr.worker.js?v=2`;
 
 /** Gracia del hard-kill SOBRE el presupuesto del worker (mismo patrón del
  *  sondeo: presupuesto + gracia — el kill solo cae sobre colgajes reales). */
@@ -94,6 +102,8 @@ function enMensaje(ev: MessageEvent<RespuestaCapa0>): void {
     payload: typeof r.payload === "string" && r.payload.length > 0 ? r.payload : null,
     tier: typeof r.payload === "string" && r.payload.length > 0 ? String(r.tier ?? "") : null,
     ms: Number(r.ms) || 0,
+    // R1.1 — passthrough honesto: undefined (bundle viejo) = conservador
+    presupuestoVencido: r.presupuestoVencido === false ? false : true,
   });
 }
 

@@ -84,6 +84,9 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
   // dueño: false = cadena de capa 0 byte-idéntica a hoy. Booleano, misma
   // semántica que tenía en las 2 whitelists manuales (flags.ts + politica.ts).
   { clave: "qrZoomTl", sanea: booleano },
+  // R1.2 — KIT qr-cache-negativa-v1 — kill-switch del dueño: false = la capa
+  // 0 paga el ladder SIEMPRE (byte-idéntico a hoy). Booleano.
+  { clave: "qrCacheNegativa", sanea: booleano },
 ];
 
 /** Whitelist de claves que la puerta flags.json (sanearFlags) tenía

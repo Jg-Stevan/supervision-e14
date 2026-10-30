@@ -107,6 +107,14 @@ import {
   esperarDesenlaceQr,
   qrCorto,
 } from "./identidad-qr";
+// R1.2 — KIT qr-cache-negativa-v1: la CAPA 0 que terminó null (cadena
+// completa, sin presupuesto vencido) se recuerda por SHA-256 de los bytes —
+// las siguientes corridas del MISMO archivo saltan el ladder (2-3 ms).
+import {
+  cacheNegativaQuitar,
+  cacheNegativaRegistrar,
+  cacheNegativaTiene,
+} from "./qr-cache-negativa";
 // KIT e14-gama-adaptativa-v1 (D74) — capa adaptativa de gama: el tier BAJO/
 // MEDIO detectado aplica SOLO presupuestos de recursos (pool/watchdog/QR);
 // el override manual del dueño manda y el flag masivaAdaptativoGama=false
@@ -535,6 +543,18 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   let qrHeredado = false;
   // (R3) epoch del despacho (tInicio) — con tsFin reconstruye el solape D31.
   let tsDespacho: number | null = null;
+  // R1.1 — la cadena de capa 0 corrió COMPLETA (sin throw) — elegible para caché.
+  let cadenaCapa0Completa = false;
+  // R1.1 — el reló de la cadena venció al terminar (null = CORTE por
+  // presupuesto, no agotamiento — la caché R1.2 NO cachea cortes).
+  let presupuestoVencidoCapa0 = false;
+  // R1.2 — la capa 0 se SALTÓ el ladder POR la caché negativa (traza).
+  let viaCacheNegativa = false;
+  // R1.2 — la caché negativa fue ESCRITA en esta pasada (hecho nuevo).
+  let cacheNegativaEscrita = false;
+  // R1.4 — tier/ms del worker de capa 0 (null = sin worker / main / heredado).
+  let qrTierCapa0: string | null = null;
+  let qrMsCapa0: number | null = null;
   try {
     // D41 — lectura RAW: el pipeline solo consume `archivo` y escribe el
     // desenlace NUEVO encima (el acta vieja, si existiera, se reemplaza
@@ -630,6 +650,25 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       logger.info(
         `[e14] capa0-qr hereda-payload fila=${fila.id} nombre=${fila.nombre} (sondeo/prescan — sin re-decode)`,
       );
+    } else if (
+      // R1.2 — KIT qr-cache-negativa-v1: consulta ANTES del ladder. Hit ⇒
+      // 2-3 ms (misma economía de la herencia positiva qrPrevio — D30).
+      // Fuentes del hecho: (a) la traza PERSISTIDA de este registro
+      // (qrSinPayload — sobrevive la recarga) o (b) el Map de SESIÓN del
+      // módulo (re-encolado del MISMO archivo — llave = SHA-256 de los
+      // bytes, fila.hashBytes estampado por cadenaDedup). Escapes sagrados:
+      // flag qrCacheNegativa OFF y forzarDedupOff (PROCESAR IGUAL) JAMÁS
+      // consultan — el dueño manda.
+      leerFlags().qrCacheNegativa &&
+      !fila.forzarDedupOff &&
+      (registro?.qrSinPayload === true ||
+        (registro?.hashBytes != null && cacheNegativaTiene(registro.hashBytes)) ||
+        (fila.hashBytes != null && cacheNegativaTiene(fila.hashBytes)))
+    ) {
+      viaCacheNegativa = true;
+      logger.info(
+        `[e14] capa0-qr cache-negativa fila=${fila.id} nombre=${fila.nombre} (sin-payload conocido — ladder omitido, 2-3 ms)`,
+      );
     } else {
       try {
         const planQr = planGamaActual();
@@ -654,6 +693,11 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           if (rWorker) {
             viaWorker = true;
             qrPayload = rWorker.payload;
+            // R1.1/R1.4 — el reló venció (null = corte, la caché R1.2 NO
+            // cachea) + telemetría del tier ganador (RespuestaCapa0).
+            presupuestoVencidoCapa0 = rWorker.presupuestoVencido !== false;
+            qrTierCapa0 = rWorker.tier ?? null;
+            qrMsCapa0 = typeof rWorker.ms === "number" ? rWorker.ms : null;
             logger.info(
               `[e14] capa0-qr worker fila=${fila.id} nombre=${fila.nombre} tier=${rWorker.tier ?? "null"} ms=${rWorker.ms} payload=${qrPayload ? qrCorto(qrPayload) : "-"}`,
             );
@@ -692,6 +736,12 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           });
           qrPayload = qrQr?.payload ?? null;
         }
+        // R1.1/R1.2 — la cadena llegó al final SIN throw. Ruta main: la API
+        // no expone "vencido" ⇒ con presupuesto configurado es conservador
+        // (posible corte → la caché NO cachea); sin presupuesto la cadena
+        // SIEMPRE se agota (vencido imposible → cacheable).
+        cadenaCapa0Completa = true;
+        if (!viaWorker) presupuestoVencidoCapa0 = planQr.qrPresupuestoMs != null;
       } catch {
         qrPayload = null; // la capa 0 jamás tumba el pipeline (fallback limpio)
       }
@@ -703,6 +753,45 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     useMasivaStore
       .getState()
       .actualizarFila(fila.id, { qrEstado: qrEstadoCapa0 });
+    // R1.2 — REGISTRO de la caché negativa: SOLO cuando (a) la cadena corrió
+    // COMPLETA sin throw, (b) terminó null REAL (sin corte por reló — R1.1
+    // presupuestoVencido=false), (c) no fue un skip de la propia caché, (d)
+    // el flag ON y (e) el dedup del dueño respetado. Llave = SHA-256 de los
+    // bytes (registro.hashBytes — cadenaDedup; sin hash ⇒ sin caché,
+    // conservador). El sondeo/prescan (parciales) JAMÁS escriben aquí.
+    if (
+      !qrPayload &&
+      cadenaCapa0Completa &&
+      !presupuestoVencidoCapa0 &&
+      !viaCacheNegativa &&
+      !fila.forzarDedupOff &&
+      leerFlags().qrCacheNegativa
+    ) {
+      const hashCache = registro?.hashBytes ?? fila.hashBytes ?? null;
+      if (hashCache) {
+        cacheNegativaRegistrar(hashCache);
+        cacheNegativaEscrita = true;
+        useMasivaStore.getState().actualizarFila(fila.id, { qrSinPayload: true });
+        logger.info(
+          `[e14] capa0-qr cache-negativa REGISTRA sha=${hashCache.slice(0, 8)} fila=${fila.id} (próxima pasada del MISMO archivo salta el ladder)`,
+        );
+      }
+    }
+    // R1.2 — el hecho cambió: la cadena SÍ leyó payload para estos bytes ⇒
+    // la entrada negativa (si existía) muere (honestidad de la caché).
+    if (qrPayload) {
+      const hashCache = registro?.hashBytes ?? fila.hashBytes ?? null;
+      if (hashCache) cacheNegativaQuitar(hashCache);
+    }
+    // R1.2 — si ESTA corrida leyó payload, la traza sin-payload previa del
+    // registro muere AQUÍ (los writes intermedios heredan el spread limpio
+    // — honestidad: el hecho cambió). El final (registroListo) re-limpia
+    // por si un re-leer de watchdog trajo la traza vieja de IDB.
+    if (qrPayload && registro && registro.qrSinPayload) {
+      const regSinTraza: RegistroMasiva = { ...registro };
+      delete regSinTraza.qrSinPayload;
+      registro = regSinTraza;
+    }
     if (!qrPayload) {
       logger.info(`[e14] capa0-qr sin-payload fila=${fila.id} nombre=${fila.nombre}`);
     } else {
@@ -1638,9 +1727,21 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // KIT e14-tiempos-v2 (D44-R2) — la capa 0 HEREDÓ (sondeo/prescan):
       // ausente = pagó decode/ladder completo (o sin payload). Aditivo D57.
       ...(qrHeredado ? { qrHeredado: true } : {}),
-      // e64-qr T-0.2 — estado SOLO-VISUAL de la capa 0 (chip QR ✓/✗;
-      // sobrevive la recarga vía filaDeRegistro). Aditivo al final (D57).
-      ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
+      // R1.2 — KIT qr-cache-negativa-v1 — trazas aditivas AL FINAL (D57):
+      // qrCacheNegativa = la capa 0 se SALTÓ el ladder por la caché;
+      // qrSinPayload = esta pasada ESCRIBIÓ el hecho (cadena completa null
+      // real). Si ESTA corrida leyó payload, la traza previa se LIMPIA
+      // (el hecho cambió — cubre el re-leer del watchdog).
+      ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
+      ...(cacheNegativaEscrita ? { qrSinPayload: true } : {}),
+      ...(qrPayload && registro?.qrSinPayload
+        ? { qrSinPayload: undefined }
+        : {}),
+      // R1.4 — KIT qr-tier-metrica-v1: telemetría del tier ganador de la
+      // capa 0 (RespuestaCapa0 — null honesto en ruta main / sin lectura).
+      ...(qrTierCapa0 != null || qrMsCapa0 != null
+        ? { qrTier: qrTierCapa0, qrMs: qrMsCapa0 }
+        : {}),
       // WAVE3 §B — traza del rescate anti-falso-rechazo (ADITIVA AL FINAL,
       // D57): "salvado" = el desenlace final ≠ RECHAZADA tras el reintento;
       // "lanzado" = el reintento también rechazó (se acepta el rechazo —
@@ -1747,6 +1848,11 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
             qrHeredado,
           }
         : {}),
+      // R1.2/R1.4 — trazas de la capa 0 al informe (aditivas — ausente =
+      // sin dato honesto): skip por caché, tier ganador y ms del worker.
+      ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
+      ...(qrTierCapa0 != null ? { qrTier: qrTierCapa0 } : {}),
+      ...(qrMsCapa0 != null ? { qrMs: qrMsCapa0 } : {}),
       ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
       ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
       dedup: registro?.dedup,
@@ -1783,6 +1889,10 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // re-arms y el tsInicio viajan si alcanzaron a nacer.
       ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
       ...(qrHeredado ? { qrHeredado: true } : {}),
+      // R1.2/R1.4 — post-mortem del ERROR (aditivos; ausente = sin dato).
+      ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
+      ...(qrTierCapa0 != null ? { qrTier: qrTierCapa0 } : {}),
+      ...(qrMsCapa0 != null ? { qrMs: qrMsCapa0 } : {}),
       ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
     });
     if (registro) {
@@ -1800,6 +1910,14 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           // antes del fallo, "leido"/"sin-payload" viajan; si el throw fue
           // ANTES de la capa 0, el campo viaja AUSENTE (jamás inventar).
           ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
+          // R1.2/R1.4 — post-mortem honesto del ERROR: skip por caché,
+          // hecho registrado y telemetría del tier si la capa 0 alcanzó a
+          // correr (aditivos AL FINAL — D57; jamás inventar).
+          ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
+          ...(cacheNegativaEscrita ? { qrSinPayload: true } : {}),
+          ...(qrTierCapa0 != null || qrMsCapa0 != null
+            ? { qrTier: qrTierCapa0, qrMs: qrMsCapa0 }
+            : {}),
           // D65 (T1.4): si un intento murió por watchdog antes del error real,
           // la traza sobrevive también en la fila ERROR (honesto).
           ...(watchdogUsados > 0

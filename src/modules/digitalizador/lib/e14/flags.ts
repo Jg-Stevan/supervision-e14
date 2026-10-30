@@ -114,6 +114,14 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // full-frame y 2 actas que SOLO zbar vio. Kill-switch del dueño: false =
   // cadena de hoy byte-idéntica.
   qrZoomTl: true,
+  // R1.2 — KIT qr-cache-negativa-v1 — cuando la cadena COMPLETA de capa 0
+  // termina null SIN presupuesto vencido, el hecho se recuerda por SHA-256
+  // de los bytes (session Map + registro.qrSinPayload) y las siguientes
+  // corridas del MISMO archivo saltan el ladder (2-3 ms). El informe midió
+  // ~110 s de ladder inútil sobre 3 actas sin QR × 2 corridas. "PROCESAR
+  // IGUAL" (forzarDedupOff) JAMÁS consulta ni escribe. Kill-switch del
+  // dueño: false = byte-idéntico a hoy.
+  qrCacheNegativa: true,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */

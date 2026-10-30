@@ -156,6 +156,20 @@ export interface MetricaActa {
    *  palanca ①); AUSENTE = sin dato (copia/ERROR temprano/jamás despachó).
    *  En el ERROR solo se estampa true (false prematuro sería mentir). */
   qrHeredado?: boolean;
+  // ─── R1.2 — KIT qr-cache-negativa-v1 — campos ADITIVOS AL FINAL (D57) ───
+  /** true = la capa 0 se SALTÓ el ladder POR la caché negativa (hit 2-3 ms
+   *  — llave SHA-256 de los bytes). Ausente = la capa 0 corrió su cadena. */
+  qrCacheNegativa?: boolean;
+  // ─── R1.4 — KIT qr-tier-metrica-v1 — campos ADITIVOS AL FINAL (D57) ───
+  /** Tier que ganó la cadena jsQR del worker de capa 0 ("base"|"recorte-600"
+   *  |"barrido"|…|"rescate4096-barrido"). null/ausente = ruta main, sin
+   *  lectura o heredado (jamás inventar — RespuestaCapa0.tier solo con
+   *  payload). Con el informe se responde: ¿dónde aparece el QR y qué
+   *  cuesta cada tier? */
+  qrTier?: string | null;
+  /** ms SOLO de la cadena jsQR del worker (RespuestaCapa0.ms). Ausente =
+   *  sin worker / heredado / caché (jamás inventar). */
+  qrMs?: number | null;
   /** (D44-R4) cuántas veces se RE-ARMÓ el cronómetro pre-OCR (reintentos del
    *  watchdog/rescate que re-pagaron origen/deskew/master). 0/ausente = el
    *  muro corrió UNA vez. preOcrMs es la SUMA de pasadas — este contador
@@ -393,6 +407,14 @@ export function registrarMetricaDesenlace(args: {
   /** (D44-R2) capa-0 heredó qrPrevio — ver MetricaActa.qrHeredado. El
    *  desenlace manda true|false EXPLÍCITO cuando preOcrMs corrió. */
   qrHeredado?: boolean;
+  // ─── R1.2/R1.4 — KITs qr-cache-negativa / qr-tier-metrica (D57) ───
+  /** true = la capa 0 se saltó el ladder por la caché negativa — ver
+   *  MetricaActa.qrCacheNegativa. */
+  qrCacheNegativa?: boolean;
+  /** Tier ganador del worker de capa 0 — ver MetricaActa.qrTier. */
+  qrTier?: string | null;
+  /** ms del worker de capa 0 — ver MetricaActa.qrMs. */
+  qrMs?: number | null;
   /** (D44-R4) re-arms del cronómetro — ver MetricaActa.reintentosPreOcr. */
   reintentosPreOcr?: number;
   dedup?: string;
@@ -468,6 +490,10 @@ export function registrarMetricaDesenlace(args: {
         // KIT e14-tiempos-v2 (D44) — trazas del despacho (aditivas al final):
         ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
         ...(typeof args.qrHeredado === "boolean" ? { qrHeredado: args.qrHeredado } : {}),
+        // R1.2/R1.4 — trazas de la capa 0 (aditivas; ausente = sin dato):
+        ...(args.qrCacheNegativa === true ? { qrCacheNegativa: true } : {}),
+        ...(args.qrTier != null ? { qrTier: args.qrTier } : {}),
+        ...(args.qrMs != null ? { qrMs: args.qrMs } : {}),
         ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),
@@ -598,6 +624,13 @@ export function registrarMetricaError(args: {
   /** (D44-R2) SOLO true se estampa en ERROR (false prematuro sería mentir
    *  — la capa 0 pudo no correr). Ausente = sin dato. */
   qrHeredado?: boolean;
+  // ─── R1.2/R1.4 — trazas de la capa 0 en el post-mortem (D57) ───
+  /** true = la capa 0 se saltó el ladder por la caché negativa antes del
+   *  error real. Ausente = sin dato (jamás inventar). */
+  qrCacheNegativa?: boolean;
+  /** Tier/ms del worker de capa 0 si alcanzó a correr — ver MetricaActa. */
+  qrTier?: string | null;
+  qrMs?: number | null;
   /** (D44-R4) re-arms consumidos antes del error real (los reintentos del
    *  watchdog re-pagan el muro — post-mortem honesto). */
   reintentosPreOcr?: number;
@@ -624,6 +657,10 @@ export function registrarMetricaError(args: {
         // D44 — trazas del post-mortem (aditivas; ausente = sin dato):
         ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
         ...(args.qrHeredado === true ? { qrHeredado: true } : {}),
+        // R1.2/R1.4 — post-mortem de la capa 0 (aditivos; ausente = sin dato):
+        ...(args.qrCacheNegativa === true ? { qrCacheNegativa: true } : {}),
+        ...(args.qrTier != null ? { qrTier: args.qrTier } : {}),
+        ...(args.qrMs != null ? { qrMs: args.qrMs } : {}),
         ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),
