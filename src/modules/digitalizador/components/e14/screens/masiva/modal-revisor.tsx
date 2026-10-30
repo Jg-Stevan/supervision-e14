@@ -44,7 +44,7 @@ import {
 } from "../../icons";
 import { filaInfo, pildoraEstadoActa } from "./helpers";
 import { PublicacionChip } from "./publicacion-chip";
-import type { PropsMasivaView } from "../MasivaView";
+import type { PropsMasivaView } from "./orquestador";
 
 /** Rectángulo de recorte en % del área de la foto (0–100 — mapea a píxeles
  * naturales al aplicar; el drag llega saneado y el clamp lo respalda). */
