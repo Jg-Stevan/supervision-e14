@@ -2,11 +2,8 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { Check, ChevronDown, Eye, Funnel } from "lucide-react";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { DropdownMenu } from "radix-ui";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   TableCell,
   TableHead,
@@ -84,10 +81,24 @@ const OPCIONES_TIEMPO: OpcionFiltro[] = TRAMOS_TIEMPO.map((tramo) => ({
 }));
 
 /**
+ * Clases comunes de los RadioItems del menú de columna: el resaltado de
+ * Radix (puntero o teclado) usa data-highlighted — el foco es siempre
+ * visible y la navegación por flechas la resuelve el propio primitive.
+ */
+const CLASE_RADIO_ITEM =
+  "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-left outline-none data-[highlighted]:bg-(--accent)";
+
+/**
  * Filtro de COLUMNA (pedido del dueño): embudo en el encabezado de
  * «Cierre COL» y «Tiempo». Abre un menú con «Todos» + las opciones del
  * conjunto del día; el activo queda marcado y el embudo se señaliza en
  * ámbar mientras haya filtro aplicado.
+ *
+ * R4-C7 (reporte 02-b M2) — era un menú a mano (role="menu" sobre un
+ * Collapsible): no cerraba con Escape ni clic-fuera, sin aria-haspopup,
+ * sin aria-checked real y sin flechas. Ahora es DropdownMenu de Radix
+ * (ya en deps): Escape/clic-fuera/flechas/aria-expanded/aria-checked y
+ * typeahead gratis, misma señalética visual (check con opacidad).
  */
 function FiltroColumna({
   label,
@@ -101,61 +112,60 @@ function FiltroColumna({
   onFiltro: (valor: string | undefined) => void;
 }) {
   const activa = valor !== undefined;
-  const [abierto, setAbierto] = useState(false);
-  const elegir = (nuevo: string | undefined) => {
-    onFiltro(nuevo);
-    setAbierto(false);
-  };
   return (
-    <Collapsible open={abierto} onOpenChange={setAbierto}>
-      <span className="relative inline-flex">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            aria-label={`Filtrar por ${label}`}
-            aria-expanded={abierto}
-            title={activa ? `Filtro activo por ${label}` : `Filtrar por ${label}`}
-            className={cn(
-              "inline-flex size-4 items-center justify-center rounded-[2px] hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)",
-              activa ? "text-(--warning)" : "text-muted-foreground"
-            )}
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          aria-label={`Filtrar por ${label}`}
+          title={activa ? `Filtro activo por ${label}` : `Filtrar por ${label}`}
+          className={cn(
+            "inline-flex size-4 items-center justify-center rounded-[2px] hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)",
+            activa ? "text-(--warning)" : "text-muted-foreground"
+          )}
+        >
+          <Funnel className="size-3" aria-hidden />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="start"
+          sideOffset={6}
+          className="z-50 min-w-[10rem] border border-border bg-popover font-data text-[13px] shadow-md"
+        >
+          <DropdownMenu.RadioGroup
+            value={valor ?? "todos"}
+            onValueChange={(nuevo) =>
+              onFiltro(nuevo === "todos" ? undefined : nuevo)
+            }
           >
-            <Funnel className="size-3" aria-hidden />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div
-            role="menu"
-            className="absolute left-0 top-5 z-50 min-w-[10rem] border border-border bg-popover font-data text-[13px] shadow-md"
-          >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => elegir(undefined)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-(--accent)"
-            >
-              <Check className={cn("size-3", !activa ? "opacity-100" : "opacity-0")} aria-hidden />
+            <DropdownMenu.RadioItem value="todos" className={CLASE_RADIO_ITEM}>
+              <Check
+                className={cn("size-3", !activa ? "opacity-100" : "opacity-0")}
+                aria-hidden
+              />
               Todos
-            </button>
+            </DropdownMenu.RadioItem>
             {opciones.map((opcion) => (
-              <button
+              <DropdownMenu.RadioItem
                 key={opcion.valor}
-                type="button"
-                role="menuitem"
-                onClick={() => elegir(opcion.valor)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-(--accent)"
+                value={opcion.valor}
+                className={CLASE_RADIO_ITEM}
               >
                 <Check
-                  className={cn("size-3", valor === opcion.valor ? "opacity-100" : "opacity-0")}
+                  className={cn(
+                    "size-3",
+                    valor === opcion.valor ? "opacity-100" : "opacity-0"
+                  )}
                   aria-hidden
                 />
                 {opcion.etiqueta}
-              </button>
+              </DropdownMenu.RadioItem>
             ))}
-          </div>
-        </CollapsibleContent>
-      </span>
-    </Collapsible>
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
@@ -420,6 +430,8 @@ const PuestoRow = memo(function PuestoRow({
   // puesto; deshabilitado si el puesto no tiene ninguna (todas
   // NO_INICIADO).
   const tieneActa = mesas.some((m) => m.estadoMesa !== "NO_INICIADO");
+  // R4-C7 — id estable del detalle (aria-controls del botón de expansión).
+  const idDetalle = `detalle-puesto-${puesto.id}`;
   return (
     <Collapsible
       open={abierto}
@@ -427,24 +439,42 @@ const PuestoRow = memo(function PuestoRow({
       asChild
     >
       <tbody>
-        <CollapsibleTrigger asChild>
-          <TableRow
-            className="h-12 cursor-pointer border-b border-border hover:bg-(--hover-row)"
-            style={{ borderLeft: `4px solid ${acento}` }}
-            aria-expanded={abierto}
-          >
-            <TableCell className="body-md px-1.5 font-medium whitespace-nowrap overflow-hidden text-ellipsis">
-              <span className="inline-flex items-center gap-1.5">
+        {/** R4-C7 (reporte 02-b C1): el <tr> vuelve a ser fila semántica —
+         * YA NO es el CollapsibleTrigger (un <tr> no es enfocable: sin foco
+         * ni Enter/Space, todo el detalle quedaba inalcanzable por teclado,
+         * WCAG 2.1.1). La expansión vive en el BOTÓN real de la primera
+         * celda (aria-expanded + aria-controls + foco visible, toque 44px);
+         * el clic en cualquier parte de la fila sigue alternando. */}
+        <TableRow
+          className="h-12 cursor-pointer border-b border-border hover:bg-(--hover-row)"
+          style={{ borderLeft: `4px solid ${acento}` }}
+          onClick={() => onToggle(puesto.id)}
+        >
+          <TableCell className="body-md px-1.5 font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+            <span className="inline-flex items-center gap-1.5">
+              <button
+                type="button"
+                aria-expanded={abierto}
+                aria-controls={idDetalle}
+                aria-label={`${abierto ? "Ocultar" : "Ver"} mesas del puesto ${puesto.puesto}`}
+                title={abierto ? "Ocultar mesas" : "Ver mesas"}
+                onClick={(e) => {
+                  e.stopPropagation(); // la fila también alterna — evitar doble toggle
+                  onToggle(puesto.id);
+                }}
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)"
+              >
                 <ChevronDown
                   className={cn(
-                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    "size-3.5 shrink-0 transition-transform",
                     abierto && "rotate-180"
                   )}
                   aria-hidden
                 />
-                {puesto.codigoPais} - {puesto.pais}
-              </span>
-            </TableCell>
+              </button>
+              {puesto.codigoPais} - {puesto.pais}
+            </span>
+          </TableCell>
             <TableCell className="body-md px-1.5">{puesto.zona}</TableCell>
             <TableCell
               className="body-md px-1.5 whitespace-nowrap overflow-hidden text-ellipsis"
@@ -482,15 +512,15 @@ const PuestoRow = memo(function PuestoRow({
               <span className="flex items-center justify-end gap-1">
                 <StatusBadge estado={puesto.estadoGlobal} />
                 {/* KIT SUP-4 — 👁 abre el visor (punto de entrada 3/3).
-                    stopPropagation: la fila completa es el trigger del
-                    Collapsible y el clic NO debe expandir/colapsar. */}
+                    stopPropagation: el clic sobre la fila alterna la
+                    expansión y aquí NO debe hacerlo. */}
                 <button
                   type="button"
                   disabled={!tieneActa}
                   title={tieneActa ? "Ver acta del puesto" : "Sin acta"}
                   aria-label={`Ver acta del puesto ${puesto.puesto}`}
                   onClick={(e) => {
-                    e.stopPropagation();
+                    e.stopPropagation(); // la fila alterna al clic — no aquí
                     onAbrirVisorDePuesto(puesto.id);
                   }}
                   className="inline-flex size-9 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary) disabled:pointer-events-none disabled:opacity-40"
@@ -500,10 +530,12 @@ const PuestoRow = memo(function PuestoRow({
               </span>
             </TableCell>
           </TableRow>
-        </CollapsibleTrigger>
 
         <CollapsibleContent asChild>
-          <TableRow className="hover:bg-transparent border-b border-border">
+          <TableRow
+            id={idDetalle}
+            className="hover:bg-transparent border-b border-border"
+          >
             <TableCell colSpan={ENCABEZADOS.length} className="p-0">
               <MesasSubtable
                 mesas={mesas}
