@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -213,14 +214,22 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Ticker de vida (T3): +5s cada 5s; a los 45s UNA transición ─────────
-  const aplicarTransicion = useCallback(async () => {
+  // R4-C8 (reporte 02-b C3): la transición ya NO se dispara DENTRO del
+  // updater de setSegundosTicker — StrictMode invoca los updaters 2 veces
+  // (prueba de pureza) y la transición de vida se aplicaba DOS veces por
+  // cada cruce del umbral. El cruce se detecta en el callback del
+  // intervalo (sistema externo → setState en callback: el patrón que
+  // React recomienda), con ref anti-doble-invoke y bandera de limpieza
+  // (nada escribe estado tras el desmontaje).
+  const aplicarTransicion = useCallback(async (vida?: { abortado: boolean }) => {
     const repo = mockSupervisionRepository;
     const transicion = await repo.aplicarTransicionVida();
-    if (!transicion) return;
+    if (!transicion || vida?.abortado) return;
     const [puestos, mesas] = await Promise.all([
       repo.getPuestos(),
       repo.getMesasDePuesto(transicion.puestoId),
     ]);
+    if (vida?.abortado) return;
     setEstado((prev) => ({
       ...prev,
       puestos,
@@ -228,8 +237,15 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  /** Espejo del contador del ticker (fuente de la detección del cruce;
+   * el state solo alimenta el chip «Sincronizado hace Xs»). */
+  const segundosRef = useRef(0);
+  /** R4-C8 — UNA transición en vuelo (anti-doble-invoke). */
+  const transicionEnVueloRef = useRef(false);
+
   useEffect(() => {
     if (estado.cargando) return;
+    const vida = { abortado: false };
     const intervalo = setInterval(() => {
       // D39 — pausa de la simulación con la pestaña oculta: cada tick sin
       // espectador era un re-render completo de 949 filas (CPU/batería en
@@ -237,15 +253,25 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       // sigue desde donde quedó — el navegador ya estrangula timers en
       // background; esto elimina el trabajo residual que quedaba.
       if (typeof document !== "undefined" && document.hidden) return;
-      setSegundosTicker((segundos) => {
-        if (segundos + TICKER_SEGUNDOS >= TRANSICION_CADA_SEGUNDOS) {
-          void aplicarTransicion();
-          return 0;
+      const siguientes = segundosRef.current + TICKER_SEGUNDOS;
+      if (siguientes >= TRANSICION_CADA_SEGUNDOS) {
+        segundosRef.current = 0;
+        setSegundosTicker(0);
+        if (!transicionEnVueloRef.current) {
+          transicionEnVueloRef.current = true;
+          void aplicarTransicion(vida).finally(() => {
+            transicionEnVueloRef.current = false;
+          });
         }
-        return segundos + TICKER_SEGUNDOS;
-      });
+      } else {
+        segundosRef.current = siguientes;
+        setSegundosTicker(siguientes);
+      }
     }, TICKER_SEGUNDOS * 1000);
-    return () => clearInterval(intervalo);
+    return () => {
+      clearInterval(intervalo);
+      vida.abortado = true;
+    };
   }, [estado.cargando, aplicarTransicion]);
 
   // ── T4 — REINSPECCIONAR (spinner ~2.5s en el botón) ────────────────────
