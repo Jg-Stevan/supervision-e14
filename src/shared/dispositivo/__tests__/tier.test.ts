@@ -251,7 +251,13 @@ describe("paridad tier §4.4 — canónica (perfil) vs perfil clasificar()", () 
     for (const c of CASOS) {
       const esperado = clasificar(aSenalesPerfil(c), BENCHMARK_NULO);
       const obtenido = calcularTier(aEntradaShared(c));
-      expect(obtenido.tier).toBe(esperado.tier);
+      // Comparación como string: el Tier de perfil incluye "PENDIENTE"
+      // (estado de UI del panel — shared/dispositivo/tier.ts lo documenta);
+      // el de shared es el union de los 3 tiers reales. Comparar los unions
+      // tipados fricciona (TS2769) sin aportar nada: la paridad que importa
+      // es de VALORES en runtime — si clasificar() devolviera "PENDIENTE" y
+      // calcularTier no (o cualquier desvío), esta aserción FALLA igual.
+      expect(obtenido.tier as string).toBe(esperado.tier as string);
       expect(obtenido.tierInferido).toBe(esperado.tierInferido);
     }
   });
