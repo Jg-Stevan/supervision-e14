@@ -16,6 +16,9 @@ import { leerOverridesFlags } from "./obs/politica";
 import type { FlagsApp } from "./obs/tipos";
 // R2 — PUBLIC_BASE único (src/shared/env.ts, era const local §B2 #10).
 import { PUBLIC_BASE } from "@/shared/env";
+// R2 — tabla ÚNICA de flags + whitelist de saneo (§B2 #11): sanearFlags y
+// leerOverridesFlags derivan del MISMO esquema (fin de la doble whitelist).
+import { sanearConEsquema } from "@/shared/e14/flags-schema";
 
 const REFRESH_MS = 24 * 60 * 60 * 1000;
 const REINTENTO_BASE_MS = 60_000;
@@ -110,50 +113,17 @@ export const FLAGS_DEFAULT: FlagsApp = {
 let remotosCacheados: Partial<FlagsApp> | null = null;
 
 /** Saneo del JSON remoto/overrides: solo claves conocidas y tipos válidos
- *  (jamás confiar en lo que llega por red/archivo). */
+ *  (jamás confiar en lo que llega por red/archivo).
+ *
+ *  R2 (§B2 #11) — DERIVA de la tabla única `sanearConEsquema` (src/shared/
+ *  e14/flags-schema.ts): mismas condiciones y clamps por clave que la
+ *  whitelist manual que reemplaza. DELTA ADITIVO documentado (test de
+ *  paridad lo fija): la tabla es la UNIÓN de las 2 whitelists históricas →
+ *  flags.json ahora también puede traer `capa0QrWorker` (antes solo por el
+ *  override localStorage de politica.ts). Nada que antes se aceptaba se
+ *  rechaza. */
 export function sanearFlags(o: unknown): Partial<FlagsApp> {
-  if (typeof o !== "object" || o === null) return {};
-  const p = o as Partial<FlagsApp>;
-  const limpio: Partial<FlagsApp> = {};
-  if (p.poolWorkers === 1 || p.poolWorkers === 2) limpio.poolWorkers = p.poolWorkers;
-  if (typeof p.thumbsOn === "boolean") limpio.thumbsOn = p.thumbsOn;
-  if (typeof p.colaPersistente === "boolean") limpio.colaPersistente = p.colaPersistente;
-  if (typeof p.ocrThreadsTope === "number" && Number.isFinite(p.ocrThreadsTope)) {
-    limpio.ocrThreadsTope = Math.max(1, Math.min(8, Math.round(p.ocrThreadsTope)));
-  }
-  if (typeof p.telemetriaSalud === "boolean") limpio.telemetriaSalud = p.telemetriaSalud;
-  if (p.endpointReportes === null || typeof p.endpointReportes === "string") {
-    limpio.endpointReportes = p.endpointReportes;
-  }
-  // KIT e73-sondeo-qr-precoz-v1 (§D) — whitelist aditiva (claves conocidas;
-  // el saneo sigue rechazando desconocidas). Tipo inválido → default (ausente).
-  if (typeof p.sondeoQrPrecoz === "boolean") limpio.sondeoQrPrecoz = p.sondeoQrPrecoz;
-  if (typeof p.sondeoQrPresupuestoMs === "number" && Number.isFinite(p.sondeoQrPresupuestoMs)) {
-    limpio.sondeoQrPresupuestoMs = Math.max(500, Math.min(30_000, Math.round(p.sondeoQrPresupuestoMs)));
-  }
-  // D36 — whitelist aditiva (booleano).
-  if (typeof p.sondeoQrCortocircuito === "boolean") limpio.sondeoQrCortocircuito = p.sondeoQrCortocircuito;
-  // KIT e14-obs-hang-atribucion-v1 (§D) — whitelist aditiva (booleano).
-  if (typeof p.hangEnCurso === "boolean") limpio.hangEnCurso = p.hangEnCurso;
-  // KIT e107-prescan-qr-cola-v1 (§D.4) — whitelist aditiva (booleano).
-  if (typeof p.prescanQrCola === "boolean") limpio.prescanQrCola = p.prescanQrCola;
-  // KIT e14-orientacion-qr-v1 (§D) — whitelist aditiva (booleano).
-  if (typeof p.qrBrujulaOrientacion === "boolean") limpio.qrBrujulaOrientacion = p.qrBrujulaOrientacion;
-  // KIT flujo-dueno-v1 (K2 — brief Agente B) — whitelist aditiva (booleano).
-  if (typeof p.masivaSondeoCrudo === "boolean") limpio.masivaSondeoCrudo = p.masivaSondeoCrudo;
-  // KIT e14-prescan-warp-lado-v1 — whitelist aditiva (números con clamp).
-  if (typeof p.prescanQrPresupuestoMs === "number" && Number.isFinite(p.prescanQrPresupuestoMs)) {
-    limpio.prescanQrPresupuestoMs = Math.max(1000, Math.min(30_000, Math.round(p.prescanQrPresupuestoMs)));
-  }
-  if (typeof p.prescanWarpLado === "number" && Number.isFinite(p.prescanWarpLado)) {
-    limpio.prescanWarpLado = Math.max(256, Math.min(4032, Math.round(p.prescanWarpLado)));
-  }
-  // KIT e14-gama-adaptativa-v1 — whitelist aditiva (booleano).
-  if (typeof p.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = p.masivaAdaptativoGama;
-  // KIT ocr-router-v1 — whitelist aditiva (booleano + enum del motor).
-  if (typeof p.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = p.ocrMotorAdaptativo;
-  if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4" || p.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = p.ocrMotor;
-  return limpio;
+  return sanearConEsquema(o) as Partial<FlagsApp>;
 }
 
 /** leerFlags() del contrato — SYNC: defaults ← remotos cacheados (si el
