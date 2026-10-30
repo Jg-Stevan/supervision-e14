@@ -165,14 +165,16 @@ function patchFila(id: string, patch: Partial<FilaMasiva>): void {
   });
 }
 
-// ─── e63m — KIT e63m-capa0-qr-identidad-v1 (F2): MAPA DE IDENTIDAD QR ───
-// CAPA 0 pre-OCR — payload EXACTO → id de la fila original del lote (el
-// runner lo registra al decodificar, ANTES de despachar OCR). Memoria de la
-// SESIÓN del lote (kit §5 — decisión deliberada: NO se persiste en IDB ni
-// se reconstruye al recargar; el lote es la unidad de dedup hoy). Llave
-// OPACA: la única comparación es la IGUALDAD EXACTA del payload completo
-// (jamás prefijos — RED LINE 10); sin umbrales, sin fuzzy (RED LINE 5).
-const mapaQrPayload = new Map<string, string>();
+// ─── e63m — MAPA DE IDENTIDAD QR: MOVIDO a dedup-payloads.ts (R8 — split
+// del store, 1 mapa de payload con ciclo de vida documentado). La API
+// pública se conserva: re-export byte a byte (el runner, el prescan y la
+// red de caracterización importan desde aquí).
+export {
+  originalQrDePayload,
+  registrarQrPayload,
+  resetearPayloadsSesion,
+} from "./dedup-payloads";
+import { resetearPayloadsSesion } from "./dedup-payloads";
 
 // ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1): MODO PRUEBAS ───────────
 // MODO PRUEBAS (pre-elección): la cola NO sobrevive recargas — revertir a
@@ -185,7 +187,7 @@ const mapaQrPayload = new Map<string, string>();
 //    reconstruye Maps desde persistencia) y borra la persistencia vieja
 //    (cola IDB + ledger del histórico — higiene).
 //  · C-2 — vaciar() resetea TODO el ciclo de vida de la memoria de dedup:
-//    mapaQrPayload + ledger + índice → limpiar y re-subir el MISMO lote
+//    mapa de payload (dedup-payloads) + ledger + índice → limpiar el MISMO lote
 //    procesa completo de cero.
 //  · C-3 — el LEDGER de enviadas NO alimenta el índice del histórico (los
 //    Maps de dedup no se alimentan de NADA persistido); la dedup DENTRO del
@@ -198,18 +200,6 @@ const mapaQrPayload = new Map<string, string>();
  *  el modo pruebas (auto-borrado al cargar). Default TRUE: la masiva SOLO se
  *  elimina con vaciar() del dueño — petición literal 2026-10-24. */
 const COLA_PERSISTENTE = leerFlags().colaPersistente ?? true;
-
-/** Registra el payload de UNA fila como original del lote. Solo se llama
- *  cuando el payload es NUEVO en el mapa o su entrada apuntaba a una fila
- *  ya muerta (re-apuntado honesto — el carrier vivo del payload manda). */
-export function registrarQrPayload(payload: string, id: string): void {
-  mapaQrPayload.set(payload, id);
-}
-
-/** id de la fila ORIGINAL de este payload (null = payload nuevo en el lote). */
-export function originalQrDePayload(payload: string): string | null {
-  return mapaQrPayload.get(payload) ?? null;
-}
 
 // ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS (D-e65-3) ────
 // Carga LIVIANA una vez por sesión de encolado: listarMapeados con mapper
@@ -997,7 +987,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         } catch {
           /* conservador — el ledger se re-borra en el próximo vaciar/carga */
         }
-        mapaQrPayload.clear();
+        resetearPayloadsSesion(); // e64p C-1 — el mapa de payload de la sesión muere aquí
         indiceEnviadas = null;
         set({ filas: [], colaDisponible: true, avisoCola: null });
         return;
@@ -1396,12 +1386,12 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     // (RL-e65b-5). La cola es el taller; el envío es el hecho.
     // e64p (C-2 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ciclo de vida
     // COMPLETO muere aquí (reversa declarada del RL-e65b-5 SOLO en modo
-    // pruebas): mapaQrPayload (capa 0 QR — hoy sobrevivía a vaciar en la
-    // misma sesión) + ledger del histórico + índice → limpiar y re-subir el
-    // MISMO lote procesa completo de cero (QA del kit). En producción
-    // (true) este bloque no existe y D-e65b-1 queda byte a byte.
+    // pruebas): el mapa de payload de la sesión (capa 0 QR — hoy sobrevivía
+    // a vaciar en la misma sesión) + ledger del histórico + índice → limpiar
+    // y re-subir el MISMO lote procesa completo de cero (QA del kit). En
+    // producción (true) este bloque no existe y D-e65b-1 queda byte a byte.
     if (!COLA_PERSISTENTE) {
-      mapaQrPayload.clear();
+      resetearPayloadsSesion();
       try {
         await borrarHistorico();
       } catch {
@@ -1428,7 +1418,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     } catch {
       /* las filas mueren igual en la bandeja */
     }
-    mapaQrPayload.clear();
+    resetearPayloadsSesion();
     try {
       await borrarHistorico();
     } catch {
