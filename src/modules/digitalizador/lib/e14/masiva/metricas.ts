@@ -34,6 +34,7 @@
 // que jamás lanzan, cero coste nuevo, el pipeline NUNCA cambia por esto.
 import { planGamaActual } from "../gama";
 import { motorOcrActual } from "../ocr/rapidocr";
+import type { FasesCapa0 } from "./capa0-qr.worker"; // R1.4-b — tipo puro (se borra al compilar)
 
 const DB_NOMBRE = "e14-masiva-metricas-v1";
 const DB_VERSION = 1;
@@ -156,6 +157,45 @@ export interface MetricaActa {
    *  palanca ①); AUSENTE = sin dato (copia/ERROR temprano/jamás despachó).
    *  En el ERROR solo se estampa true (false prematuro sería mentir). */
   qrHeredado?: boolean;
+  // ─── R1.2 — KIT qr-cache-negativa-v1 — campos ADITIVOS AL FINAL (D57) ───
+  /** true = la capa 0 se SALTÓ el ladder POR la caché negativa (hit 2-3 ms
+   *  — llave SHA-256 de los bytes). Ausente = la capa 0 corrió su cadena. */
+  qrCacheNegativa?: boolean;
+  // ─── R1.4 — KIT qr-tier-metrica-v1 — campos ADITIVOS AL FINAL (D57) ───
+  /** Tier que ganó la cadena jsQR del worker de capa 0 ("base"|"recorte-600"
+   *  |"barrido"|…|"rescate4096-barrido"). null/ausente = ruta main, sin
+   *  lectura o heredado (jamás inventar — RespuestaCapa0.tier solo con
+   *  payload). Con el informe se responde: ¿dónde aparece el QR y qué
+   *  cuesta cada tier? */
+  qrTier?: string | null;
+  /** ms SOLO de la cadena jsQR del worker (RespuestaCapa0.ms). Ausente =
+   *  sin worker / heredado / caché (jamás inventar). */
+  qrMs?: number | null;
+  // ─── R1.4-b — KIT qr-fases-telemetria-v1 — campos ADITIVOS AL FINAL (D57) ───
+  /** Desglose POR FASE de la cadena del worker (solo fases que CORRIERON —
+   *  ausente = saltada por el reló o no alcanzada). Sub-partición de qrMs:
+   *  Σ(qrFases) ≤ qrMs SIEMPRE. Responde «¿qué cuesta cada fase?» —
+   *  decode/base/recorte600/barrido/nitido/binarizada/rotaciones/rescate4096.
+   *  Ausente = ruta main / heredado / caché / bundle v≤2 (jamás inventar). */
+  qrFases?: FasesCapa0;
+  /** Causa del fin de la cadena del worker: "payload" (leyó QR — tier
+   *  presente) | "agotado" (null REAL — cacheable) | "vencido" (corte por
+   *  reló — null NO es un hecho) | "sin-decode" (decode falló). Responde
+   *  «¿por qué un null SIN tier?» del informe 2026-10-30. Ausente = ruta
+   *  main / heredado / caché / bundle v≤2 (jamás inventar). */
+  qrFin?: string;
+  /** ms del rescate zxing de MAIN tras el worker null (fileToCaptureDataUrl
+   *  + decodificarQrDeCapture soloZxing) — la sub-partición que faltaba
+   *  (el hueco preOcrQrMs − qrMs = 2,5-4,5 s del informe A/B 2026-10-30).
+   *  Ausente = el rescate no corrió (payload leído en worker / ruta main /
+   *  heredado / caché — jamás inventar). */
+  qrZxingMs?: number;
+  /** R1.4-b — presupuesto (ms) con el que la escalera CORRIÓ (snapshot al
+   *  inicio de la capa 0). null/ausente = plan sin presupuesto (ALTO/base)
+   *  o no llegó a leerse — jamás inventar. Responde «¿qué presupuesto tenía
+   *  esta escalera?» cuando gama.tierEfectivo del informe bajó a mitad de
+   *  sesión (informe móvil 2026-10-30 16:27: ALTO/MEDIO, qrMs 13,3 s). */
+  qrPresupuestoMs?: number | null;
   /** (D44-R4) cuántas veces se RE-ARMÓ el cronómetro pre-OCR (reintentos del
    *  watchdog/rescate que re-pagaron origen/deskew/master). 0/ausente = el
    *  muro corrió UNA vez. preOcrMs es la SUMA de pasadas — este contador
@@ -393,6 +433,22 @@ export function registrarMetricaDesenlace(args: {
   /** (D44-R2) capa-0 heredó qrPrevio — ver MetricaActa.qrHeredado. El
    *  desenlace manda true|false EXPLÍCITO cuando preOcrMs corrió. */
   qrHeredado?: boolean;
+  // ─── R1.2/R1.4 — KITs qr-cache-negativa / qr-tier-metrica (D57) ───
+  /** true = la capa 0 se saltó el ladder por la caché negativa — ver
+   *  MetricaActa.qrCacheNegativa. */
+  qrCacheNegativa?: boolean;
+  /** Tier ganador del worker de capa 0 — ver MetricaActa.qrTier. */
+  qrTier?: string | null;
+  /** ms del worker de capa 0 — ver MetricaActa.qrMs. */
+  qrMs?: number | null;
+  /** Desglose por fase del worker — ver MetricaActa.qrFases. */
+  qrFases?: FasesCapa0;
+  /** Causa del fin de la cadena — ver MetricaActa.qrFin. */
+  qrFin?: string;
+  /** ms del rescate zxing de main — ver MetricaActa.qrZxingMs. */
+  qrZxingMs?: number;
+  /** Presupuesto con el que corrió la escalera — ver MetricaActa.qrPresupuestoMs. */
+  qrPresupuestoMs?: number | null;
   /** (D44-R4) re-arms del cronómetro — ver MetricaActa.reintentosPreOcr. */
   reintentosPreOcr?: number;
   dedup?: string;
@@ -468,6 +524,17 @@ export function registrarMetricaDesenlace(args: {
         // KIT e14-tiempos-v2 (D44) — trazas del despacho (aditivas al final):
         ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
         ...(typeof args.qrHeredado === "boolean" ? { qrHeredado: args.qrHeredado } : {}),
+        // R1.2/R1.4 — trazas de la capa 0 (aditivas; ausente = sin dato):
+        ...(args.qrCacheNegativa === true ? { qrCacheNegativa: true } : {}),
+        ...(args.qrTier != null ? { qrTier: args.qrTier } : {}),
+        ...(args.qrMs != null ? { qrMs: args.qrMs } : {}),
+        // R1.4-b — KIT qr-fases-telemetria-v1 (aditivos; ausente = sin dato):
+        ...(args.qrFases ? { qrFases: args.qrFases } : {}),
+        ...(args.qrFin != null ? { qrFin: args.qrFin } : {}),
+        ...(args.qrZxingMs != null ? { qrZxingMs: args.qrZxingMs } : {}),
+        ...(args.qrPresupuestoMs != null
+          ? { qrPresupuestoMs: args.qrPresupuestoMs }
+          : {}),
         ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),
@@ -598,6 +665,19 @@ export function registrarMetricaError(args: {
   /** (D44-R2) SOLO true se estampa en ERROR (false prematuro sería mentir
    *  — la capa 0 pudo no correr). Ausente = sin dato. */
   qrHeredado?: boolean;
+  // ─── R1.2/R1.4 — trazas de la capa 0 en el post-mortem (D57) ───
+  /** true = la capa 0 se saltó el ladder por la caché negativa antes del
+   *  error real. Ausente = sin dato (jamás inventar). */
+  qrCacheNegativa?: boolean;
+  /** Tier/ms del worker de capa 0 si alcanzó a correr — ver MetricaActa. */
+  qrTier?: string | null;
+  qrMs?: number | null;
+  /** Desglose por fase / fin / zxing de main si alcanzaron a correr. */
+  qrFases?: FasesCapa0;
+  qrFin?: string;
+  qrZxingMs?: number;
+  /** Presupuesto con el que corrió la escalera — ver MetricaActa.qrPresupuestoMs. */
+  qrPresupuestoMs?: number | null;
   /** (D44-R4) re-arms consumidos antes del error real (los reintentos del
    *  watchdog re-pagan el muro — post-mortem honesto). */
   reintentosPreOcr?: number;
@@ -624,6 +704,17 @@ export function registrarMetricaError(args: {
         // D44 — trazas del post-mortem (aditivas; ausente = sin dato):
         ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
         ...(args.qrHeredado === true ? { qrHeredado: true } : {}),
+        // R1.2/R1.4 — post-mortem de la capa 0 (aditivos; ausente = sin dato):
+        ...(args.qrCacheNegativa === true ? { qrCacheNegativa: true } : {}),
+        ...(args.qrTier != null ? { qrTier: args.qrTier } : {}),
+        ...(args.qrMs != null ? { qrMs: args.qrMs } : {}),
+        // R1.4-b — KIT qr-fases-telemetria-v1 (aditivos; ausente = sin dato):
+        ...(args.qrFases ? { qrFases: args.qrFases } : {}),
+        ...(args.qrFin != null ? { qrFin: args.qrFin } : {}),
+        ...(args.qrZxingMs != null ? { qrZxingMs: args.qrZxingMs } : {}),
+        ...(args.qrPresupuestoMs != null
+          ? { qrPresupuestoMs: args.qrPresupuestoMs }
+          : {}),
         ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),

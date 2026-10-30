@@ -152,6 +152,8 @@ export interface FlagsApp {
   ocrMotor: "ppocrv5" | "tesseract-best-psm4" | "tesseract-spa-best-psm4" | null; // default null = el ROUTER decide; no-null = override MANUAL del dueño (D6 — el router NO decide). «tesseract-spa-best-psm4» = Tesseract REAL del benchmark (tesseract.js — fase 5b)
   // ─── KIT e75-qr-zoom-zbar-v1 — campo ADITIVO AL FINAL (D57) ───
   qrZoomTl: boolean; // default true — tier ZOOM TL re-escalado + zbar-wasm en la capa 0 (lab 12 imágenes: 3 páginas del escáner rescatadas con píxeles nativos del QR + 2 que SOLO zbar vio); false = cadena de hoy byte-idéntica (kill-switch del dueño)
+  // ─── R1.2 — KIT qr-cache-negativa-v1 — campo ADITIVO AL FINAL (D57) ───
+  qrCacheNegativa: boolean; // default true — la capa 0 que terminó null SIN presupuesto vencido se recuerda por SHA-256 de los bytes (session Map + registro.qrSinPayload): las siguientes corridas del MISMO archivo saltan el ladder (2-3 ms); "PROCESAR IGUAL" jamás consulta ni escribe; false = byte-idéntico a hoy (kill-switch del dueño)
 }
 
 export interface ReporteSesion {

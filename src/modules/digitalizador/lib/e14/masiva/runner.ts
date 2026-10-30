@@ -110,13 +110,24 @@ import { decodificarQrDeCapture, esperarDesenlaceQr } from "./identidad-qr";
 // R8 — re-apuntado directo al módulo canónico (fin del re-export temporal
 // de R7b: identidad-qr ya no re-exporta qrCorto).
 import { qrCorto } from "../qr-zxing";
+// R1.2 — KIT qr-cache-negativa-v1: la CAPA 0 que terminó null (cadena
+// completa, sin presupuesto vencido) se recuerda por SHA-256 de los bytes —
+// las siguientes corridas del MISMO archivo saltan el ladder (2-3 ms).
+import {
+  cacheNegativaQuitar,
+  cacheNegativaRegistrar,
+  cacheNegativaTiene,
+} from "./qr-cache-negativa";
 // KIT e14-gama-adaptativa-v1 (D74) — capa adaptativa de gama: el tier BAJO/
 // MEDIO detectado aplica SOLO presupuestos de recursos (pool/watchdog/QR);
 // el override manual del dueño manda y el flag masivaAdaptativoGama=false
 // vuelve todo byte-idéntico a hoy.
 import { flagsMasivaEfectivos, planGamaActual } from "../gama";
 import { leerFlags } from "../flags";
-import { decodificarQrCapa0Worker } from "./capa0-qr.client"; // D40 — KIT e14-capa0-qr-worker-v1
+import {
+  decodificarQrCapa0Worker,
+  type FasesCapa0, // R1.4-b — KIT qr-fases-telemetria-v1 (tipo puro — se borra al compilar)
+} from "./capa0-qr.client"; // D40 — KIT e14-capa0-qr-worker-v1
 
 // ─── D65 — KIT e14-progreso-watchdog-dedup-v1 (T1): WATCHDOG HUMANO ───
 // Antes (e14-masiva-ux-v1 T4): presupuesto ÚNICO de 120 s — un colgado moría
@@ -450,6 +461,15 @@ interface CtxProcesarUno {
   qrEstadoCapa0: "leido" | "sin-payload" | null; // e64-qr T-0.2 (SOLO-VISUAL)
   qrHeredado: boolean; // D44-R2 — heredó qrPrevio (sin decode ni ladder)
   preOcrQrMs: number | null; // D44-R1 — el bloque capa-0 entero
+  // R1.1/R1.2/R1.4-b — telemetría de la CAPA 0 (integración remota main).
+  viaCacheNegativa: boolean; // R1.2 — se SALTÓ el ladder POR la caché negativa
+  cacheNegativaEscrita: boolean; // R1.2 — la caché fue ESCRITA en esta pasada
+  qrTierCapa0: string | null; // R1.4 — tier ganador del worker (null = main/sin lectura)
+  qrMsCapa0: number | null; // R1.4 — ms del worker (null honesto)
+  qrFasesCapa0: FasesCapa0 | null; // R1.4-b — desglose por fase (null = sin worker/bundle viejo)
+  qrFinCapa0: string | null; // R1.4-b — causa del fin de la cadena
+  qrZxingMs: number | null; // R1.4-b — ms del rescate zxing de main
+  qrPresupuestoMsCapa0: number | null; // R1.4-b — presupuesto REAL con el que corrió
   // STAGE 2 — pipeline de intentos (fasePipelineIntentos).
   preOcrMs: number | null; // D43 — el muro pre-OCR (null = jamás llegó al bridge)
   preOcrOrigenMs: number; // D63-A por intento (acumula reintentos)
@@ -516,6 +536,14 @@ type TrazasPostMortem = {
   etapaAlMorir?: string;
   elapsedMs?: number;
   rescateRechazo?: "salvado" | "lanzado";
+  qrCacheNegativa?: boolean; // R1.2 — skip del ladder por caché negativa
+  qrSinPayload?: boolean; // R1.2 — hecho registrado (| undefined = re-limpieza)
+  qrTier?: string | null; // R1.4 — tier ganador del worker
+  qrMs?: number | null; // R1.4 — ms del worker
+  qrFases?: FasesCapa0; // R1.4-b — desglose por fase
+  qrFin?: string; // R1.4-b — causa del fin de la cadena
+  qrZxingMs?: number; // R1.4-b — ms del rescate zxing de main
+  qrPresupuestoMs?: number; // R1.4-b — presupuesto REAL de la escalera
 };
 
 /** PUNTO ÚNICO del estampado de trazas (misión punto 3 / C-1 de la zona:
@@ -540,6 +568,8 @@ function trazasPostMortemDe(
     watchdog?: boolean;
     rescate?: "auto" | "salvado" | "lanzado";
     statusDesenlace?: Acta["status"];
+    capa0Telemetria?: boolean; // R1.2/R1.4/R1.4-b — SOLO registroListo y el catch la estampan
+    limpiaSinPayload?: boolean; // R1.2 — re-limpieza de la traza vieja (SOLO registroListo)
   },
 ): TrazasPostMortem {
   const { qrPayload, qrEstadoCapa0, qrHeredado, watchdogUsados, etapaAlMorir, elapsedMuerteMs, rescateLanzado } = ctx;
@@ -553,6 +583,36 @@ function trazasPostMortemDe(
           ...(etapaAlMorir != null ? { etapaAlMorir } : {}),
           ...(elapsedMuerteMs != null ? { elapsedMs: elapsedMuerteMs } : {}),
         }
+      : {}),
+    // R1.2/R1.4/R1.4-b — telemetría de la CAPA 0 (integración remota main):
+    // SOLO registroListo y el catch del post-mortem la estampan (los re-saves
+    // de dedup/capa-2 NO — byte-idéntico al monolito remoto). La re-limpieza
+    // qrSinPayload:undefined es SOLO del registroListo (el catch del ERROR
+    // jamás la tuvo).
+    ...(subset.capa0Telemetria && ctx.viaCacheNegativa
+      ? { qrCacheNegativa: true as const }
+      : {}),
+    ...(subset.capa0Telemetria && ctx.cacheNegativaEscrita
+      ? { qrSinPayload: true as const }
+      : {}),
+    ...(subset.limpiaSinPayload && ctx.qrPayload && ctx.registro?.qrSinPayload
+      ? { qrSinPayload: undefined }
+      : {}),
+    ...(subset.capa0Telemetria &&
+    (ctx.qrTierCapa0 != null || ctx.qrMsCapa0 != null)
+      ? { qrTier: ctx.qrTierCapa0, qrMs: ctx.qrMsCapa0 }
+      : {}),
+    ...(subset.capa0Telemetria && ctx.qrFasesCapa0
+      ? { qrFases: ctx.qrFasesCapa0 }
+      : {}),
+    ...(subset.capa0Telemetria && ctx.qrFinCapa0 != null
+      ? { qrFin: ctx.qrFinCapa0 }
+      : {}),
+    ...(subset.capa0Telemetria && ctx.qrZxingMs != null
+      ? { qrZxingMs: ctx.qrZxingMs }
+      : {}),
+    ...(subset.capa0Telemetria && ctx.qrPresupuestoMsCapa0 != null
+      ? { qrPresupuestoMs: ctx.qrPresupuestoMsCapa0 }
       : {}),
     ...(rescateLanzado && subset.rescate
       ? {
@@ -605,6 +665,20 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
   let qrPayload: string | null = ctx.qrPayload;
   let qrHeredado = ctx.qrHeredado;
   let qrEstadoCapa0: "leido" | "sin-payload" | null = ctx.qrEstadoCapa0;
+  let registro: RegistroMasiva = ctx.registro; // R1.2 — el stage puede re-limpiar la traza qrSinPayload
+  // R1.1/R1.2/R1.4-b — estado de la capa 0 (los 2 primeros son INTERNOS del
+  // stage — deciden la escritura de la caché aquí mismo; el resto viaja al
+  // ctx para el registroListo y el post-mortem del catch).
+  let cadenaCapa0Completa = false;
+  let presupuestoVencidoCapa0 = false;
+  let viaCacheNegativa = ctx.viaCacheNegativa;
+  let cacheNegativaEscrita = ctx.cacheNegativaEscrita;
+  let qrTierCapa0 = ctx.qrTierCapa0;
+  let qrMsCapa0 = ctx.qrMsCapa0;
+  let qrFasesCapa0 = ctx.qrFasesCapa0;
+  let qrFinCapa0 = ctx.qrFinCapa0;
+  let qrZxingMs = ctx.qrZxingMs;
+  let qrPresupuestoMsCapa0 = ctx.qrPresupuestoMsCapa0;
   // (bloque movido VERBATIM de procesarUno — mismo orden, mismos literales)
     const tQrCapa0 = performance.now(); // D44-R1 — el bloque capa-0 se cronometra ENTERO
     const qrPrevio = fila.qrPrevio;
@@ -614,9 +688,31 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
       logger.info(
         `[e14] capa0-qr hereda-payload fila=${fila.id} nombre=${fila.nombre} (sondeo/prescan — sin re-decode)`,
       );
+    } else if (
+      // R1.2 — KIT qr-cache-negativa-v1: consulta ANTES del ladder. Hit ⇒
+      // 2-3 ms (misma economía de la herencia positiva qrPrevio — D30).
+      // Fuentes del hecho: (a) la traza PERSISTIDA de este registro
+      // (qrSinPayload — sobrevive la recarga) o (b) el Map de SESIÓN del
+      // módulo (re-encolado del MISMO archivo — llave = SHA-256 de los
+      // bytes, fila.hashBytes estampado por cadenaDedup). Escapes sagrados:
+      // flag qrCacheNegativa OFF y forzarDedupOff (PROCESAR IGUAL) JAMÁS
+      // consultan — el dueño manda.
+      leerFlags().qrCacheNegativa &&
+      !fila.forzarDedupOff &&
+      (registro?.qrSinPayload === true ||
+        (registro?.hashBytes != null && cacheNegativaTiene(registro.hashBytes)) ||
+        (fila.hashBytes != null && cacheNegativaTiene(fila.hashBytes)))
+    ) {
+      viaCacheNegativa = true;
+      logger.info(
+        `[e14] capa0-qr cache-negativa fila=${fila.id} nombre=${fila.nombre} (sin-payload conocido — ladder omitido, 2-3 ms)`,
+      );
     } else {
       try {
         const planQr = planGamaActual();
+        // R1.4-b — sello del presupuesto REAL de esta escalera (snapshot al
+        // inicio — el informe de gama puede cambiar después).
+        qrPresupuestoMsCapa0 = planQr.qrPresupuestoMs ?? null;
         // D40 — KIT e14-capa0-qr-worker-v1: el carril pesado de la capa 0
         // (decode del blob + ladder + barridos + nitidez + binarizada +
         // rotaciones + rescate) corre en WORKER dedicado jsQR-only
@@ -638,12 +734,25 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
           if (rWorker) {
             viaWorker = true;
             qrPayload = rWorker.payload;
+            // R1.1/R1.4 — el reló venció (null = corte, la caché R1.2 NO
+            // cachea) + telemetría del tier ganador (RespuestaCapa0).
+            presupuestoVencidoCapa0 = rWorker.presupuestoVencido !== false;
+            qrTierCapa0 = rWorker.tier ?? null;
+            qrMsCapa0 = typeof rWorker.ms === "number" ? rWorker.ms : null;
+            // R1.4-b — telemetría por fase + causa del fin (undefined =
+            // bundle v≤2 / catch — NO se exporta, jamás inventar).
+            qrFasesCapa0 = rWorker.fases ?? null;
+            qrFinCapa0 = rWorker.fin ?? null;
             logger.info(
-              `[e14] capa0-qr worker fila=${fila.id} nombre=${fila.nombre} tier=${rWorker.tier ?? "null"} ms=${rWorker.ms} payload=${qrPayload ? qrCorto(qrPayload) : "-"}`,
+              `[e14] capa0-qr worker fila=${fila.id} nombre=${fila.nombre} tier=${rWorker.tier ?? "null"} ms=${rWorker.ms} fin=${rWorker.fin ?? "-"} fases=${rWorker.fases ? JSON.stringify(rWorker.fases) : "-"} payload=${qrPayload ? qrCorto(qrPayload) : "-"}`,
             );
             if (!qrPayload) {
               // Solo el tier que el worker no puede cargar (wasm) — sin
               // re-pagar los barridos jsQR (ya corrieron en el worker).
+              // R1.4-b — CRONOMETRADO: es el hueco preOcrQrMs − qrMs del
+              // informe (fileToCaptureDataUrl decodifica el original COMPLETO
+              // + la cadena zxing de main — 2,5-4,5 s medidos 2026-10-30).
+              const tZxing = performance.now();
               const captureQr = await fileToCaptureDataUrl(archivo);
               const qrQr = await decodificarQrDeCapture(captureQr, {
                 soloZxing: true,
@@ -653,6 +762,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
                 // donde ya corre el otro tier wasm (cobertura aditiva).
                 zoomTl: leerFlags().qrZoomTl,
               });
+              qrZxingMs = Math.round(performance.now() - tZxing);
               qrPayload = qrQr?.payload ?? null;
             }
           }
@@ -676,6 +786,12 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
           });
           qrPayload = qrQr?.payload ?? null;
         }
+        // R1.1/R1.2 — la cadena llegó al final SIN throw. Ruta main: la API
+        // no expone "vencido" ⇒ con presupuesto configurado es conservador
+        // (posible corte → la caché NO cachea); sin presupuesto la cadena
+        // SIEMPRE se agota (vencido imposible → cacheable).
+        cadenaCapa0Completa = true;
+        if (!viaWorker) presupuestoVencidoCapa0 = planQr.qrPresupuestoMs != null;
       } catch {
         qrPayload = null; // la capa 0 jamás tumba el pipeline (fallback limpio)
       }
@@ -687,6 +803,47 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
     storeMasiva()
       .getState()
       .actualizarFila(fila.id, { qrEstado: qrEstadoCapa0 });
+    // R1.2 — REGISTRO de la caché negativa: SOLO cuando (a) la cadena corrió
+    // COMPLETA sin throw, (b) terminó null REAL (sin corte por reló — R1.1
+    // presupuestoVencido=false), (c) no fue un skip de la propia caché, (d)
+    // el flag ON y (e) el dedup del dueño respetado. Llave = SHA-256 de los
+    // bytes (registro.hashBytes — cadenaDedup; sin hash ⇒ sin caché,
+    // conservador). El sondeo/prescan (parciales) JAMÁS escriben aquí.
+    if (
+      !qrPayload &&
+      cadenaCapa0Completa &&
+      !presupuestoVencidoCapa0 &&
+      !viaCacheNegativa &&
+      !fila.forzarDedupOff &&
+      leerFlags().qrCacheNegativa
+    ) {
+      const hashCache = registro?.hashBytes ?? fila.hashBytes ?? null;
+      if (hashCache) {
+        cacheNegativaRegistrar(hashCache);
+        cacheNegativaEscrita = true;
+        storeMasiva()
+          .getState()
+          .actualizarFila(fila.id, { qrSinPayload: true });
+        logger.info(
+          `[e14] capa0-qr cache-negativa REGISTRA sha=${hashCache.slice(0, 8)} fila=${fila.id} (próxima pasada del MISMO archivo salta el ladder)`,
+        );
+      }
+    }
+    // R1.2 — el hecho cambió: la cadena SÍ leyó payload para estos bytes ⇒
+    // la entrada negativa (si existía) muere (honestidad de la caché).
+    if (qrPayload) {
+      const hashCache = registro?.hashBytes ?? fila.hashBytes ?? null;
+      if (hashCache) cacheNegativaQuitar(hashCache);
+    }
+    // R1.2 — si ESTA corrida leyó payload, la traza sin-payload previa del
+    // registro muere AQUÍ (los writes intermedios heredan el spread limpio
+    // — honestidad: el hecho cambió). El final (registroListo) re-limpia
+    // por si un re-leer de watchdog trajo la traza vieja de IDB.
+    if (qrPayload && registro && registro.qrSinPayload) {
+      const regSinTraza: RegistroMasiva = { ...registro };
+      delete regSinTraza.qrSinPayload;
+      registro = regSinTraza;
+    }
     if (!qrPayload) {
       logger.info(`[e14] capa0-qr sin-payload fila=${fila.id} nombre=${fila.nombre}`);
     } else {
@@ -752,7 +909,24 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
             logger.info(
               `[e14] capa0-qr ya-enviada-historico ${payloadQrCorto} fila=${fila.id} hist=${enviadaHist.id}`,
             );
-            return { resuelto: true, ctx: { ...ctx, qrPayload, qrHeredado, qrEstadoCapa0 } }; // sin OCR, sin envío — YA-ENVIADA jamás vuelve a siguientePendiente (T-5 e65)
+            return {
+              resuelto: true,
+              ctx: {
+                ...ctx,
+                registro,
+                qrPayload,
+                qrHeredado,
+                qrEstadoCapa0,
+                viaCacheNegativa,
+                cacheNegativaEscrita,
+                qrTierCapa0,
+                qrMsCapa0,
+                qrFasesCapa0,
+                qrFinCapa0,
+                qrZxingMs,
+                qrPresupuestoMsCapa0,
+              },
+            }; // sin OCR, sin envío — YA-ENVIADA jamás vuelve a siguientePendiente (T-5 e65)
           }
         }
         // ORIGINAL — payload nuevo en el lote (o auto-registrado: la fila ya
@@ -780,7 +954,24 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
       } else if (originalQr.estado === "LISTA" || originalQr.estado === "DUPLICADA") {
         // Original con desenlace FINAL → reutiliza (el OCR jamás se paga).
         if (await reutilizarViaQr(originalQr))
-          return { resuelto: true, ctx: { ...ctx, qrPayload, qrHeredado, qrEstadoCapa0 } };
+          return {
+            resuelto: true,
+            ctx: {
+              ...ctx,
+              registro,
+              qrPayload,
+              qrHeredado,
+              qrEstadoCapa0,
+              viaCacheNegativa,
+              cacheNegativaEscrita,
+              qrTierCapa0,
+              qrMsCapa0,
+              qrFasesCapa0,
+              qrFinCapa0,
+              qrZxingMs,
+              qrPresupuestoMsCapa0,
+            },
+          };
         logger.info(
           `[e14] capa0-qr fallback fila=${fila.id} reprocesa-completo reutilizarResultado=false`,
         );
@@ -795,7 +986,24 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
         );
         if (desenlaceQr === "reutiliza") {
           if (await reutilizarViaQr(originalQr))
-          return { resuelto: true, ctx: { ...ctx, qrPayload, qrHeredado, qrEstadoCapa0 } };
+          return {
+            resuelto: true,
+            ctx: {
+              ...ctx,
+              registro,
+              qrPayload,
+              qrHeredado,
+              qrEstadoCapa0,
+              viaCacheNegativa,
+              cacheNegativaEscrita,
+              qrTierCapa0,
+              qrMsCapa0,
+              qrFasesCapa0,
+              qrFinCapa0,
+              qrZxingMs,
+              qrPresupuestoMsCapa0,
+            },
+          };
           logger.info(
             `[e14] capa0-qr fallback fila=${fila.id} reprocesa-completo reutilizarResultado=false`,
           );
@@ -816,7 +1024,25 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
     }
     // D44-R1 — cierre del bloque capa-0 (herencia/ladder + dedup + APLAZADA).
     const preOcrQrMs = Math.round(performance.now() - tQrCapa0);
-    return { resuelto: false, ctx: { ...ctx, qrPayload, qrHeredado, qrEstadoCapa0, preOcrQrMs } };
+    return {
+      resuelto: false,
+      ctx: {
+        ...ctx,
+        registro,
+        qrPayload,
+        qrHeredado,
+        qrEstadoCapa0,
+        preOcrQrMs,
+        viaCacheNegativa,
+        cacheNegativaEscrita,
+        qrTierCapa0,
+        qrMsCapa0,
+        qrFasesCapa0,
+        qrFinCapa0,
+        qrZxingMs,
+        qrPresupuestoMsCapa0,
+      },
+    };
 }
 
 // ─── R8 · STAGE 2/5 — fasePipelineIntentos (D63-A/B · D66 · D65 · WAVE3 §B) ──
@@ -1726,6 +1952,14 @@ async function fasePersistYMetrica(
   const preOcrPasadas = ctx.preOcrPasadas;
   const tsDespacho = ctx.tsDespacho;
   const qrHeredado = ctx.qrHeredado;
+  // R1.2/R1.4/R1.4-b — telemetría de la capa 0 (integración remota main).
+  const viaCacheNegativa = ctx.viaCacheNegativa;
+  const qrTierCapa0 = ctx.qrTierCapa0;
+  const qrMsCapa0 = ctx.qrMsCapa0;
+  const qrFasesCapa0 = ctx.qrFasesCapa0;
+  const qrFinCapa0 = ctx.qrFinCapa0;
+  const qrZxingMs = ctx.qrZxingMs;
+  const qrPresupuestoMsCapa0 = ctx.qrPresupuestoMsCapa0;
   // (bloque movido VERBATIM de procesarUno — mismo orden, mismos literales)
     // D35 — thumbMs: la miniatura de la bandeja es TRABAJO REAL del main
     // thread post-pipeline (decode completo + canvas + JPEG). Cronometrado
@@ -1771,6 +2005,8 @@ async function fasePersistYMetrica(
         heredado: true,
         rescate: "auto",
         statusDesenlace: actaDesenlace.status,
+        capa0Telemetria: true,
+        limpiaSinPayload: true,
       }),
     };
     // FIX M14 (auditoría 2-c): persistencia fallida TRAS el envío — la fila
@@ -1866,6 +2102,19 @@ async function fasePersistYMetrica(
             preOcrMasterMs,
             qrHeredado,
           }
+        : {}),
+      // R1.2/R1.4 — trazas de la capa 0 al informe (aditivas — ausente =
+      // sin dato honesto): skip por caché, tier ganador y ms del worker.
+      ...(viaCacheNegativa ? { qrCacheNegativa: true } : {}),
+      ...(qrTierCapa0 != null ? { qrTier: qrTierCapa0 } : {}),
+      ...(qrMsCapa0 != null ? { qrMs: qrMsCapa0 } : {}),
+      // R1.4-b — KIT qr-fases-telemetria-v1 (aditivos; ausente = sin dato):
+      // desglose por fase + causa del fin + ms del rescate zxing de main.
+      ...(qrFasesCapa0 ? { qrFases: qrFasesCapa0 } : {}),
+      ...(qrFinCapa0 != null ? { qrFin: qrFinCapa0 } : {}),
+      ...(qrZxingMs != null ? { qrZxingMs } : {}),
+      ...(qrPresupuestoMsCapa0 != null
+        ? { qrPresupuestoMs: qrPresupuestoMsCapa0 }
         : {}),
       ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
       ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
@@ -2039,6 +2288,14 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     qrEstadoCapa0: null,
     qrHeredado: false,
     preOcrQrMs: null,
+    viaCacheNegativa: false,
+    cacheNegativaEscrita: false,
+    qrTierCapa0: null,
+    qrMsCapa0: null,
+    qrFasesCapa0: null,
+    qrFinCapa0: null,
+    qrZxingMs: null,
+    qrPresupuestoMsCapa0: null,
     preOcrMs: null,
     preOcrOrigenMs: 0,
     preOcrDeskewMs: 0,
@@ -2115,6 +2372,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     const r1 = await faseCapa0Qr({ ...ctx, registro, archivo, esperaMs });
     if (r1.resuelto) return;
     ctx = r1.ctx;
+    if (r1.ctx.registro) registro = r1.ctx.registro; // R1.2 — el stage re-limpió la traza qrSinPayload (el hecho cambió)
     // ─── R8 · STAGE 2/5 (split de procesarUno): PIPELINE DE INTENTOS ───
     // Origen (D63-A) + deskew (D63-B) + master (D66) + puente + watchdog (D65)
     // + rescate (WAVE3 §B) — el bucle de intentos vive en fasePipelineIntentos.
@@ -2203,6 +2461,16 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // re-arms y el tsInicio viajan si alcanzaron a nacer.
       ...(ctx.tsDespacho != null ? { tsInicio: ctx.tsDespacho } : {}),
       ...(ctx.qrHeredado ? { qrHeredado: true } : {}),
+      // R1.2/R1.4/R1.4-b — post-mortem del ERROR (aditivos; ausente = sin dato).
+      ...(ctx.viaCacheNegativa ? { qrCacheNegativa: true } : {}),
+      ...(ctx.qrTierCapa0 != null ? { qrTier: ctx.qrTierCapa0 } : {}),
+      ...(ctx.qrMsCapa0 != null ? { qrMs: ctx.qrMsCapa0 } : {}),
+      ...(ctx.qrFasesCapa0 ? { qrFases: ctx.qrFasesCapa0 } : {}),
+      ...(ctx.qrFinCapa0 != null ? { qrFin: ctx.qrFinCapa0 } : {}),
+      ...(ctx.qrZxingMs != null ? { qrZxingMs: ctx.qrZxingMs } : {}),
+      ...(ctx.qrPresupuestoMsCapa0 != null
+        ? { qrPresupuestoMs: ctx.qrPresupuestoMsCapa0 }
+        : {}),
       ...(ctx.preOcrPasadas > 1
         ? { reintentosPreOcr: ctx.preOcrPasadas - 1 }
         : {}),
@@ -2216,7 +2484,12 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           // post-mortem (heredado solo-true + watchdog>0 + rescate "lanzado"
           // fijo en un ERROR tardío): PUNTO ÚNICO trazasPostMortemDe — el
           // catch estampa desde el CTX fresco de los stages, byte-idéntico.
-          ...trazasPostMortemDe(ctx, { heredado: true, watchdog: true, rescate: "lanzado" }),
+          ...trazasPostMortemDe(ctx, {
+            heredado: true,
+            watchdog: true,
+            rescate: "lanzado",
+            capa0Telemetria: true,
+          }),
         });
       } catch {
         /* IDB otra vez — la fila ya quedó ERROR en memoria (honesto) */

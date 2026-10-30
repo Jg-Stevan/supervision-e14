@@ -1,0 +1,148 @@
+diff --git a/src/modules/digitalizador/lib/e14/gama.ts b/src/modules/digitalizador/lib/e14/gama.ts
+index ec6858b..f4e0c2e 100644
+--- a/src/modules/digitalizador/lib/e14/gama.ts
++++ b/src/modules/digitalizador/lib/e14/gama.ts
+@@ -18,8 +18,9 @@
+  *   2. El override MANUAL del dueño MANDA: si una clave existe en
+  *      `e14-flags-overrides` (localStorage), la capa adaptativa NO la toca
+  *      (flagsMasivaEfectivos filtra por clave).
+- *   3. ALTO ⇒ plan base (sin cambios — solo el re-warm del OCR tras el
+- *      watchdog, estrictamente aditivo). BAJO/MEDIO ⇒ ajustes de la tabla.
++ *   3. ALTO ⇒ plan MEDIO unificado (gama-medio-unificada-v1 — presupuestos
++ *      de recursos, jamás calidad) + pool 2 solo con hilos WASM reales.
++ *      BAJO ⇒ ajustes de la tabla (suelo anti-OOM — jamás se unifica).
+  * · La decisión D74 lo registra como excepción BOUNDADA al espíritu D6:
+  *   nunca cambia criterios/score/reglas de negocio — SOLO presupuestos de
+  *   recursos (memoria/CPU/reló). Con flag OFF todo vuelve a hoy.
+@@ -30,7 +31,8 @@
+  *   D37) el pool sube a 2 workers (el premiso e71 «dos OCR se reparten el
+  *   mismo CPU» era válido mono-hilo; con pthreads reales el segundo worker
+  *   amortiza el arranque frío y el carril QR corre sin desplazar OCR).
+- *   Sin aislamiento ⇒ base (honesto: sin ganancia medida).
++ *   Sin aislamiento ⇒ plan MEDIO unificado sin pool extra (honesto: sin
++ *   ganancia medida mono-hilo).
+  * · GOBERNADOR REACTIVO (auto-tuning bajo presión): matarYRecrearWorkers()
+  *   reporta cada hard-kill del watchdog (reportarPresionGama). ≥2 kills en
+  *   3 min ⇒ degradación PREVENTIVA de un escalón (ALTO→MEDIO, MEDIO→BAJO)
+@@ -55,6 +57,15 @@
+  *   presupuesto cadena QR   | —     | 8000  | 5000
+  *   dhash visual en ingesta | sí    | sí    | no
+  *
++ *   KIT gama-medio-unificada-v1: ALTO corre ESTE plan MEDIO (presupuestos
++ *   unificados) + pool 2 solo con hilos WASM reales (COOP/COEP). Evidencia
++ *   informes 2026-10-30: escritorio MEDIO limpio tras R1 (QR −42 %, cero
++ *   regresión) vs móvil ALTO con presupuesto null (QR 13,3 s) + OOM
++ *   (INVALID SESSION) pagando el warp prescan 4032 (12 MP) en el carril
++ *   paralelo. BAJO conserva SUS protecciones (suelo anti-OOM — jamás se
++ *   unifica). El gobernador reactivo queda intacto (MEDIO→BAJO sigue
++ *   degradando; ALTO→MEDIO pasa a ser innocuo).
++ *
+  * Notas de cada ajuste (el porqué vive TAMBIÉN en el consumidor):
+  * · poolWorkers 1 en BAJO: dos OCR en paralelo se reparten el mismo CPU en
+  *   2-4 núcleos — NO hay ganancia y la UI sí sufre (runner.ts cabecera e71).
+@@ -118,7 +129,8 @@ export interface PlanGama {
+   nucleos: number;
+   memoriaGB: number | null;
+   saveData: boolean;
+-  /** true = adaptaciones ACTIVAS (flag ON ∧ (tier ≠ ALTO ∨ amplificado)). */
++  /** true = adaptaciones ACTIVAS (flag ON — con flag ON los tres tiers son
++   *  activos: ALTO/MEDIO comparten el plan unificado, BAJO el suelo). */
+   activo: boolean;
+   /** D38 — tier con el que se compusieron los presupuestos (real, o un
+    *  escalón abajo si el gobernador reactivo está activo). El tier REAL
+@@ -152,8 +164,8 @@ export interface PlanGama {
+   ajustes: string[];
+ }
+ 
+-/** Base byte-idéntica a hoy (flag OFF / sin navigator). ALTO sin hilos WASM
+- *  también cae aquí (D38: sin ganancia medida mono-hilo — honesto). */
++/** Base byte-idéntica a hoy (flag OFF / sin navigator). Con flag ON ningún
++ *  tier cae aquí: ALTO = plan MEDIO unificado (gama-medio-unificada-v1). */
+ function planBase(tier: Tier, tierInferido: boolean, fuente: PlanGama["fuente"], señales: SeñalesGama): PlanGama {
+   return {
+     tier,
+@@ -196,18 +208,45 @@ function componerPlan(
+   }
+   if (!flags.masivaAdaptativoGama) return base;
+ 
+-  // D38 — ALTO con hilos WASM reales: AMPLIFICAR (aprovechar al máximo).
+-  // El premissa e71 (pool 1 — «dos OCR se reparten el mismo CPU») era
+-  // válido mono-hilo; con COOP/COEP el wasm corre pthreads y el 2º worker
+-  // amortiza el arranque frío. Sin aislamiento ⇒ base (honesto).
++  /** KIT gama-medio-unificada-v1 — MEDIO es el plan UNIFICADO de ALTO/MEDIO:
++   *  ajustes SUAVES que conservan la calidad (master 4032, QR 2048, rescate
++   *  4096 y dhash son idénticos en BASE/MEDIO — solo cambian presupuestos
++   *  de recursos, D74). Evidencia 2026-10-30: escritorio MEDIO limpio tras
++   *  R1; móvil ALTO con presupuesto null pagó QR 13,3 s + OOM. */
++  const planMedioUnificado = (): PlanGama => ({
++    ...base,
++    activo: true,
++    flagsOverride: {
++      prescanWarpLado: 2560,
++      prescanQrPresupuestoMs: 5000,
++    },
++    precalorCola: 2,
++    watchdogMs: 90_000,
++    progresoMs: 350,
++    qrPresupuestoMs: 8000,
++    ajustes: [
++      "warp prescan 2560",
++      "prescan 5 s",
++      "watchdog 90 s",
++      "precalor 2",
++      "cadena QR 8 s",
++      "progreso 350 ms",
++    ],
++  });
++
++  // D38 — AMPLIFICACIÓN ALTO: el ÚNICO extra de ALTO es pool 2 con hilos
++  // WASM reales (COOP/COEP — el 2º worker amortiza el arranque frío y el
++  // carril QR corre sin desplazar OCR). Sin aislamiento ⇒ plan MEDIO
++  // unificado sin pool extra (honesto: sin ganancia medida mono-hilo).
+   if (tier === "ALTO") {
+-    if (!señales.wasmHilos) return base;
++    const medio = planMedioUnificado();
++    if (!señales.wasmHilos)
++      return { ...medio, ajustes: [...medio.ajustes, "ALTO = MEDIO (unificada)"] };
+     return {
+-      ...base,
+-      activo: true,
++      ...medio,
+       amplificado: true,
+-      flagsOverride: { poolWorkers: 2 },
+-      ajustes: ["pool 2 (hilos WASM ✓)", "master 4032 (base potente)", "precalor 3"],
++      flagsOverride: { ...medio.flagsOverride, poolWorkers: 2 },
++      ajustes: [...medio.ajustes, "pool 2 (hilos WASM ✓)", "ALTO = MEDIO + amplificación"],
+     };
+   }
+ 
+@@ -244,27 +283,8 @@ function componerPlan(
+       ],
+     };
+   }
+-  // MEDIO — ajustes SUAVES (conserva la calidad: master/QR intactos).
+-  return {
+-    ...base,
+-    activo: true,
+-    flagsOverride: {
+-      prescanWarpLado: 2560,
+-      prescanQrPresupuestoMs: 5000,
+-    },
+-    precalorCola: 2,
+-    watchdogMs: 90_000,
+-    progresoMs: 350,
+-    qrPresupuestoMs: 8000,
+-    ajustes: [
+-      "warp prescan 2560",
+-      "prescan 5 s",
+-      "watchdog 90 s",
+-      "precalor 2",
+-      "cadena QR 8 s",
+-      "progreso 350 ms",
+-    ],
+-  };
++  // MEDIO — el plan unificado (ver planMedioUnificado arriba).
++  return planMedioUnificado();
+ }
+ 
+ // ─── D38 — gobernador reactivo (presión observada → degradación preventiva) ──

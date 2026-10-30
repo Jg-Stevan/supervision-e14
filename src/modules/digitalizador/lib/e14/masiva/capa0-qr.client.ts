@@ -28,14 +28,26 @@
  */
 import { logger } from "../../logger";
 import { leerFlags } from "../flags";
-import type { RespuestaCapa0 } from "./capa0-qr.worker";
+import type { FinCapa0, FasesCapa0, RespuestaCapa0 } from "./capa0-qr.worker";
 
-/** Resultado del worker — ESPEJO de RespuestaCapa0 (sin el id). */
+export type { FinCapa0, FasesCapa0 } from "./capa0-qr.worker";
+
+/** Resultado del worker — ESPEJO de RespuestaCapa0 (sin el id).
+ *  R1.1 — presupuestoVencido: el reló de la cadena venció al terminar
+ *  (el null fue CORTE por presupuesto, no agotamiento — la caché negativa
+ *  R1.2 del runner NO cachea cortes). undefined = bundle del worker viejo
+ *  (sin el campo) — tratado como vencido (conservador).
+ *  R1.4-b — fases/fin: telemetría por fase + causa del fin. undefined =
+ *  bundle viejo (v≤2) o cadena no completó (catch interno) — el runner
+ *  NO exporta (jamás inventar). */
 export type ResultadoCapa0Worker = {
   corrio: true;
   payload: string | null;
   tier: string | null;
   ms: number;
+  presupuestoVencido?: boolean;
+  fases?: FasesCapa0;
+  fin?: FinCapa0;
 };
 
 /** Opciones de la cadena (plan de gama D74 — mismos nombres del runner). */
@@ -50,8 +62,13 @@ export type OpcionesCapa0Worker = {
 import { PUBLIC_BASE } from "@/shared/env";
 
 /** Cache-busting del worker precompilado (mismo patrón ?v=N del
- *  detection-worker — bump al regenerar el bundle). */
-const WORKER_URL = `${PUBLIC_BASE}/scanner/capa0-qr.worker.js?v=1`;
+ *  detection-worker — bump al regenerar el bundle).
+ *  R1.1 — v2: presupuesto REAL (guard por cuadrante/fracción en barridos +
+ *  guard por rotación + guard del rescate 4096) y RespuestaCapa0
+ *  .presupuestoVencido (R1.2 — la caché negativa no cachea cortes).
+ *  R1.4-b — v3: RespuestaCapa0.fases (ms POR FASE) + .fin (payload |
+ *  agotado | vencido | sin-decode) — telemetría qrFases/qrFin. */
+const WORKER_URL = `${PUBLIC_BASE}/scanner/capa0-qr.worker.js?v=3`;
 
 /** Gracia del hard-kill SOBRE el presupuesto del worker (mismo patrón del
  *  sondeo: presupuesto + gracia — el kill solo cae sobre colgajes reales). */
@@ -83,6 +100,27 @@ const pendientes = new Map<
 >();
 let seqId = 0;
 
+/** R1.4-b — validación del desglose que cruza el postMessage: objeto plano
+ *  con valores numéricos finitos ≥ 0 (desconfianza sanadora — un bundle
+ *  viejo v≤2 no trae el campo y un mensaje malo no tumba el cliente).
+ *  Devuelve SOLO las fases numéricas válidas; vacío/inválido → undefined. */
+function fasesValidas(f: unknown): FasesCapa0 | undefined {
+  if (typeof f !== "object" || f === null) return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(f as Record<string, unknown>)) {
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? (out as FasesCapa0) : undefined;
+}
+
+/** Fines legales — espejo de FinCapa0 (el postMessage cruza sin tipos). */
+const FINES_CAPA0: ReadonlySet<string> = new Set([
+  "payload",
+  "agotado",
+  "vencido",
+  "sin-decode",
+]);
+
 function enMensaje(ev: MessageEvent<RespuestaCapa0>): void {
   const r = ev.data;
   const pendiente = typeof r?.id === "number" ? pendientes.get(r.id) : undefined;
@@ -94,6 +132,15 @@ function enMensaje(ev: MessageEvent<RespuestaCapa0>): void {
     payload: typeof r.payload === "string" && r.payload.length > 0 ? r.payload : null,
     tier: typeof r.payload === "string" && r.payload.length > 0 ? String(r.tier ?? "") : null,
     ms: Number(r.ms) || 0,
+    // R1.1 — passthrough honesto: undefined (bundle viejo) = conservador
+    presupuestoVencido: r.presupuestoVencido === false ? false : true,
+    // R1.4-b — passthrough validado: undefined (bundle v≤2 / catch) = sin
+    // telemetría — el runner NO exporta los campos (jamás inventar).
+    fases: fasesValidas(r.fases),
+    fin:
+      typeof r.fin === "string" && FINES_CAPA0.has(r.fin)
+        ? (r.fin as FinCapa0)
+        : undefined,
   });
 }
 
