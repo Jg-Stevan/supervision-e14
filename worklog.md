@@ -557,3 +557,14 @@ Work Log:
 Stage Summary:
 - La capa 0 gana el tier ZOOM TL+zbar sin tocar los desenlaces existentes (hereda/base/barrido/recorte-600/zxing/rotaciones/rescate4096 idénticos); kill-switch qrZoomTl=false = cadena de hoy byte-idéntica.
 - Costo: 0 en el camino feliz (early-exit antes); ~150-600 ms solo en actas donde TODO lo demás falló.
+
+---
+Task ID: 22 — DOC LABORATORIO-qr-decodificadores-v1: documentación completa del lab de decodificadores QR
+
+Work Log:
+- docs/LABORATORIO-qr-decodificadores-v1.md NUEVO: la evidencia completa que sustenta el e75 — cómo funciona un lector QR (binarización/finders 1:1:3:1:1/perspectiva/Reed-Solomon), metodología (12 muestras, GT multi-paso 7/12 legibles, denominador honesto, 3 corridas), Fase 1 (decodificadores por escala 640→1600: 0 aciertos a 640 full-frame; zxing-wasm mejor compromiso 4/7·5.2ms @1024; jsQR 5/7·71ms → worker), Fase 2 (full vs band vs zoom: zoom@1024 6/7·6.1ms, rescata 3 páginas que full-frame no leyó ni a 4000px; zbar complementario p2/p4; unión 10/12), veredicto (escalera 4 pasos ~11ms zxing + ~80ms peor caso con zbar), reglas de oro (px por módulo ≥3-4, jamás up-escalar, resampler decide marginales), dedup entre medios (4 pares byte-a-byte) y validación de campo del informe masiva 2026-10-30 (6/6 ENVIADA con e75 activo, f5 rescatada, 48.7s en las 2 ilegibles).
+- Fuente: laboratorio de benchmark (3 corridas reproducibles) + informe masiva del usuario; todos los números trazables a esas corridas.
+
+Stage Summary:
+- El repo queda con la documentación del lab COMPLETA (antes solo existía la receta en REPORTE-e75): cualquier dev puede reconstruir por qué la escalera es full→zoom→zbar y por qué zbar es complementario.
+- Sin cambios de código: solo docs + worklog.
