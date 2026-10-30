@@ -14,7 +14,7 @@
  */
 import { leerRegistro } from "./cola";
 import { logger } from "../../logger";
-import { useMasivaStore } from "./store";
+import { storeMasiva } from "./store-api";
 
 // ─── e72 — ESPERA ACOTADA por el desenlace de la original (guard de
 // ingesta × pool) ─── La rama DUPLICADA de procesarUno caía al REPROCESO
@@ -28,6 +28,10 @@ import { useMasivaStore } from "./store";
 // y el fallback honesto de SIEMPRE corre: el dueño nunca pierde la foto).
 // PENDIENTE/PROCESANDO ESPERAN (la original siempre va delante en la FIFO
 // — el otro slot del pool la alcanza; sin deadlock por construcción).
+// C5: el CALLER (rama DUPLICADA de runner.ts) SÓLO llama con la original
+// DELANTE en la FIFO (guard agregadaEn) o MUERTA (respuesta rápida); la
+// copiable DETRÁS se APARCA allí (slot liberado + re-visita al terminar la
+// ola) y jamás llega a esta espera. El contrato AQUÍ no cambia.
 // Sin timers globales — mismo patrón de esperarDesenlaceQr (e63m), techo a
 // escala OCR (15 s del QR no cubren un pipeline completo).
 const ESPERA_ORIGINAL_INTERVALO_MS = 400;
@@ -42,10 +46,10 @@ async function esperarDesenlaceOriginal(
   );
   while (Date.now() - tEspera < ESPERA_ORIGINAL_TECHO_MS) {
     await new Promise((r) => setTimeout(r, ESPERA_ORIGINAL_INTERVALO_MS));
-    if (!useMasivaStore.getState().filas.some((f) => f.id === estaFilaId)) {
+    if (!storeMasiva().getState().filas.some((f) => f.id === estaFilaId)) {
       return false; // esta fila QUITADA/VACIADA en la espera — nada que copiar
     }
-    const original = useMasivaStore
+    const original = storeMasiva()
       .getState()
       .filas.find((f) => f.id === originalId);
     // Whitelist COPIABLE (T-5 e65: la literal YA-ENVIADA jamás se escribe en

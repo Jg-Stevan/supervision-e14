@@ -31,7 +31,8 @@
  *   OpenCV del core (warmUpScannerWorker — el mismo mecanismo que ya usa
  *   el bridge al detectar) UNA vez por sesión al primer master.
  *
- * Módulo singleton sin React: se suscribe al mini-store (useMasivaStore)
+ * Módulo singleton sin React: se suscribe al mini-store (storeMasiva() — R8:
+ * inyección store-api; sin import de ./store)
  * igual que el runner lo parchea desde fuera (mismo patrón marcarFila).
  * Un fallo del precalor JAMÁS tumba nada: la fila procesa normal.
  */
@@ -39,7 +40,7 @@ import { maestroDeImagen, type MaestroImagen } from "./archivos";
 import { logger } from "../../logger";
 import { leerRegistro } from "./cola";
 import { warmUpScannerWorker } from "@jg-stevan/scanner-core/detector-client";
-import { useMasivaStore } from "./store";
+import { storeMasiva } from "./store-api";
 // KIT e14-gama-adaptativa-v1 (D74): el TOPE EFECTIVO del precalor lo da el
 // plan de gama (BAJO 1 · MEDIO 2 · base 3).
 import { planGamaActual } from "../gama";
@@ -79,8 +80,8 @@ let precalorEnVuelo = false;
 
 /** Patch INMUTABLE de UNA fila (mismo patrón del runner). */
 function marcarFila(id: string, patch: Partial<FilaMasiva>): void {
-  const filas = useMasivaStore.getState().filas;
-  useMasivaStore.setState({
+  const filas = storeMasiva().getState().filas;
+  storeMasiva().setState({
     filas: filas.map((f) => (f.id === id ? { ...f, ...patch } : f)),
   });
 }
@@ -89,7 +90,7 @@ function marcarFila(id: string, patch: Partial<FilaMasiva>): void {
  *  (corriendo), ni fila PROCESANDO (progreso vivo), ni REVISIÓN abierta
  *  (origenAbierto — el editor usa el main thread), ni envío de lote. */
 function pipelineOcioso(): boolean {
-  const s = useMasivaStore.getState();
+  const s = storeMasiva().getState();
   return (
     !s.corriendo &&
     s.progreso === null &&
@@ -100,7 +101,7 @@ function pipelineOcioso(): boolean {
 
 /** ¿La fila sigue viva y PENDIENTE? (base de TODAS las cancelaciones). */
 function filaVivaYPendiente(id: string): boolean {
-  const fila = useMasivaStore.getState().filas.find((f) => f.id === id);
+  const fila = storeMasiva().getState().filas.find((f) => f.id === id);
   return !!fila && fila.estado === "PENDIENTE";
 }
 
@@ -109,7 +110,7 @@ function filaVivaYPendiente(id: string): boolean {
  *  saltan: su id real llega al resolver agregarLote). */
 function siguientePendienteSinMaster(): FilaMasiva | null {
   return (
-    useMasivaStore
+    storeMasiva()
       .getState()
       .filas.filter(
         (f) =>
@@ -142,7 +143,7 @@ async function ciclo(): Promise<void> {
     for (;;) {
       if (!pipelineOcioso()) return;
       // Poda: entradas/fallos de filas que ya no están (quitada/vaciada).
-      const vivos = new Set(useMasivaStore.getState().filas.map((f) => f.id));
+      const vivos = new Set(storeMasiva().getState().filas.map((f) => f.id));
       for (const [id, entrada] of entradas) {
         if (!vivos.has(id)) {
           entrada.abortada = true;
@@ -267,7 +268,7 @@ let cableado = false;
 export function cablearPrecalor(): void {
   if (cableado) return;
   cableado = true;
-  useMasivaStore.subscribe((estado, previo) => {
+  storeMasiva().subscribe((estado, previo) => {
     if (
       estado.filas === previo.filas &&
       estado.progreso === previo.progreso &&

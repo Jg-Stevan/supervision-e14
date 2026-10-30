@@ -21,19 +21,20 @@ import {
 // e65b — KIT e65b-historico-enviadas-v1 (T-2): LEDGER PERSISTENTE de
 // enviadas (DB separada — historico.ts, solo llaves/L7). El índice del
 // histórico se FUSIONA con el ledger: sobrevive vaciar() y recargas
-// (REVERSA de D-e65-8 → D-e65b-1).
+// (REVERSA de D-e65-8 → D-e65b-1). R8 — split del store: la carga/fusión
+// del índice y el crecimiento del ledger viven en dedup-indice.ts; aquí
+// quedan los consumers directos del ciclo de vida y del índice-payload del
+// sondeo (indiceEnviadasPorPayload — KIT e73 §C).
 import {
   borrarHistorico,
-  listarHistorico,
-  registrarEntradaHistorico,
   // KIT e73-sondeo-qr-precoz-v1 (§C) — índice histórico por payload del sondeo
-  actualizarIndicePayload,
   indiceEnviadasPorPayload,
   // D33 — reiniciar-envios: reset del índice de sesión por payload
   resetearIndicePayload,
   type EntradaHistorica,
 } from "./historico";
 // SPLIT C1 (refactor/runner-logger-v1): hacerThumb vive en runner-thumbs.ts
+import { hacerThumb } from "./runner-thumbs";
 import { logger } from "../../logger";
 // WAVE3 §A.3 — ORDEN-WAVE3-remoto-rescate-obs-v1: cliente del ledger remoto
 // (el registro nace TAMBIÉN al drenar las filas «EN COLA» — único hook de
@@ -45,14 +46,19 @@ import { leerFlags } from "../flags";
 // (worker e73: lee la identidad QR ANTES del pool — gemelas jamás pagan
 // slot/probe/OCR; null honesto = la vía de HOY — doctrina del conservador).
 import { sondearQrPrecoz } from "./sondeo-qr.client";
-// (responsabilidad de render — movimiento puro del runner).
-import { hacerThumb } from "./runner-thumbs";
+// R8 — inyección del store al núcleo (ver cabecera de este archivo).
+import { cablearStoreMasiva } from "./store-api";
+// R8 — SPLIT del store (etapa 2): el núcleo (runner/precalor/runner-dedup/
+// runner-vida) ya NO importa este módulo — recibe la API del store por
+// INYECCIÓN (store-api.ts, cableada abajo tras create). Sentido único:
+// store → núcleo. Este import (iniciar/pausar/rearrancar para las actions
+// de UI) es la ÚNICA arista store→runner y NO tiene retorno.
 import { iniciarRunner, pausarRunner, rearrancarTrasEncolar } from "./runner";
 // D66 — KIT e14-decode-unico-precalor-v1: cableado del PRECALOR (T3) — la
 // suscripción al mini-store vive aquí (zona del kit: «flag transitorio
-// precalentada + cola de precalor») DESPUÉS de crear el store: precalor.ts
-// también importa useMasivaStore (solo DENTRO de funciones — un call en su
-// evaluación de módulo sería TDZ por el ciclo runner↔precalor↔store).
+// precalentada + cola de precalor») DESPUÉS de crear el store. R8: precalor
+// consume el store vía storeMasiva() (inyección — sin import de ./store, sin
+// TDZ por el viejo ciclo runner↔precalor↔store).
 import { cablearPrecalor } from "./precalor";
 // KIT e14-masiva-ux-v1 (T2): clasificación/extracción de archivos — las
 // deps pesadas (fflate/node-unrar-js) viven DETRÁS de extraerArchivo con
@@ -89,112 +95,12 @@ import {
 } from "./tipos";
 import type { Acta } from "../types";
 
-export type FiltroMasiva =
-  | "TODAS"
-  | "OPTIMA"
-  | "ADVERTENCIA"
-  | "RECHAZADA"
-  | "EN_REVISION_HUMANA"
-  | "ERROR";
-
-/** D65 — KIT e14-progreso-watchdog-dedup-v1 (T3): vocabulario del kit para
- *  la señal de vida de la fila ACTIVA. La fracción SOLO existe en OCR y es
- *  REAL (reconocedor por lotes de rec — §2-C4 del kit ocr-escalonado); las
- *  demás etapas van SIN número (barra animada — jamás inventar %). */
-export type EtapaVidaKit = "preparando" | "deteccion" | "ocr" | "verificacion";
-
-/** Progreso de la fila ACTIVA (throttled por el runner 250 ms — D65 T3.1).
- *  Estado TRANSITORIO: NO se persiste en IndexedDB (kit T3.4 — cada tick a
- *  IDB sería caro); al recargar la página las filas vuelven a PENDIENTE como
- *  hoy y no queda % fantasma.
- *
- *  CAMBIO (pedido del dueño): UN % para TODO el proceso del acta — antes el
- *  chip de la fila saltaba por tramos fijos por fase y el OCR escalonado
- *  (2 pasadas) hacía que el número RETROCEDIERA (95→50→95). Ahora el runner
- *  computa `fracGlobal` (0..1): cada fase del pipeline mapea a un tramo del
- *  TOTAL, las 2 pasadas del OCR reparten sub-tramos y el valor es MONOTÓNICO
- *  (jamás baja dentro de la misma acta — Math.max por señal). */
-// knip C3: de-export — uso SOLO interno (estado del mini-store).
-interface ProgresoFila {
-  id: string;
-  etapa: EtapaVidaKit;
-  /** 0..1 SOLO cuando etapa === "ocr" — dato REAL del reconocedor. */
-  ocrFraccion?: number;
-  /** 0..1 del PROCESO COMPLETO del acta (todas las fases sumadas) —
-   *  monotónico: nunca baja dentro de la misma acta. 1 = LISTA. */
-  fracGlobal?: number;
-}
-
-interface MasivaStore {
-  filas: FilaMasiva[];
-  corriendo: boolean;
-  progreso: ProgresoFila | null;
-  filtro: FiltroMasiva;
-  /** Acta abierta en REVISIÓN desde la bandeja (T3.4) — la identidad para
-   *  sincronizar al volver. null = ninguna abierta. */
-  origenAbierto: string | null;
-  /** «GUARDANDO N…» — copia async de files → IDB (zona de carga). */
-  guardando: number;
-  /** false → píldora de fallback (IndexedDB no disponible — kit §3/§6). */
-  colaDisponible: boolean;
-  /** FIX (auditoría 2-c C5): true mientras corre «ENVIAR ADVERTENCIAS» —
-   *  guard de re-entrancia del lote (doble tap = doble envío). */
-  enviandoLote: boolean;
-
-  /** FIX M9 (auditoría 2-c): aviso específico de QUOTA — antes cualquier
-   *  fallo de escritura (casi siempre almacenamiento lleno con actas de
-   *  ~15 MB/registro) degradaba a «TU NAVEGADOR NO SOPORTA LA COLA» (falso)
-   *  y mataba el botón PROCESAR para TODA la bandeja. null = sin aviso. */
-  avisoCola: string | null;
-
-  /** Al montar: lista IDB → filas livianas + recuperarCola() (zombis fuera). */
-  cargarFilas: () => Promise<void>;
-  /** Suelta/selección de fotos: filas PENDIENTES al instante (ids temp) +
-   *  copia async a IDB — al resolver, los ids reales reemplazan a los temp. */
-  agregarFiles: (files: File[]) => Promise<void>;
-  iniciar: () => void;
-  pausar: () => void;
-  /** ABRIR: auto-pausa del runner + REVISIÓN del acta (vía T3.4). */
-  abrirActa: (id: string) => Promise<void>;
-  /** Al volver de REVISIÓN: si la identidad coincide, re-persiste el acta
-   *  ACTUALIZADA (recorte/filtro/envío — F5) y refresca la fila. Si no,
-   *  SOLO limpia origenAbierto (no escribe nada). */
-  sincronizarAlVolver: () => Promise<void>;
-  quitar: (id: string) => Promise<void>;
-  vaciar: () => Promise<void>;
-  /** D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO de envíos (cola +
-   *  ledger del histórico + índices de sesión). El corte explícito que pide
-   *  el dueño para re-probar el MISMO lote — botón de 2 toques (MasivaView);
-   *  vaciar() queda byte a byte (RL-e65b-5 intacto). */
-  reiniciarEnvios: () => Promise<void>;
-  /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
-   *  DUPLICADA (→ PENDIENTE, dupOf fuera) para que el runner la reprocese
-   *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
-  procesarIgual: (id: string) => Promise<void>;
-  /** D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» de una fila ERROR —
-   *  la re-encola (PENDIENTE, error fuera, persistente) para que el dueño
-   *  pulse PROCESAR. NO auto-procesa (misma doctrina D45: extraer/re-encolar
-   *  NO procesa). Sin archivo original en IDB → la fila SIGUE en ERROR con
-   *  SIN_ARCHIVO_ORIGINAL (honesto — registros viejos o filas de formato). */
-  reintentar: (id: string) => Promise<void>;
-  /** Envío en lote SECUENCIAL de ADVERTENCIAS (cada una vía registrarEnvio
-   *  real). NO toca RECHAZADAS ni EN_RH (kit §6). */
-  enviarLote: (estado: "ADVERTENCIA") => Promise<void>;
-  /** D65 (T3.1): señal de vida de la fila en curso — action NUEVO del kit;
-   *  el runner emite con throttle 250 ms vía bucketDeVida. Transitorio
-   *  (NUNCA a IDB — kit T3.4). `fracGlobal` = % ÚNICO del proceso completo
-   *  del acta (monotónico — ver ProgresoFila). */
-  marcarProgreso: (
-    id: string,
-    progreso: { etapa: EtapaVidaKit; ocrFraccion?: number; fracGlobal?: number },
-  ) => void;
-  setFiltro: (filtro: FiltroMasiva) => void;
-  /** e64-qr-v1 (T-0.2): estampar campos SOLO-VISUALES sobre UNA fila viva
-   *  (el chip qrEstado de la CAPA 0 QR se pinta a mitad de proceso, cuando
-   *  el runner acaba de decodificar). Patch INMUTABLE — el MISMO patrón del
-   *  patchFila interno (el kit llama a este mutador desde el runner). */
-  actualizarFila: (id: string, patch: Partial<FilaMasiva>) => void;
-}
+// R8 — SPLIT del store (etapa 2): los tipos del mini-store viven en
+// tipos.ts (el núcleo inyectado los consume sin importar este módulo — fin
+// del ciclo store↔runner↔precalor). API PÚBLICA intacta: los tipos que los
+// consumidores ya importaban de aquí siguen exportados desde aquí.
+import type { MasivaStore } from "./tipos";
+export type { EtapaVidaKit, FiltroMasiva } from "./tipos";
 
 /** Registro IDB → fila LIVIANA (sin Blob, sin acta — la foto duerme). */
 function filaDeRegistro(r: RegistroMasiva): FilaMasiva {
@@ -259,142 +165,36 @@ function patchFila(id: string, patch: Partial<FilaMasiva>): void {
   });
 }
 
-// ─── e63m — KIT e63m-capa0-qr-identidad-v1 (F2): MAPA DE IDENTIDAD QR ───
-// CAPA 0 pre-OCR — payload EXACTO → id de la fila original del lote (el
-// runner lo registra al decodificar, ANTES de despachar OCR). Memoria de la
-// SESIÓN del lote (kit §5 — decisión deliberada: NO se persiste en IDB ni
-// se reconstruye al recargar; el lote es la unidad de dedup hoy). Llave
-// OPACA: la única comparación es la IGUALDAD EXACTA del payload completo
-// (jamás prefijos — RED LINE 10); sin umbrales, sin fuzzy (RED LINE 5).
-const mapaQrPayload = new Map<string, string>();
+// ─── e63m — MAPA DE IDENTIDAD QR: MOVIDO a dedup-payloads.ts (R8 — split
+// del store, 1 mapa de payload con ciclo de vida documentado). La API
+// pública se conserva: re-export byte a byte (el runner, el prescan y la
+// red de caracterización importan desde aquí).
+export {
+  originalQrDePayload,
+  registrarQrPayload,
+  resetearPayloadsSesion,
+} from "./dedup-payloads";
+import { resetearPayloadsSesion } from "./dedup-payloads";
 
-// ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1): MODO PRUEBAS ───────────
-// MODO PRUEBAS (pre-elección): la cola NO sobrevive recargas — revertir a
-// true para producción.
-// Pedido literal del dueño: «que las actas no se guarden en memoria por el
-// momento, porque estamos haciendo pruebas y la gracia es que en cada lote
-// pueda identificar el acta antes de procesarla».
-// Con FALSE (modo pruebas):
-//  · C-1 — cargarFilas() arranca la cola VACÍA (no restaura filas ni
-//    reconstruye Maps desde persistencia) y borra la persistencia vieja
-//    (cola IDB + ledger del histórico — higiene).
-//  · C-2 — vaciar() resetea TODO el ciclo de vida de la memoria de dedup:
-//    mapaQrPayload + ledger + índice → limpiar y re-subir el MISMO lote
-//    procesa completo de cero.
-//  · C-3 — el LEDGER de enviadas NO alimenta el índice del histórico (los
-//    Maps de dedup no se alimentan de NADA persistido); la dedup DENTRO del
-//    lote/sesión queda INTACTA (la gracia — gemelas atrapadas en vivo).
-// Con TRUE (producción): byte a byte el comportamiento de siempre —
-// restauración tras recarga/crash + dedup inter-lote + ledger e65b que
-// sobrevive vaciar() (D-e65b-1). Cero código borrado — solo ciclo de vida.
-/** e64p (C-1/C-2 — MODO PRUEBAS). Desde cola-persistente-v1: kill switch del
- *  dueño — el override `colaPersistente: false` (e14-flags-overrides) activa
- *  el modo pruebas (auto-borrado al cargar). Default TRUE: la masiva SOLO se
- *  elimina con vaciar() del dueño — petición literal 2026-10-24. */
-const COLA_PERSISTENTE = leerFlags().colaPersistente ?? true;
+// ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1/C-2/C-3): MODO PRUEBAS ───
+// El kill switch (COLA_PERSISTENTE) y su contrato completo viven AHORA en
+// dedup-indice.ts (R8 — split del store: la decisión de alimentarse del
+// ledger es del índice; el store consume el mismo export).
+import { COLA_PERSISTENTE } from "./dedup-indice";
 
-/** Registra el payload de UNA fila como original del lote. Solo se llama
- *  cuando el payload es NUEVO en el mapa o su entrada apuntaba a una fila
- *  ya muerta (re-apuntado honesto — el carrier vivo del payload manda). */
-export function registrarQrPayload(payload: string, id: string): void {
-  mapaQrPayload.set(payload, id);
-}
-
-/** id de la fila ORIGINAL de este payload (null = payload nuevo en el lote). */
-export function originalQrDePayload(payload: string): string | null {
-  return mapaQrPayload.get(payload) ?? null;
-}
-
-// ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS (D-e65-3) ────
-// Carga LIVIANA una vez por sesión de encolado: listarMapeados con mapper
-// que NO retiene Blob ni acta (lección L7 / fix C6) — solo las llaves del
-// dedup ({id, hashBytes?, hashDedup?, payloadQr?}). Registros SIN llave
-// quedan FUERA (jamás inventar).
-// e65b (T-2b, D-e65b-1): el índice se FUSIONA con el LEDGER persistente
-// (historico.ts — DB separada): sobrevive vaciar() y recargas. Lo que se
-// ENVÍA después de la carga queda cubierto por (a) las filas VIVAS de la
-// cola (mismas capas, con verificación de registro viva antes de marcar)
-// y (b) registrarEnviadaHistorico — que actualiza el cache EN MEMORIA al
-// instante (mismo gesto de la sesión).
-let indiceEnviadas: EntradaHistorica[] | null = null;
-
-async function indiceEnviadasDe(): Promise<EntradaHistorica[]> {
-  if (indiceEnviadas) return indiceEnviadas;
-  const deCola = await listarMapeados<EntradaHistorica>((r) => {
-    // Solo ENVIADAS (acta propia) o YA-ENVIADA (filas marcadas por el kit).
-    if (r.acta?.status !== "ENVIADA" && r.estado !== "YA-ENVIADA") return null;
-    if (!r.hashBytes && !r.hashDedup && !r.qrPayload) return null; // sin llave → jamás inventar
-    return {
-      id: r.id,
-      ts: r.agregadaEn,
-      hashBytes: r.hashBytes,
-      hashDedup: r.hashDedup,
-      payloadQr: r.qrPayload,
-    };
-  });
-  // e65b (M-e65b-2): el ledger NO es fatal — si cae, el índice se construye
-  // SOLO con la cola viva (exactamente el comportamiento e65; conservador
-  // RL-e65b-3 — jamás tumba la cadena de dedup).
-  // e64p (C-3 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ledger NO
-  // alimenta el índice — cero memoria ENTRE lotes (el histórico de sesiones
-  // anteriores jamás marca YA-ENVIADA); solo la cola viva de ESTA sesión.
-  let deLedger: EntradaHistorica[] = [];
-  if (COLA_PERSISTENTE) {
-    try {
-      deLedger = await listarHistorico(); // llaves chicas — getAll seguro (L7)
-    } catch {
-      deLedger = [];
-    }
-  }
-  const porId = new Map<string, EntradaHistorica>();
-  for (const e of deLedger) porId.set(e.id, e);
-  for (const e of deCola) porId.set(e.id, e); // la cola viva manda (más fresca)
-  indiceEnviadas = [...porId.values()];
-  return indiceEnviadas;
-}
-
-/** e65b (T-2c): el ÚNICO punto donde el ledger crece — alimenta el histórico
- *  con TODO desenlace ENVIADO (envío propio del runner T-3a, gemela
- *  reutilizada T-3b, envíos manuales T-3c, marca YA-ENVIADA T-2d) —
- *  fire-and-forget desde el runner (RL-e65b-2/3). Si el cache del índice ya
- *  está construido, se actualiza EN MEMORIA al instante (mismo gesto — la
- *  re-subida de ESTA sesión ya matchea sin recargar). */
-export async function registrarEnviadaHistorico(e: EntradaHistorica): Promise<void> {
-  try {
-    await registrarEntradaHistorico(e);
-  } catch {
-    return; // IDB caída — conservador, jamás tumba el envío (RL-e65b-3)
-  }
-  if (indiceEnviadas) {
-    const entrada: EntradaHistorica = {
-      id: e.id,
-      ts: e.ts,
-      hashBytes: e.hashBytes,
-      hashDedup: e.hashDedup,
-      payloadQr: e.payloadQr,
-    };
-    const i = indiceEnviadas.findIndex((x) => x.id === e.id);
-    if (i >= 0) indiceEnviadas[i] = entrada;
-    else indiceEnviadas.push(entrada);
-  }
-  // KIT e73-sondeo-qr-precoz-v1 (§C) — hook al MISMO punto de invalidación:
-  // el índice por payload del sondeo ve el MISMO gesto de sesión (no-op si
-  // aún no cargó — se construirá con TODO dentro al primer uso).
-  actualizarIndicePayload(e);
-}
-
-/** e65b (T-2e): lookup O(n) sobre el índice cacheado (n = enviadas; miles OK).
- *  El índice SOLO contiene enviadas por construcción → hit = YA-ENVIADA.
- *  Igualdad EXACTA del payload (llave opaca — jamás prefijos, RL-e65b-8).
- *  Fallo del índice → null conservador: la fila sigue su curso (RL-e65b-3). */
-export async function enviadaPorPayload(payload: string): Promise<EntradaHistorica | null> {
-  if (!payload) return null;
-  try {
-    return (await indiceEnviadasDe()).find((h) => h.payloadQr === payload) ?? null;
-  } catch {
-    return null;
-  }
-}
+// ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS: MOVIDO a
+// dedup-indice.ts (R8 — split del store, rol «ledger/índice»). La API
+// pública se conserva: re-exports byte a byte (el runner y el prescan
+// importan desde aquí hasta sus propios re-apuntes).
+export {
+  enviadaPorPayload,
+  registrarEnviadaHistorico,
+} from "./dedup-indice";
+import {
+  indiceEnviadasDe,
+  registrarEnviadaHistorico,
+  resetearIndiceEnviadas,
+} from "./dedup-indice";
 
 /** e65 (T-4): marca YA-ENVIADA con el MISMO patrón anti-zombi de la marca
  *  DUPLICADA (fila viva + PENDIENTE + registro leíble + write IDB OK).
@@ -1091,8 +891,8 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         } catch {
           /* conservador — el ledger se re-borra en el próximo vaciar/carga */
         }
-        mapaQrPayload.clear();
-        indiceEnviadas = null;
+        resetearPayloadsSesion(); // e64p C-1 — el mapa de payload de la sesión muere aquí
+        resetearIndiceEnviadas();
         set({ filas: [], colaDisponible: true, avisoCola: null });
         return;
       }
@@ -1490,19 +1290,19 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     // (RL-e65b-5). La cola es el taller; el envío es el hecho.
     // e64p (C-2 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ciclo de vida
     // COMPLETO muere aquí (reversa declarada del RL-e65b-5 SOLO en modo
-    // pruebas): mapaQrPayload (capa 0 QR — hoy sobrevivía a vaciar en la
-    // misma sesión) + ledger del histórico + índice → limpiar y re-subir el
-    // MISMO lote procesa completo de cero (QA del kit). En producción
-    // (true) este bloque no existe y D-e65b-1 queda byte a byte.
+    // pruebas): el mapa de payload de la sesión (capa 0 QR — hoy sobrevivía
+    // a vaciar en la misma sesión) + ledger del histórico + índice → limpiar
+    // y re-subir el MISMO lote procesa completo de cero (QA del kit). En
+    // producción (true) este bloque no existe y D-e65b-1 queda byte a byte.
     if (!COLA_PERSISTENTE) {
-      mapaQrPayload.clear();
+      resetearPayloadsSesion();
       try {
         await borrarHistorico();
       } catch {
         /* conservador — el índice ya no lo verá en esta sesión */
       }
     }
-    indiceEnviadas = null;
+    resetearIndiceEnviadas();
     set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
   },
 
@@ -1522,14 +1322,14 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     } catch {
       /* las filas mueren igual en la bandeja */
     }
-    mapaQrPayload.clear();
+    resetearPayloadsSesion();
     try {
       await borrarHistorico();
     } catch {
       /* conservador — IDB caída: los índices de sesión ya no la verán */
     }
     resetearIndicePayload();
-    indiceEnviadas = null;
+    resetearIndiceEnviadas();
     set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
   },
 
@@ -1603,6 +1403,11 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
   // del patchFila interno; expuesto como action para el runner (chip QR).
   actualizarFila: (id, patch) => patchFila(id, patch),
 }));
+
+// R8 — SPLIT del store (etapa 2): INYECCIÓN del store al núcleo — el punto
+// ÚNICO de cableado. Va ANTES de cablearPrecalor(): la suscripción del
+// precalor consume storeMasiva() desde su primer tick.
+cablearStoreMasiva(useMasivaStore);
 
 // D66 — KIT e14-decode-unico-precalor-v1 (T3): el precalor queda cableado
 // al mini-store DESDE AHORA (store ya creado) — respira con la cola aunque

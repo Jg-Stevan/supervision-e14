@@ -8,7 +8,7 @@
  * runner.ts (orquestador) importa { vidas, vidaDe, marcarFila, marcarVida };
  * este archivo NUNCA importa de otros runner-*.ts.
  */
-import { useMasivaStore } from "./store";
+import { storeMasiva } from "./store-api";
 import type { FilaMasiva } from "./tipos";
 import type { ProgresoAnalisis } from "../types";
 // KIT e14-obs-hang-atribucion-v1 (§A.2) — hook D58: cada señal del bridge
@@ -104,8 +104,8 @@ function fracGlobalDe(id: string, p: ProgresoAnalisis): number {
 
 /** Patch INMUTABLE de UNA fila (la bandeja pinta filas livianas). */
 function marcarFila(id: string, patch: Partial<FilaMasiva>): void {
-  const filas = useMasivaStore.getState().filas;
-  useMasivaStore.setState({
+  const filas = storeMasiva().getState().filas;
+  storeMasiva().setState({
     filas: filas.map((f) => (f.id === id ? { ...f, ...patch } : f)),
   });
 }
@@ -153,7 +153,7 @@ function marcarVida(id: string, p: ProgresoAnalisis): void {
   const ahora = Date.now();
   if (ahora - vida.ultimoEn < progresoMsEfectivo()) return;
   vida.ultimoEn = ahora;
-  useMasivaStore
+  storeMasiva()
     .getState()
     .marcarProgreso(id, { ...bucketDeVida(p), fracGlobal: vida.frac });
 }
