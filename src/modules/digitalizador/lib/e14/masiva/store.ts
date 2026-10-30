@@ -753,10 +753,18 @@ async function cadenaDedup(
       const candidatas = filas.filter(
         (f) => f.id !== entrada.id && f.hashDedup && f.estado !== "ERROR",
       );
+      // D45 — diagnóstico de la comparación: con cuántas candidatas se
+      // comparó y la MEJOR distancia de Hamming vista (incluso sobre el
+      // umbral — afinar DEDUP_HAMMING_MAX con datos, no con corazonadas).
+      // Con dedup:"sin-match" responde POR QUÉ no matcheó (¿0 candidatas?
+      // ¿candidatas había pero todas lejos?). Observador pasivo.
+      let mejorDistancia: number | null = null;
+      let nIndice = 0;
       let original: Pick<FilaMasiva, "id" | "agregadaEn"> | null = null;
       let hamming = DEDUP_HAMMING_MAX + 1;
       for (const c of candidatas) {
         const d = hamming64(hash, c.hashDedup as string);
+        if (mejorDistancia === null || d < mejorDistancia) mejorDistancia = d;
         if (d <= DEDUP_HAMMING_MAX && (original === null || d < hamming || c.agregadaEn < original.agregadaEn)) {
           original = c;
           hamming = d;
@@ -769,7 +777,9 @@ async function cadenaDedup(
       let originalDelIndice = false;
       for (const h of await indiceEnviadasDe()) {
         if (!h.hashDedup || h.id === entrada.id) continue;
+        nIndice += 1; // D45 — candidatas del índice también se cuentan
         const d = hamming64(hash, h.hashDedup);
+        if (mejorDistancia === null || d < mejorDistancia) mejorDistancia = d;
         if (d <= DEDUP_HAMMING_MAX && (original === null || d < hamming)) {
           original = { id: h.id, agregadaEn: 0 };
           hamming = d;
@@ -795,7 +805,20 @@ async function cadenaDedup(
                 dedupVisualDe: original.id,
               }
             : { dedup: "sin-match" };
-      const writeHashYTraza = { ...registro, hashDedup: hash, hashBytes: bytes ?? registro.hashBytes, ...trazaDedup };
+      const writeHashYTraza = {
+        ...registro,
+        hashDedup: hash,
+        hashBytes: bytes ?? registro.hashBytes,
+        ...trazaDedup,
+        // D45 — diagnóstico de la comparación (aditivo al final, D57): la
+        // traza dice QUÉ pasó; esto dice CON QUÉ se comparó y a qué
+        // distancia quedó lo más cercano (mecanismos, no corazonadas).
+        dedupDetalle: {
+          candidatas: candidatas.length,
+          indice: nIndice,
+          mejorDistancia,
+        },
+      };
       // WAVE3 C.2 (obs-informe-wave3-v1) — el veto ya-enviada JAMÁS es
       // destruido por la traza visual: si el registro YA es YA-ENVIADA (el
       // veto capa-0/bytes aterrizó antes que el dhash de esta cadena), la

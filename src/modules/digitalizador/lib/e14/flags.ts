@@ -107,6 +107,13 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // decide.
   ocrMotorAdaptativo: true,
   ocrMotor: null,
+  // KIT e75-qr-zoom-zbar-v1 — tier ZOOM TL re-escalado + zbar-wasm en la capa
+  // 0 (recorta la banda TL 50%×30% del ORIGINAL a píxeles nativos y la pasa
+  // por zxing→zbar ANTES del rescate 4096): el lab de 12 imágenes reales
+  // midió 3 páginas del escáner que la cadena completa no leyó NI a 4000 px
+  // full-frame y 2 actas que SOLO zbar vio. Kill-switch del dueño: false =
+  // cadena de hoy byte-idéntica.
+  qrZoomTl: true,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */
@@ -123,6 +130,9 @@ let remotosCacheados: Partial<FlagsApp> | null = null;
  *  override localStorage de politica.ts). Nada que antes se aceptaba se
  *  rechaza. */
 export function sanearFlags(o: unknown): Partial<FlagsApp> {
+  // R2 (§B2 #11) — DERIVA de la tabla única. KIT e75-qr-zoom-zbar-v1 añadió
+  // `qrZoomTl` a la whitelist manual histórica: vive ahora en la tabla
+  // ESQUEMA_FLAGS de src/shared/e14/flags-schema.ts (misma semántica: booleano).
   return sanearConEsquema(o) as Partial<FlagsApp>;
 }
 

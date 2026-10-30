@@ -57,6 +57,19 @@ export interface EtapasMetrica {
    *  (diagnostico.tiempos.procesoMs — bridge ms.proceso) — ahora VIAJA al
    *  informe. 0 = fase omitida (sinRecorte, SIM-only) → se omite. */
   procesoMs?: number;
+  // ─── KIT e14-medicion-faltante-v1 (D45) — SUB-DESGLOSE del muro procesoMs ───
+  // Los 2 warps SERIALIZADOS por el core ("bw" para mostrar + "original"
+  // para leer). Paredes individuales desde el despacho conjunto — la 2.ª
+  // acumula la cola de la 1.ª (la DIFERENCIA entre ambas paredes es el
+  // coste propio del segundo warp). Mismo trato que las subs de preOcr
+  // (D44-R1): particiones del MISMO muro — jamás compiten por «cuello» ni
+  // suman al trabajo del informe (doble contabilidad prohibida).
+  /** (D45) pared del warp "bw" (mostrar/guardar) desde el despacho. */
+  procesoBwMs?: number;
+  /** (D45) pared del warp "original" (leer) desde el despacho — incluye la
+   *  cola del primero (core serializado). Ausente = filtro ya-original
+   *  (pOcr compartido — un solo warp) o sinRecorte. */
+  procesoOcrMs?: number;
   /** KIT e14-etapas-preocr-v1 (D43) — calidad del recorte (Laplaciano +
    *  contraste + brillo). ídem — bridge ms.calidad. */
   calidadMs?: number;
@@ -148,6 +161,32 @@ export interface MetricaActa {
    *  muro corrió UNA vez. preOcrMs es la SUMA de pasadas — este contador
    *  aclara los outliers (¿1 muro de 31 s o 3 muros de ~10 s?). */
   reintentosPreOcr?: number;
+  // ─── KIT e14-medicion-faltante-v1 (D45) — lo que el informe NO traía ───
+  /** Muro del despacho: tsFin − tsInicio (la MISMA ventana del solape
+   *  D44-R3). Ausente = fila sin tsInicio (ERROR temprano). */
+  muroMs?: number;
+  /** Residual del muro SIN dueño: muroMs − (totalMs + preOcrMs + thumbMs +
+   *  persistMs + envioMs) — SOLO con las dos paredes mayores en mano (jamás
+   *  inventar). Es el 0,3-0,7 s/acta que el informe 2026-10-30 no explicaba
+   *  (transfer/serialización/GC/marco del store). Puede ser negativo →
+   *  señal de solape entre paredes — también es dato. */
+  gapMs?: number;
+  /** D61 medía el dispatch síncrono (envioMs) — la PUBLICACIÓN del acta al
+   *  monitor (publicarDesdeActa — red real) corría fire-and-forget SIN
+   *  dueño. Ahora se mide al aterrizar: ms del roundtrip + estado final
+   *  ("publicada" | "bloqueada"). Llega DESPUÉS del desenlace (re-put
+   *  idempotente — último gana). Ausente = la publicación no corrió o no
+   *  aterrizó antes del export. NO compite por «cuello» (no es camino
+   *  crítico del desenlace). */
+  envioRoundMs?: number;
+  envioEstado?: string;
+  /** Diagnóstico del dedup de INGESTA (cadenaDedup): con cuántas candidatas
+   *  (filas vivas + índice histórico) se comparó el dhash y la MEJOR
+   *  distancia de Hamming vista — INCLUSO si quedó sobre el umbral (oro
+   *  para afinar DEDUP_HAMMING_MAX con datos, no con corazonadas). Con
+   *  dedup:"sin-match" responde POR QUÉ no matcheó. Ausente = el dhash no
+   *  corrió (gama OFF / decode falló — el "(sin campo)" del informe). */
+  dedupDetalle?: { candidatas: number; indice: number; mejorDistancia: number | null };
 }
 
 /** Una corrida = un PROCESAR (o su rearranque) hasta que el bucle drena o
@@ -157,6 +196,12 @@ export interface CorridaMetrica {
   inicio: number;
   fin: number | null; // null = EN CURSO (pausa/recarga la cierra honesta)
   nActas: number; // desenlaces registrados de esta corrida
+  /** D45 — por qué se cerró: "drenada" | "pausa" (finally del runner) |
+   *  "recarga-o-abandono" (corrida quedada abierta por recarga/crash,
+   *  cerrada honesta al abrir la siguiente). fin=null SIN motivo = EN
+   *  CURSO de verdad — antes 2 de cada 5 corridas del informe real morían
+   *  con fin=null y no se sabía por qué. */
+  motivoCierre?: string;
 }
 
 // ─── IDB (mismo patrón de cola.ts/historico.ts) ─────────────────────────────
@@ -240,6 +285,8 @@ export function cuelloDeEtapas(e: EtapasMetrica): string | null {
     if (k === "sondeoQrMs" || k === "thumbMs") continue;
     // D44 — particiones del muro preOcrMs: jamás cuello (doble contabilidad)
     if (k !== "preOcrMs" && k.startsWith("preOcr")) continue;
+    // D45 — particiones del muro procesoMs (los 2 warps): jamás cuello
+    if (k !== "procesoMs" && k.startsWith("proceso")) continue;
     if (typeof v === "number" && v > maxMs) {
       maxMs = v;
       mejor = k.replace(/Ms$/, "");
@@ -259,7 +306,10 @@ export function iniciarCorridaMetrica(): void {
       if (corridaIdViva) {
         const abierta = await leerCorrida(corridaIdViva);
         if (abierta && abierta.fin == null) {
-          await put(STORE_CORRIDAS, { ...abierta, fin: Date.now() });
+          // D45 — la corrida quedada abierta NO se cierra en silencio: su
+          // motivo de muerte queda estampado (recarga/crash — el fin=null
+          // del informe real ya tiene dueño).
+          await put(STORE_CORRIDAS, { ...abierta, fin: Date.now(), motivoCierre: "recarga-o-abandono" });
         }
       }
       const corrida: CorridaMetrica = {
@@ -295,6 +345,8 @@ export function registrarMetricaDesenlace(args: {
       tiempos?: {
         totalMs?: number;
         procesoMs?: number;
+        procesoBwMs?: number;
+        procesoOcrMs?: number;
         calidadMs?: number;
         ocrMs?: number;
         esperaMs?: number | null;
@@ -328,11 +380,30 @@ export function registrarMetricaDesenlace(args: {
   /** (D44-R4) re-arms del cronómetro — ver MetricaActa.reintentosPreOcr. */
   reintentosPreOcr?: number;
   dedup?: string;
+  /** (D45) diagnóstico del dedup de ingesta — ver MetricaActa.dedupDetalle. */
+  dedupDetalle?: { candidatas: number; indice: number; mejorDistancia: number | null };
 }): void {
   void (async () => {
     try {
       if (!corridaIdViva) return; // sin corrida viva → sin métrica (honesto)
       const t = args.acta.diagnostico?.tiempos ?? null;
+      // D45 — muro del despacho + residual SIN dueño. tsFin es el MISMO
+      // reloj del registro de abajo (una sola lectura de Date.now()).
+      const tsFin = Date.now();
+      let muroMs: number | null = null;
+      let gapMs: number | null = null;
+      if (typeof args.tsInicio === "number") {
+        muroMs = Math.round(tsFin - args.tsInicio);
+        // gap SOLO con las dos paredes mayores en mano (jamás inventar);
+        // las etapas post-bridge medidas (thumb/persist/envío) RESTAN —
+        // son segmentos del muro con dueño. El sondeo NO (es paralelo).
+        if (typeof t?.totalMs === "number" && typeof args.preOcrMs === "number") {
+          const thumb = typeof args.thumbMs === "number" ? args.thumbMs : 0;
+          const persist = typeof t?.persistMs === "number" ? t.persistMs : 0;
+          const envio = typeof t?.envioMs === "number" ? t.envioMs : 0;
+          gapMs = Math.round((muroMs - t.totalMs - args.preOcrMs - thumb - persist - envio) * 10) / 10;
+        }
+      }
       const etapas: EtapasMetrica = {};
       if (typeof t?.decodeMs === "number") etapas.decodeMs = t.decodeMs;
       if (typeof t?.detectMs === "number") etapas.detectMs = t.detectMs;
@@ -341,6 +412,10 @@ export function registrarMetricaDesenlace(args: {
       // probe viajaba solo en diagnostico.orientacionProbeMs (D57). Guard > 0:
       // 0 = fase omitida (sinRecorte/SIM) — se omite, jamás inventar trabajo.
       if (typeof t?.procesoMs === "number" && t.procesoMs > 0) etapas.procesoMs = t.procesoMs;
+      // D45 — subs del muro proceso (los 2 warps — guard > 0: ausente =
+      // sinRecorte / filtro ya-original con pOcr compartido).
+      if (typeof t?.procesoBwMs === "number" && t.procesoBwMs > 0) etapas.procesoBwMs = t.procesoBwMs;
+      if (typeof t?.procesoOcrMs === "number" && t.procesoOcrMs > 0) etapas.procesoOcrMs = t.procesoOcrMs;
       if (typeof t?.calidadMs === "number" && t.calidadMs > 0) etapas.calidadMs = t.calidadMs;
       if (
         typeof args.acta.diagnostico?.orientacionProbeMs === "number" &&
@@ -364,7 +439,7 @@ export function registrarMetricaDesenlace(args: {
         id: args.filaId,
         corridaId: corridaIdViva,
         nombre: args.nombre,
-        tsFin: Date.now(),
+        tsFin,
         totalMs: typeof t?.totalMs === "number" ? t.totalMs : null,
         etapas,
         desenlace: args.acta.status,
@@ -380,6 +455,10 @@ export function registrarMetricaDesenlace(args: {
         ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),
+        // KIT e14-medicion-faltante-v1 (D45) — muro + residual + dedup:
+        ...(muroMs != null ? { muroMs } : {}),
+        ...(gapMs != null ? { gapMs } : {}),
+        ...(args.dedupDetalle ? { dedupDetalle: args.dedupDetalle } : {}),
       };
       await persistirActa(m);
     } catch {
@@ -426,10 +505,50 @@ export function registrarMetricaCopia(args: {
         copia: true,
         // D44-R3 — el turno de la copia también es turno (solape real):
         ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
+        // D45 — muro + residual de la copia (sin preOcr — la copia no paga
+        // pre-OCR propio; totalMs ≈ 0 es su dato real, guard e72):
+        ...(typeof args.tsInicio === "number"
+          ? (() => {
+              const muroCopia = Math.round(Date.now() - args.tsInicio!);
+              return {
+                muroMs: muroCopia,
+                ...(typeof args.totalMs === "number"
+                  ? { gapMs: Math.round((muroCopia - args.totalMs) * 10) / 10 }
+                  : {}),
+              };
+            })()
+          : {}),
       };
       await persistirActa(m);
     } catch {
       /* conservador */
+    }
+  })();
+}
+
+/** Hook 2c (D45) — la PUBLICACIÓN del acta al monitor ATERRIZÓ (el store
+ *  mide el await real de publicarDesdeActa y llama aquí fire-and-forget).
+ *  Re-put IDEMPOTENTE sobre el espejo + IDB (patrón del módulo — último
+ *  gana): el desenlace ya viajó y la publicación llega después. */
+export function registrarMetricaEnvioRound(args: {
+  filaId: string;
+  envioRoundMs: number;
+  envioEstado: string;
+}): void {
+  void (async () => {
+    try {
+      const i = actasVivas.findIndex((a) => a.id === args.filaId);
+      if (i < 0) return; // sin métrica previa (desenlace no registrado) — nada que parchear
+      const m: MetricaActa = {
+        ...actasVivas[i],
+        envioRoundMs: Math.round(args.envioRoundMs),
+        envioEstado: args.envioEstado,
+      };
+      actasVivas[i] = m;
+      await put(STORE_ACTAS, m);
+      notificar();
+    } catch {
+      /* conservador — fire-and-forget */
     }
   })();
 }
@@ -484,14 +603,22 @@ export function registrarMetricaError(args: {
   })();
 }
 
-/** Hook 4 — finally del bucle: cierra la corrida (drenada o pausada). */
-export function cerrarCorridaMetrica(): void {
+/** Hook 4 — finally del bucle: cierra la corrida (drenada o pausada).
+ *  D45 — el motivo de cierre VIAJA ("drenada"|"pausa" del runner; el
+ *  cierre de una corrida quedada abierta nace "recarga-o-abandono" en el
+ *  hook 1). Sin motivo = llamada legada (mismo comportamiento de ayer). */
+export function cerrarCorridaMetrica(motivo?: string): void {
   void (async () => {
     try {
       if (!corridaIdViva) return;
       const c = await leerCorrida(corridaIdViva);
       if (c && c.fin == null) {
-        await put(STORE_CORRIDAS, { ...c, fin: Date.now(), nActas: actasVivas.length });
+        await put(STORE_CORRIDAS, {
+          ...c,
+          fin: Date.now(),
+          nActas: actasVivas.length,
+          ...(motivo ? { motivoCierre: motivo } : {}),
+        });
       }
       corridaIdViva = null;
       notificar();

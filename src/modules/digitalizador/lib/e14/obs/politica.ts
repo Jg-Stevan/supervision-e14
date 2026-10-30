@@ -125,6 +125,11 @@ export function leerOverridesFlags(): Partial<FlagsApp> {
     if (!raw) return {};
     const o = JSON.parse(raw) as Partial<FlagsApp>;
     if (typeof o !== "object" || o === null) return {};
+    // R2 (§B2 #11) — DERIVA de la tabla única ESQUEMA_FLAGS
+    // (src/shared/e14/flags-schema.ts): una sola whitelist sirve a las 2
+    // puertas (sanearFlags + esta) — el problema de la "DOBLE whitelist" que
+    // motivaba cada KIT se elimina de raíz. KIT e75-qr-zoom-zbar-v1 añadió
+    // `qrZoomTl`: está en la tabla (booleano, misma semántica).
     return sanearConEsquema(o) as Partial<FlagsApp>;
   } catch {
     return {};

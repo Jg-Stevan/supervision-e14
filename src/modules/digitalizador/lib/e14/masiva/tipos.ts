@@ -225,6 +225,18 @@ export interface RegistroMasiva {
   /** (T2) distancia de Hamming del match v2 (0–64). Solo filas con
    *  dedup === "v2" lo traen; sin match no hay distancia (no se inventa). */
   dedupDistancia?: number | null;
+  // ---------- D45 — KIT e14-medicion-faltante-v1 ----------
+  /** Diagnóstico de la comparación del dedup de INGESTA (cadenaDedup):
+   *  con cuántas candidatas (filas vivas + índice histórico) se comparó el
+   *  dhash y la MEJOR distancia de Hamming vista — INCLUSO sobre el umbral
+   *  (afinar DEDUP_HAMMING_MAX con datos). Con dedup:"sin-match" responde
+   *  POR QUÉ no matcheó. Ausente = el dhash no corrió (gama OFF / decode
+   *  falló — jamás inventar). */
+  dedupDetalle?: {
+    candidatas: number;
+    indice: number;
+    mejorDistancia: number | null;
+  };
   // ---------- D66 — KIT e14-decode-unico-precalor-v1 (T4) ----------
   /** ms SOLO del decodificado a MASTER (T4: separado de procesoMs, que
    *  conserva su semántica). Filas precalentadas → 0 (el decode ya pasó en

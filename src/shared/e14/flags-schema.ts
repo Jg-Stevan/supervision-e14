@@ -80,6 +80,10 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
         ? v
         : undefined,
   },
+  // KIT e75-qr-zoom-zbar-v1 (merge origin/main post-Ola 0) — kill-switch del
+  // dueño: false = cadena de capa 0 byte-idéntica a hoy. Booleano, misma
+  // semántica que tenía en las 2 whitelists manuales (flags.ts + politica.ts).
+  { clave: "qrZoomTl", sanea: booleano },
 ];
 
 /** Whitelist de claves que la puerta flags.json (sanearFlags) tenía
