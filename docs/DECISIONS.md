@@ -1219,3 +1219,48 @@ vuelo + actas que compartieron turno). El export JSON gana los campos por acta
 **Qué NO se tocó (conservador):** pipeline/bridge/watchdog/criterios/score/gate,
 sondeo/prescan/dhash (sus `sondeoQrMs` intactos), precalor, pool, presupuesto de gama,
 rutas de copia/ya-enviada (sus contratos de métrica solo ganan campos opcionales).
+
+## D45 — KIT e14-medicion-faltante-v1: los 5 huecos de medición que quedaban (observador pasivo)
+
+**Fecha:** 2026-10-30 · **Origen:** auditoría E15/E16 del banco de tiempos (informe real
+2026-10-30-03-28-16 + réplica del pipeline con 3 relojes + medición Node independiente).
+El informe real dejó 5 tiempos SIN dueño — este kit los instrumenta SIN tocar el pipeline.
+
+**Las 5 mediciones nuevas (puros cronómetros — cero cambios de comportamiento):**
+
+1. **`gapMs` por acta (MetricaActa):** muro del despacho (`muroMs = tsFin − tsInicio`, la
+   MISMA ventana del solape D44-R3) menos TODO lo medido que vive dentro
+   (`totalMs + preOcrMs + thumbMs + persistMs + envioMs`) — SOLO con las dos paredes
+   mayores en mano (jamás inventar). Es el 0,3-0,7 s/acta del informe real que nadie
+   explicaba (transfer/serialización/GC/marco del store). Negativo = solape de paredes
+   — también es dato.
+2. **`envioRoundMs`/`envioEstado` — la publicación REAL:** D61 media el dispatch
+   síncrono (`registrarEnvioMasiva` ≈ 1 ms) pero `publicarDesdeActa` (la red de verdad
+   hacia el monitor) corría fire-and-forget SIN dueño. El store cronometra el await
+   completo y reporta al aterrizar (callback opcional — nadie está obligado a
+   escuchar); la métrica se actualiza con re-put idempotente (hook 2c — patrón del
+   módulo). NO compite por «cuello» (no es camino crítico del desenlace).
+3. **`motivoCierre` de corrida:** el `fin=null` (2 de 5 corridas del informe real) deja
+   de ser un misterio — el finally del runner cierra con `"drenada"|"pausa"` (stopFlag
+   manda) y la corrida quedada abierta por recarga/crash se cierra honesta con
+   `"recarga-o-abandono"` al abrir la siguiente.
+4. **Sub-desglose de `procesoMs` (los 2 warps):** `procesoBwMs`/`procesoOcrMs` — pared
+   individual de CADA `processImage` desde el despacho conjunto. El core SERIALIZA →
+   la 2.ª pared acumula la cola de la 1.ª (el coste propio del segundo warp es la
+   DIFERENCIA). Particiones del MISMO muro (mismo trato D44-R1: jamás cuello, jamás
+   doble contabilidad; guard > 0 — omitidos si sinRecorte/pOcr compartido).
+5. **`dedupDetalle` — por qué "sin-match":** cadenaDedup cuenta sus candidatas (filas
+   vivas + índice histórico) y estampa la MEJOR distancia de Hamming vista — INCLUSO
+   sobre el umbral (afinar `DEDUP_HAMMING_MAX` con datos, no con corazonadas). El
+   "(sin campo)" del informe = dhash omitido por gama o decode falló (ahora explícito).
+
+**Informe (InformeCorrida.tsx):** sub-barras └ WARP BW / WARP LECTURA (% del propio
+muro) + 3 líneas nuevas: GAP SIN DUEÑO (N de M &gt; 50 ms · peor), PUBLICACIÓN AL
+MONITOR (media + BLOQUEADAS) y DEDUP SIN-MATCH (candidatas/acta · mejor distancia vs
+umbral 6). Cabecera de corrida: `COMPLETADA · cierre: pausa` — el motivo viaja.
+
+**Qué NO se tocó (conservador):** pipeline/bridge/watchdog/criterios/score/gate (los
+cronómetros son `.then()` sobre las MISMAS promesas), sondeo/prescan (intactos),
+pool/capacidad, presupuesto de gama, rutas de copia/ya-enviada, semántica de `dedup`
+(el override e63k manda igual), el contrato del export (solo campos ADITIVOS AL FINAL
+— patrón D57: los informes previos no cambian de forma).

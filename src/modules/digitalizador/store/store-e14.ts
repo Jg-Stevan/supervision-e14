@@ -64,7 +64,10 @@ interface EstadoE14 {
   motivosNoEnvio: Record<string, number>;
   /** Desenlace de la publicación en el monitor, por acta.id. */
   publicaciones: Record<string, PublicacionActa>;
-  registrarEnvioMasiva: (acta: Acta) => void;
+  registrarEnvioMasiva: (
+    acta: Acta,
+    onPublicacion?: (r: { ms: number; estado: string }) => void,
+  ) => void;
   contarMotivoNoEnvioActa: (acta: Acta) => void;
   abrirActaMasiva: (id: string) => Promise<void>;
   cerrarActaMasiva: () => void;
@@ -186,24 +189,36 @@ export const useE14Store = create<EstadoE14>()((set, get) => ({
   motivosNoEnvio: {},
   publicaciones: {},
 
-  registrarEnvioMasiva: (acta) => {
+  registrarEnvioMasiva: (acta, onPublicacion) => {
     // Fire-and-forget (el runner jamás espera la publicación — RL-e65b-3).
     const id = acta.id;
     set((prev) => ({
       publicaciones: { ...prev.publicaciones, [id]: { estado: "publicando" } },
     }));
+    // D45 — KIT e14-medicion-faltante-v1: el roundtrip REAL de la publicación
+    // (publicarDesdeActa — la red de verdad) queda medido. envioMs de D61 solo
+    // cubría la sección síncrona del envío (≈1 ms); la publicación corría
+    // fire-and-forget SIN dueño. Observador pasivo: el cronómetro NO cambia
+    // el comportamiento; el callback es OPCIONAL (nadie está obligado a
+    // escuchar) y el estado final viaja honesto ("publicada"|"bloqueada").
+    const tPublicacion = Date.now();
     void publicarDesdeActa(acta, (p) =>
       set((prev) => ({ publicaciones: { ...prev.publicaciones, [id]: p } })),
-    ).catch((error) => {
-      // La publicación JAMÁS tumba el envío — queda documentada y bloqueada.
-      logger.info(`[e14] masiva → supervision: publicación falló (${String(error)})`);
-      set((prev) => ({
-        publicaciones: {
-          ...prev.publicaciones,
-          [id]: { estado: "bloqueada", motivo: "error interno de publicación" },
-        },
-      }));
-    });
+    )
+      .then(() => {
+        onPublicacion?.({ ms: Date.now() - tPublicacion, estado: "publicada" });
+      })
+      .catch((error) => {
+        // La publicación JAMÁS tumba el envío — queda documentada y bloqueada.
+        logger.info(`[e14] masiva → supervision: publicación falló (${String(error)})`);
+        onPublicacion?.({ ms: Date.now() - tPublicacion, estado: "bloqueada" });
+        set((prev) => ({
+          publicaciones: {
+            ...prev.publicaciones,
+            [id]: { estado: "bloqueada", motivo: "error interno de publicación" },
+          },
+        }));
+      });
   },
 
   contarMotivoNoEnvioActa: (acta) => {

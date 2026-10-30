@@ -126,6 +126,12 @@ export interface DiagnosticoActa {
   };
   tiempos: {
     procesoMs: number;
+    /** D45 — sub-desglose del muro procesoMs: pared individual de CADA warp
+     *  ("bw" mostrar + "original" leer) desde el despacho conjunto. El core
+     *  SERIALIZA → la 2.ª pared acumula la cola de la 1.ª (su coste propio =
+     *  diferencia entre paredes). Omitidos = sinRecorte / pOcr compartido. */
+    procesoBwMs?: number;
+    procesoOcrMs?: number;
     calidadMs: number;
     ocrMs: number;
     totalMs: number;
