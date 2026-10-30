@@ -8,8 +8,8 @@
  * procesada + encabezado impreso verbatim). La MISMA forma del loader:
  * `ActaRealLista` (reexportada del módulo estático — una sola fuente).
  *
- * VALIDACIÓN (D25 a/b/d) contra el catálogo DIVIPOLA (`cargarCatalogoDivipola()` —
- * Result de solo-lectura; jamás lanza, C1): (a) `idEnlace` existe;
+ * VALIDACIÓN (D25 a/b/d) contra el catálogo DIVIPOLA — (a)/(b) por el
+ * validador ÚNICO `data/validacion-d25.ts` (M13; jamás lanza — C1): (a) `idEnlace` existe;
  * (b) `mesa` ≤ `totalMesas`; (d) página dentro de rango. La que falla NO se
  * publica → `BLOQUEADA: <motivo>` en consola y en el desenlace que el
  * adaptador muestra en la bandeja (cuarentena); el resto sigue.
@@ -31,7 +31,7 @@
 
 import type { FormularioTipo, FotoActa, ImpresionActa } from "../domain/acta";
 import type { ActaRealLista } from "./actas-reales/actas-reales";
-import { cargarCatalogoDivipola } from "./divipola-adapter";
+import { validarJoinDivipola } from "./validacion-d25";
 // KIT recepcion-actas-v1 (D28): toda publicación deja su entrada en el
 // log de RECEPCIÓN (PUBLICADA/BLOQUEADA) — el embudo es este módulo.
 import { registrarRecepcion } from "./recepcion-log";
@@ -123,17 +123,12 @@ export async function publicarActaMasiva(
 ): Promise<ResultadoPublicacion> {
   const clave = `${entrada.idEnlace}::${entrada.mesa}`;
 
-  // (a) idEnlace existe en el catálogo (solo-lectura — D25). C1: el
-  // adaptador devuelve Result — catálogo no disponible → BLOQUEADA
-  // (cuarentena), jamás una excepción en la publicación.
-  const catalogo = cargarCatalogoDivipola();
-  const registro = catalogo.ok
-    ? catalogo.catalogo.find((r) => r.idEnlace === entrada.idEnlace)
-    : undefined;
-  if (!registro) {
-    const motivo = catalogo.ok
-      ? `(a) idEnlace "${entrada.idEnlace}" ausente en el catálogo DIVIPOLA`
-      : `(a) catálogo DIVIPOLA no disponible (${catalogo.motivo})`;
+  // D25 (a)/(b) — validador ÚNICO compartido con el loader estático
+  // (actas-reales.ts, M13): `validarJoinDivipola` devuelve el motivo o
+  // null. Catálogo no disponible → también BLOQUEADA (C1 — el adaptador
+  // jamás lanza): la página va a cuarentena, el resto sigue.
+  const motivoJoin = validarJoinDivipola(entrada.idEnlace, entrada.mesa);
+  if (motivoJoin) {
     registrarRecepcion({
       fecha: Date.now(),
       origen: "carga-masiva",
@@ -146,42 +141,13 @@ export async function publicarActaMasiva(
       srcFoto: entrada.srcFoto,
       pais: entrada.impresion.pais,
       lugar: entrada.impresion.lugar,
-      motivo,
+      motivo: motivoJoin,
       score: entrada.score,
       statusActa: entrada.statusActa,
       nombreArchivo: entrada.nombreArchivo,
       clave,
     });
-    return { ok: false, clave, motivo };
-  }
-
-  // (b) mesa ≤ totalMesas del puesto.
-  const numeroMesa = Number(entrada.mesa);
-  if (
-    !Number.isInteger(numeroMesa) ||
-    numeroMesa < 1 ||
-    numeroMesa > registro.totalMesas
-  ) {
-    const motivo = `(b) mesa ${entrada.mesa} fuera de rango (totalMesas: ${registro.totalMesas})`;
-    registrarRecepcion({
-      fecha: Date.now(),
-      origen: "carga-masiva",
-      estado: "BLOQUEADA",
-      idEnlace: entrada.idEnlace,
-      mesa: entrada.mesa,
-      formulario: entrada.formulario,
-      paginaIndex: entrada.paginaIndex,
-      paginaTotal: entrada.paginaTotal,
-      srcFoto: entrada.srcFoto,
-      pais: entrada.impresion.pais,
-      lugar: entrada.impresion.lugar,
-      motivo,
-      score: entrada.score,
-      statusActa: entrada.statusActa,
-      nombreArchivo: entrada.nombreArchivo,
-      clave,
-    });
-    return { ok: false, clave, motivo };
+    return { ok: false, clave, motivo: motivoJoin };
   }
 
   // (d) página dentro de rango del formulario.
