@@ -557,3 +557,16 @@ Work Log:
 Stage Summary:
 - La capa 0 gana el tier ZOOM TL+zbar sin tocar los desenlaces existentes (hereda/base/barrido/recorte-600/zxing/rotaciones/rescate4096 idénticos); kill-switch qrZoomTl=false = cadena de hoy byte-idéntica.
 - Costo: 0 en el camino feliz (early-exit antes); ~150-600 ms solo en actas donde TODO lo demás falló.
+
+---
+Task ID: 22 — D45-R1: park-and-drain del roundtrip de publicación (el M2 no aterrizaba — carrera despacho→desenlace)
+
+Work Log:
+- Evidencia: informe real 2026-10-30-14-13 (6 actas, misma máquina del 03-28) — muroMs/gapMs/dedupDetalle/procesoBw/procesoOcr/motivoCierre aterrizaron PERFECTOS (4/5 huecos del D45 medidos y coherentes: muroMs = tsFin−tsInicio al ms en 6/6; gap 162–231 ms/acta = muro 99% contabilizado), pero envioRoundMs/envioEstado AUSENTES en 6/6.
+- Causa raíz (traza del código, no corazonada): registrarEnvioMasiva despacha la publicación fire-and-forget (runner L1502) y ENTRE ahí y registrarMetricaDesenlace (L1730) corren awaits del desenlace (sha256 del payload + registrarEnvioRemoto + hacerThumb ~30-80 ms + guardarRegistro/IDB) — el roundtrip de red local resuelve ANTES de que la métrica exista en actasVivas → findIndex −1 → return silencioso. publicarDesdeActa SIEMPRE resuelve (sin-join/publicada/bloqueada/catch), así que el callback SÍ disparó 6/6 — la pérdida era del re-put, no de la red.
+- Fix (metricas.ts SOLO, observador pasivo): Map envioRoundPendiente (parking) — si el re-put no encuentra la métrica, aparca {envioRoundMs, envioEstado}; registrarMetricaDesenlace y registrarMetricaError drenan el parking al construir m (spread + delete). clear() en los 2 resets de actasVivas (nueva corrida / wipe). Ventana de carrera cerrada al 100%: entre el build de m y persistirActa no hay await (persistirActa push es síncrono), así que el callback o llega antes del IIFE (→ parking, drenado) o después del push (→ parcheo directo).
+- Verificación: tsc --noEmit 13 = baseline 13 (0 nuevos) · eslint 0/0. Cero cambios de comportamiento (fire-and-forget intacto, RL-e65b-3).
+
+Stage Summary:
+- El M2 del D45 queda completo: la próxima corrida estampa envioRoundMs/envioEstado en TODAS las actas (publicada|bloqueada|sin-join), venga cuando venga el roundtrip.
+- Lección del informe 14-13 para el análisis (no cambia código): dedup "sin-match" era CORRECTO (candidatas 0→5, mejor distancia Hamming 18–26 vs umbral 6 — actas distintas, no falla del índice) · procesoMs es OCR-bound (el warp bw 2.4–4.2 s SIEMPRE termina antes que el warp lectura) · 085053 (18.9 s) + 084939 (29.8 s) quemaron 48.7 s de ladder QR — el cap del E16 apunta exactamente ahí.
