@@ -86,9 +86,10 @@ export function BandejaFilas({
   visibles,
   visiblesOrdenadas,
   progreso,
-  colaVida,
+  posicionesCola,
+  totalCola,
+  nombrePorId,
   recienListas,
-  filas,
   procesarIgual,
   abrirActa,
   reintentar,
@@ -97,9 +98,14 @@ export function BandejaFilas({
   visibles: FilaMasiva[];
   visiblesOrdenadas: FilaMasiva[];
   progreso: ProgresoFilaVista | null;
-  colaVida: string[];
+  /** Posición 1-based en la cola de vida (Map precalculado en el orquestador
+   *  — R6: mata el `colaVida.indexOf` O(n²) del render). */
+  posicionesCola: Map<string, number>;
+  totalCola: number;
+  /** Map id→nombre (precalculado en el orquestador — R6: mata el
+   *  `filas.find((o) => o.id === f.dupOf)` O(n²) del render). */
+  nombrePorId: Map<string, string>;
   recienListas: Set<string>;
-  filas: FilaMasiva[];
   procesarIgual: (id: string) => void;
   abrirActa: (id: string) => void;
   reintentar: (id: string) => void;
@@ -112,9 +118,10 @@ export function BandejaFilas({
         key={f.id}
         f={f}
         progreso={progreso}
-        colaVida={colaVida}
+        posicionesCola={posicionesCola}
+        totalCola={totalCola}
+        nombrePorId={nombrePorId}
         recienListas={recienListas}
-        filas={filas}
         procesarIgual={procesarIgual}
         abrirActa={abrirActa}
         reintentar={reintentar}

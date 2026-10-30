@@ -76,8 +76,6 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   const enviandoLote = useMasivaStore((s) => s.enviandoLote);
   // KIT e73 (§E): contadores del chip del sondeo QR en ingesta (SOLO-LECTURA
   // — derivados de las filas; jamás tocan la cola ni el runner).
-  const sondeadas = filas.filter((f) => f.sondeoQrMs != null).length;
-  const conPayload = filas.filter((f) => f.sondeoQrTier != null).length;
   // KIT e107-prescan-qr-cola-v1 (§D.3): estado del banner del pre-scan
   // («SONDEANDO QR… k/N») — SOLO-LECTURA, como el chip del sondeo e73.
   const prescan = usePrescanQrEstado();
@@ -215,42 +213,95 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
     if (online) void refrescarEnviosTrasDrenaje();
   }, [online]);
 
-  const pendientes = filas.filter(
-    (f) => f.estado === "PENDIENTE" && !f.id.startsWith("masiva-temp-"),
-  ).length;
-  // KIT e14-masiva-tiempos-v1 (PR-1): las DUPLICADAS son cola también (su
-  // procesamiento es la copia rápida) — habilitan PROCESAR igual que las
-  // PENDIENTES y se cuentan aparte en la línea de conteos. FIX M13: las
-  // temps no cuentan como PENDIENTES (mueren al aterrizar sus ids reales).
-  const duplicadas = filas.filter((f) => f.estado === "DUPLICADA").length;
-  const terminadas =
-    filas.filter(
-      (f) =>
-        f.estado === "LISTA" || f.estado === "ERROR" || f.estado === "YA-ENVIADA",
-    ).length; // e65: la YA-ENVIADA está terminada (cero pipeline)
-  // e65-dedup-enviadas-v1 (T-7): contador de la línea de resumen.
-  const yaEnviadas = filas.filter((f) => f.estado === "YA-ENVIADA").length;
-  const advertenciasPend = filas.filter(
-    (f) => f.estado === "LISTA" && f.statusActa === "ADVERTENCIA",
-  ).length;
+  // R6 — FIX (reporte 03b §M-2, «~12 filter() por render»): sondeadas,
+  // conPayload, pendientes, duplicadas, terminadas, yaEnviadas,
+  // advertenciasPend, enviadas, enCola y errores eran 10 filter() + 2 más
+  // re-ejecutados en CADA render (la vista re-renderiza por señal de vida,
+  // throttle 250 ms). Mismo resultado en UNA pasada memoizada — la
+  // dependencia es estrecha: solo cambia cuando cambia `filas`.
+  // KIT e73 (§E): sondeadas/conPayload alimentan el chip del sondeo QR.
+  const conteos = useMemo(() => {
+    let sondeadas = 0;
+    let conPayload = 0;
+    let pendientes = 0;
+    let duplicadas = 0;
+    let terminadas = 0;
+    let yaEnviadas = 0;
+    let advertenciasPend = 0;
+    let enviadas = 0;
+    let enCola = 0;
+    let errores = 0;
+    for (const f of filas) {
+      if (f.sondeoQrMs != null) sondeadas++;
+      if (f.sondeoQrTier != null) conPayload++;
+      switch (f.estado) {
+        case "PENDIENTE":
+          // FIX M13: las temps no cuentan como PENDIENTES (mueren al
+          // aterrizar sus ids reales).
+          if (!f.id.startsWith("masiva-temp-")) pendientes++;
+          break;
+        case "DUPLICADA":
+          // KIT e14-masiva-tiempos-v1 (PR-1): las DUPLICADAS son cola también
+          // (su procesamiento es la copia rápida).
+          duplicadas++;
+          break;
+        case "LISTA":
+          terminadas++;
+          if (f.statusActa === "ADVERTENCIA") advertenciasPend++;
+          // KIT e14-masiva-ux-v1 (T3.4): conteos del encabezado del lote.
+          else if (f.statusActa === "ENVIADA") {
+            if (f.envioEnCola) enCola++;
+            else enviadas++;
+          }
+          break;
+        case "YA-ENVIADA":
+          // e65: la YA-ENVIADA está terminada (cero pipeline) — contador
+          // T-7 de la línea de resumen.
+          terminadas++;
+          yaEnviadas++;
+          break;
+        case "ERROR":
+          terminadas++;
+          errores++;
+          break;
+      }
+    }
+    return {
+      sondeadas,
+      conPayload,
+      pendientes,
+      duplicadas,
+      terminadas,
+      yaEnviadas,
+      advertenciasPend,
+      enviadas,
+      enCola,
+      errores,
+    };
+  }, [filas]);
+  const {
+    sondeadas,
+    conPayload,
+    pendientes,
+    duplicadas,
+    terminadas,
+    yaEnviadas,
+    advertenciasPend,
+    enviadas,
+    enCola,
+    errores,
+  } = conteos;
   const hayCola = filas.length > 0;
 
-  // KIT e14-masiva-ux-v1 (T3.4): conteos del encabezado del lote — el dueño
-  // ve de un vistazo si «se pudo enviar» y qué queda pendiente.
-  const enviadas = filas.filter(
-    (f) => f.estado === "LISTA" && f.statusActa === "ENVIADA" && !f.envioEnCola,
-  ).length;
-  const enCola = filas.filter(
-    (f) => f.estado === "LISTA" && f.statusActa === "ENVIADA" && f.envioEnCola,
-  ).length;
-  const errores = filas.filter((f) => f.estado === "ERROR").length;
-
-  const visibles =
-    filtro === "TODAS"
-      ? filas
-      : filas.filter((f) =>
-          filtro === "ERROR" ? f.estado === "ERROR" : f.statusActa === filtro,
-        );
+  const visibles = useMemo(
+    () =>
+      filtro === "TODAS"
+        ? filas
+        : filas.filter((f) =>
+            filtro === "ERROR" ? f.estado === "ERROR" : f.statusActa === filtro,
+          ),
+    [filas, filtro],
+  );
 
   // KIT e64v — Cambio B: duplicadas AL FINAL de la bandeja. SOLO orden de
   // RENDER (useMemo): el array del store JAMÁS se reordena — es la fuente
@@ -263,7 +314,10 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
     return [...originales, ...duplicadas];
   }, [visibles]);
 
-  const activa = progreso ? filas.find((f) => f.id === progreso.id) : null;
+  // R6 — FIX O(n²) (reporte 03b §M-2): `filas.find((f) => f.id === progreso.id)`
+  // por render → Map id→fila precalculado.
+  const porId = useMemo(() => new Map(filas.map((f) => [f.id, f])), [filas]);
+  const activa = progreso ? (porId.get(progreso.id) ?? null) : null;
   const filaActiva = activa && activa.estado === "PROCESANDO" ? activa : null;
 
   // D65 (T3.3): cola REAL del runner (MISMA orden que siguientePendiente:
@@ -283,6 +337,28 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
       .map((f) => f.id);
     return enCursoId ? [enCursoId, ...ordenadas] : ordenadas;
   }, [filas, enCursoId]);
+
+  // R6 — FIX O(n²) (reporte 03b §M-2): `colaVida.indexOf(f.id)` POR FILA en
+  // el render de la bandeja — con un zip de 500 entradas son ~250k
+  // comparaciones por señal de vida (throttle 250 ms). Map de posiciones
+  // (1-based; PRIMERA aparición — misma semántica que indexOf) precalculado
+  // en O(n).
+  const posicionesCola = useMemo(() => {
+    const pos = new Map<string, number>();
+    for (let i = 0; i < colaVida.length; i++) {
+      const id = colaVida[i];
+      if (!pos.has(id)) pos.set(id, i + 1);
+    }
+    return pos;
+  }, [colaVida]);
+  const totalCola = colaVida.length;
+
+  // R6 — FIX O(n²) (reporte 03b §M-2): `filas.find((o) => o.id === f.dupOf)`
+  // por fila DUPLICADA en el render → Map id→nombre precalculado.
+  const nombrePorId = useMemo(
+    () => new Map(filas.map((f) => [f.id, f.nombre])),
+    [filas],
+  );
 
   // D65 (T3.3): destello 100% verde al LISTAR («un instante, luego pasa al
   // estado normal»). Transitorio en memoria — nada a IDB. La 1.ª pasada
@@ -574,9 +650,10 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
             visibles={visibles}
             visiblesOrdenadas={visiblesOrdenadas}
             progreso={progreso}
-            colaVida={colaVida}
+            posicionesCola={posicionesCola}
+            totalCola={totalCola}
+            nombrePorId={nombrePorId}
             recienListas={recienListas}
-            filas={filas}
             procesarIgual={procesarIgual}
             abrirActa={abrirActa}
             reintentar={reintentar}

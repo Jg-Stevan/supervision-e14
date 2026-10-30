@@ -6,9 +6,10 @@
  * SPLIT move-only de MasivaView.tsx (reporte 03b M-2): el cuerpo del
  * `visiblesOrdenadas.map(...)` de la bandeja se extrae a este componente
  * SIN cambiar lógica ni JSX. Los props conservan LOS NOMBRES de las
- * variables locales originales (f, progreso, colaVida, recienListas,
- * filas y las acciones del store) para que el bloque movido quede
- * verbatim — solo cambia la indentación (dedent ×12).
+ * variables locales originales (f, progreso, recienListas y las acciones
+ * del store) para que el bloque movido quede verbatim — solo cambia la
+ * indentación (dedent ×12). R6-fix O(n²): colaVida/filas entran como Maps
+ * precalculados (posicionesCola/totalCola/nombrePorId).
  */
 import type { EtapaVidaKit } from "@/modules/digitalizador/lib/e14/masiva/store";
 import type { FilaMasiva } from "@/modules/digitalizador/lib/e14/masiva/tipos";
@@ -35,9 +36,10 @@ export interface ProgresoFilaVista {
 export function FilaMasivaVista({
   f,
   progreso,
-  colaVida,
+  posicionesCola,
+  totalCola,
+  nombrePorId,
   recienListas,
-  filas,
   procesarIgual,
   abrirActa,
   reintentar,
@@ -45,9 +47,14 @@ export function FilaMasivaVista({
 }: {
   f: FilaMasiva;
   progreso: ProgresoFilaVista | null;
-  colaVida: string[];
+  /** Posición 1-based en la cola de vida (Map precalculado — R6: reemplaza
+   *  el `colaVida.indexOf(f.id)` O(n²) por fila del render). */
+  posicionesCola: Map<string, number>;
+  totalCola: number;
+  /** Map id→nombre (precalculado — R6: reemplaza el `filas.find` O(n²)
+   *  por fila DUPLICADA del render). */
+  nombrePorId: Map<string, string>;
   recienListas: Set<string>;
-  filas: FilaMasiva[];
   procesarIgual: (id: string) => void;
   abrirActa: (id: string) => void;
   reintentar: (id: string) => void;
@@ -60,7 +67,7 @@ export function FilaMasivaVista({
   const esDup = esDuplicada(f);
   // D65 (T3.3) — señal de vida de la fila (barra h-1 discreta):
   const enColaVida = f.estado === "PENDIENTE" || f.estado === "DUPLICADA";
-  const posCola = enColaVida ? colaVida.indexOf(f.id) + 1 : 0;
+  const posCola = enColaVida ? (posicionesCola.get(f.id) ?? 0) : 0;
   const pctProceso = porcentajeProcesoActa(f, Boolean(esActiva), progreso);
   // % SOLO si es dato REAL (OCR del reconocedor) — kit T3 honestidad.
   const ocrPct =
@@ -182,7 +189,7 @@ export function FilaMasivaVista({
               a su original — transparencia total del dedup. */}
           {f.estado === "DUPLICADA" && f.dupOf && (
             <span className="font-mono text-[9px] uppercase tracking-wider text-gray-400 truncate">
-              ≡ {filas.find((o) => o.id === f.dupOf)?.nombre ?? "OTRA FILA"}
+              ≡ {nombrePorId.get(f.dupOf) ?? "OTRA FILA"}
             </span>
           )}
           {/* e65-dedup-enviadas-v1 (T-7): chip YA ENVIADA — la
@@ -338,7 +345,7 @@ export function FilaMasivaVista({
             <p className="mt-1 font-mono text-[11px] tabular-nums tracking-wider text-gray-400 uppercase truncate">
               <span aria-live="polite">
                 {enColaVida
-                  ? `EN COLA #${posCola} DE ${colaVida.length}`
+                  ? `EN COLA #${posCola} DE ${totalCola}`
                   : progreso
                     ? etiquetaVida({ etapa: progreso.etapa })
                     : ""}
