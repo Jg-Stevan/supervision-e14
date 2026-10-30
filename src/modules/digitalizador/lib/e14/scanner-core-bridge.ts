@@ -151,9 +151,12 @@ import type { ProbeOrientacion } from "./orientacion";
 // decisión/elegir del módulo PURO (anclasDe/elegirMejor/necesitaSegunda)
 // viven ahora en ocr-escalonado-runner.ts — el runner es su único
 // consumidor en producción; el módulo puro sigue testeable headless — bun.)
-// KIT e14-diagnostico-autoenvio-v1 (C1): registro del DESENLACE montado justo
-// donde hoy se escribe el log de auditoría (UNA sola fuente de verdad — §9.6).
-import { construirDiagnostico } from "./diagnostico";
+// KIT e14-diagnostico-autoenvio-v1 (C1) — R7b (M4): el PAYLOAD del registro
+// del desenlace vive en auditoria.ts (UNA implementación para los 2 sitios —
+// antes duplicado aquí y en pipelineRecorte, pitfall §9.9); la guarda y el
+// log de auditoría quedan EN EL CALLER. (construirDiagnostico sigue en
+// ./diagnostico — consumido por auditoria.ts.)
+import { construirDiagnosticoDelDesenlace } from "./auditoria";
 // (R7b M5b: canvasCon viaja con capturarFrame/calidadDeActa — acta-factory.ts
 // y calidad.ts lo importan directamente; el bridge ya no crea canvas.)
 import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
@@ -1155,7 +1158,11 @@ export class RealCoreBridge implements E14Bridge {
     let diag: DiagnosticoActa | null = null;
     if (!opciones.simular) {
       try {
-        diag = construirDiagnostico({
+        // R7b (M4): payload unificado en auditoria.ts — diferencias del sitio
+        // explícitas (actaId "" se parcha luego; gateMarco D63-C; decode/
+        // detect medidos). SIM nunca (§9.2). Observación PASIVA: si falla,
+        // el desenlace NO se toca (§9.7).
+        diag = construirDiagnosticoDelDesenlace({
           actaId: "", // se parcha con el id REAL tras construirActa
           intento: opciones.intento,
           maxIntentos: opciones.maxIntentos,
@@ -1164,60 +1171,41 @@ export class RealCoreBridge implements E14Bridge {
           scoreVisual,
           scoreFinal: score,
           techos: techosDiag,
-          metricas: {
-            sharpness: calidad.sharpness,
-            // KIT e14-diag-campos-aditivos-v1: métricas v2 REALES (§3).
-            sharpnessHi: calidad.sharpnessHi,
-            brightness: calidad.brightness,
-            contrast: calidad.contrast,
-            contrastPapel: calidad.contrastPapel,
-            contrasteEfectivo: contrasteEfectivoDe(calidad, ocrLegible),
-          },
-          level: calidad.level,
+          calidad,
+          ocrLegible,
           lecturaChars: texto.length,
-          // KIT e14-diag-campos-aditivos-v1: la señal del C3 — MISMA
-          // instancia, sin recálculo (pitfall §9.10).
           senalLectura: { nivel: senal.nivel, anclas: senal.anclas },
           senalActa,
           ocrValido: ocrTextIsValid(texto),
-          gate: {
-            completa,
-            // D63-C (T2.3): veredicto del marco impreso (null en fotos/SIM).
-            gateMarco: marcoEscaneo?.veredicto ?? null,
-            fondo: verificacionResuelta?.fondo ?? false,
-            recortada,
-            ladoEsquina: ladoEsquina ?? null,
-            votos: {
-              densidadPct: marcadores.densidadVotosPct,
-              skipPag2: votosSkipPag2,
-              ok: marcadoresOk,
-            },
-            procesadaVacia,
-            clasifNivel: desenlace.clasificacion?.nivel ?? "—",
+          completa,
+          // D63-C (T2.3): veredicto del marco impreso (null en fotos/SIM).
+          gateMarco: marcoEscaneo?.veredicto ?? null,
+          fondo: verificacionResuelta?.fondo ?? false,
+          recortada,
+          ladoEsquina: ladoEsquina ?? null,
+          votos: {
+            densidadPct: marcadores.densidadVotosPct,
+            skipPag2: votosSkipPag2,
+            ok: marcadoresOk,
           },
-          captura: {
-            motor,
-            filtro: filtroActa,
-            crop: { w: infoCrop.w, h: infoCrop.h, fallback: infoCrop.fallback },
-            quad,
-            quadOrigen,
-          },
-          tiempos: {
-            procesoMs: ms.proceso,
-            // D45 — sub-desglose de los 2 warps (omitidos si no corrieron —
-            // jamás inventar; doctrina guard > 0 de D43).
-            ...(ms.procesoBw > 0 ? { procesoBwMs: ms.procesoBw } : {}),
-            ...(ms.procesoOcr > 0 ? { procesoOcrMs: ms.procesoOcr } : {}),
-            calidadMs: ms.calidad,
-            ocrMs: ms.ocr,
-            totalMs: ms.total,
-            // D61 — KIT e14-tiempos-ocultos-v1 (T2): decode/detect YA se medían
-            // (ms.decode/ms.detect de este pipeline, hoy en la traza de consola)
-            // — ahora PERSISTEN. null honesto si la fase no corrió (video-grab
-            // sin archivo → decode=0; sinRecorte → detect=0) — jamás inventar.
-            decodeMs: ms.decode > 0 ? Math.round(ms.decode) : null,
-            detectMs: ms.detect > 0 ? Math.round(ms.detect) : null,
-          },
+          procesadaVacia,
+          clasifNivel: desenlace.clasificacion?.nivel ?? "—",
+          motor,
+          filtro: filtroActa,
+          crop: { w: infoCrop.w, h: infoCrop.h, fallback: infoCrop.fallback },
+          quad,
+          quadOrigen,
+          msProceso: ms.proceso,
+          msProcesoBw: ms.procesoBw,
+          msProcesoOcr: ms.procesoOcr,
+          msCalidad: ms.calidad,
+          msOcr: ms.ocr,
+          msTotal: ms.total,
+          // D61 — decode/detect YA se medían (traza de consola) — ahora
+          // PERSISTEN. null honesto si la fase no corrió (video-grab sin
+          // archivo → decode=0; sinRecorte → detect=0) — jamás inventar.
+          decodeMs: ms.decode > 0 ? Math.round(ms.decode) : null,
+          detectMs: ms.detect > 0 ? Math.round(ms.detect) : null,
         });
       } catch {
         diag = null;
@@ -1767,7 +1755,10 @@ export class RealCoreBridge implements E14Bridge {
     let diag: DiagnosticoActa | null = null;
     if (acta.fuente !== "SIMULACION") {
       try {
-        diag = construirDiagnostico({
+        // R7b (M4): payload unificado en auditoria.ts — diferencias del sitio
+        // explícitas (actaId = acta.id; SIN gateMarco — la clave viaja AUSENTE
+        // como hoy; decode/detect null/null — esta ruta no los mide).
+        diag = construirDiagnosticoDelDesenlace({
           actaId: acta.id, // el acta existe — identidad conservada (spread)
           intento: acta.intento,
           maxIntentos: acta.maxIntentos,
@@ -1776,56 +1767,39 @@ export class RealCoreBridge implements E14Bridge {
           scoreVisual,
           scoreFinal: score,
           techos: techosDiag,
-          metricas: {
-            sharpness: calidad.sharpness,
-            // KIT e14-diag-campos-aditivos-v1: métricas v2 REALES (§3).
-            sharpnessHi: calidad.sharpnessHi,
-            brightness: calidad.brightness,
-            contrast: calidad.contrast,
-            contrastPapel: calidad.contrastPapel,
-            contrasteEfectivo: contrasteEfectivoDe(calidad, ocrLegible),
-          },
-          level: calidad.level,
+          calidad,
+          ocrLegible,
           lecturaChars: texto.length,
-          // KIT e14-diag-campos-aditivos-v1: la señal del C3 del recorte —
-          // MISMA instancia, sin recálculo (pitfall §9.10).
           senalLectura: { nivel: senal.nivel, anclas: senal.anclas },
           senalActa,
           ocrValido: ocrTextIsValid(texto),
-          gate: {
-            completa,
-            fondo: verificacion.fondo,
-            recortada,
-            ladoEsquina: ladoEsquina ?? null,
-            votos: {
-              densidadPct: marcadores.densidadVotosPct,
-              skipPag2: votosSkipPag2,
-              ok: marcadoresOk,
-            },
-            procesadaVacia,
-            clasifNivel: desenlace.clasificacion?.nivel ?? "—",
+          completa,
+          gateMarco: undefined, // el recorte NO traía la clave (ver auditoria.ts)
+          fondo: verificacion.fondo,
+          recortada,
+          ladoEsquina: ladoEsquina ?? null,
+          votos: {
+            densidadPct: marcadores.densidadVotosPct,
+            skipPag2: votosSkipPag2,
+            ok: marcadoresOk,
           },
-          captura: {
-            motor,
-            filtro,
-            crop: { w: infoCrop.w, h: infoCrop.h, fallback: infoCrop.fallback },
-            quad,
-            quadOrigen,
-          },
-          tiempos: {
-            procesoMs: ms.proceso,
-            // D45 — sub-desglose de los 2 warps (omitidos si no corrieron).
-            ...(ms.procesoBw > 0 ? { procesoBwMs: ms.procesoBw } : {}),
-            ...(ms.procesoOcr > 0 ? { procesoOcrMs: ms.procesoOcr } : {}),
-            calidadMs: ms.calidad,
-            ocrMs: ms.ocr,
-            totalMs: ms.total,
-            // D61 — KIT e14-tiempos-ocultos-v1 (T2): esta ruta (recorte manual
-            // del editor) NO mide decode/detect (su `ms` local solo trae
-            // proceso/calidad/ocr/total) — null honesto, jamás inventar.
-            decodeMs: null,
-            detectMs: null,
-          },
+          procesadaVacia,
+          clasifNivel: desenlace.clasificacion?.nivel ?? "—",
+          motor,
+          filtro,
+          crop: { w: infoCrop.w, h: infoCrop.h, fallback: infoCrop.fallback },
+          quad,
+          quadOrigen,
+          msProceso: ms.proceso,
+          msProcesoBw: ms.procesoBw,
+          msProcesoOcr: ms.procesoOcr,
+          msCalidad: ms.calidad,
+          msOcr: ms.ocr,
+          msTotal: ms.total,
+          // D61 — esta ruta (recorte manual del editor) NO mide decode/detect
+          // (su `ms` local no los trae) — null honesto, jamás inventar.
+          decodeMs: null,
+          detectMs: null,
         });
       } catch {
         diag = null;
