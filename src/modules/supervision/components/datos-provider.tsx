@@ -64,26 +64,42 @@ interface EstadoDatos {
   mesaEnAccionId: string | null;
 }
 
-interface AccionesDatos {
-  reinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
-  marcarNotificacionLeida: (id: string) => void;
-  marcarTodasLeidas: () => void;
-  marcarAnomaliaRevisada: (id: string) => void;
-}
-
-interface DatosContexto extends EstadoDatos, AccionesDatos {
+/**
+ * R4-C6 (reporte 02-b C2) — el contexto GRANDE se parte en DOS con valores
+ * memoizados separados:
+ *
+ * · ContextoDatos — catálogo y filas (EstadoDatos + derivados). Su valor
+ *   solo cambia con eventos REALES de datos (transición de vida, carga
+ *   masiva, reinspección, publicación).
+ * · ContextoAcciones — el VISOR (estado + acciones) y el resto de las
+ *   acciones. Abrir/cerrar el visor, navegar MESA n/N, cargar un acta o
+ *   pulsar Aprobar re-crea ESTE valor y SOLO re-renderiza a sus
+ *   consumidores directos (visor, shell, vistas) — jamás a las 949 filas:
+ *   PuestoRow/MesasSubtable ya no se suscriben a contexto alguno (llegan
+ *   las acciones por props estables — puestos-table.tsx).
+ */
+interface DatosContexto extends EstadoDatos {
   resumen: ResumenGlobal;
   notificacionesNoLeidas: number;
   anomaliasAbiertas: number;
-  // ── KIT SUP-4 — visor de actas (T3) ─────────────────────────────────
+  /** Mesas CON acta de un puesto (en orden — alimenta MESA n/N). */
+  mesasConActaDelPuesto: (puestoId: string) => Mesa[];
+}
+
+interface AccionesContexto {
+  // ── KIT SUP-4 — estado del visor de actas (T3.2) ─────────────────────
   visorActa: EstadoVisorActa | null;
   /** El acta de la mesa abierta; null mientras carga o si no hay acta. */
   actaActual: ActaMesa | null;
   actaCargando: boolean;
   /** Acción del visor en curso (spinner 2.5 s en el botón — kit T5). */
   accionActaEnCurso: "aprobar" | "rescanear" | null;
-  /** Mesas CON acta de un puesto (en orden — alimenta MESA n/N). */
-  mesasConActaDelPuesto: (puestoId: string) => Mesa[];
+  // ── Acciones de datos (T4/T5/T6) ─────────────────────────────────────
+  reinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  marcarNotificacionLeida: (id: string) => void;
+  marcarTodasLeidas: () => void;
+  marcarAnomaliaRevisada: (id: string) => void;
+  // ── Acciones del visor (T3/T5) ───────────────────────────────────────
   abrirVisor: (
     puestoId: string,
     mesaId: string,
@@ -104,7 +120,8 @@ interface DatosContexto extends EstadoDatos, AccionesDatos {
   confirmarRescanVisor: (observacion: string) => Promise<void>;
 }
 
-const Contexto = createContext<DatosContexto | null>(null);
+const ContextoDatos = createContext<DatosContexto | null>(null);
+const ContextoAcciones = createContext<AccionesContexto | null>(null);
 
 /** D42 — KIT e14-monitor-memo-v1: contexto HOJA del ticker de vida. Único
  *  consumidor: el chip «Sincronizado hace Xs» de la cabecera (ResumenChips
@@ -510,26 +527,34 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     [estado.anomalias]
   );
 
-  // D42 — KIT e14-monitor-memo-v1: el valor del contexto va MEMOIZADO — con
-  // el ticker fuera del estado grande y TODAS las acciones en useCallback
-  // estable, la identidad solo cambia con eventos REALES de datos (no cada
-  // tick de 5 s). Los consumidores (949 PuestoRow incluidos) re-renderizan
-  // solo cuando algo realmente cambió.
-  const valor: DatosContexto = useMemo(
+  // D42 — KIT e14-monitor-memo-v1: los DOS valores van MEMOIZADOS — con el
+  // ticker fuera del estado grande y TODAS las acciones en useCallback
+  // estable, la identidad de cada contexto solo cambia con sus propios
+  // eventos (R4-C6): el de DATOS con eventos reales de catálogo, el de
+  // ACCIONES con el flujo del visor/acciones — que ya no alcanza a las
+  // filas (los callbacks que éstas reciben son estables durante el flujo
+  // del visor y viajan por props).
+  const valorDatos: DatosContexto = useMemo(
     () => ({
       ...estado,
       resumen,
       notificacionesNoLeidas,
       anomaliasAbiertas,
-      reinspeccionar,
-      marcarNotificacionLeida,
-      marcarTodasLeidas,
-      marcarAnomaliaRevisada,
+      mesasConActaDelPuesto,
+    }),
+    [estado, resumen, notificacionesNoLeidas, anomaliasAbiertas, mesasConActaDelPuesto]
+  );
+
+  const valorAcciones: AccionesContexto = useMemo(
+    () => ({
       visorActa,
       actaActual,
       actaCargando,
       accionActaEnCurso,
-      mesasConActaDelPuesto,
+      reinspeccionar,
+      marcarNotificacionLeida,
+      marcarTodasLeidas,
+      marcarAnomaliaRevisada,
       abrirVisor,
       abrirVisorDePuesto,
       abrirVisorDeAnomalia,
@@ -541,19 +566,14 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       confirmarRescanVisor,
     }),
     [
-      estado,
-      resumen,
-      notificacionesNoLeidas,
-      anomaliasAbiertas,
-      reinspeccionar,
-      marcarNotificacionLeida,
-      marcarTodasLeidas,
-      marcarAnomaliaRevisada,
       visorActa,
       actaActual,
       actaCargando,
       accionActaEnCurso,
-      mesasConActaDelPuesto,
+      reinspeccionar,
+      marcarNotificacionLeida,
+      marcarTodasLeidas,
+      marcarAnomaliaRevisada,
       abrirVisor,
       abrirVisorDePuesto,
       abrirVisorDeAnomalia,
@@ -569,21 +589,38 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   const valorTicker = useMemo(() => ({ segundos: segundosTicker }), [segundosTicker]);
 
   return (
-    <Contexto.Provider value={valor}>
-      <ContextoTicker.Provider value={valorTicker}>
-        {children}
-        {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
-            monta desde el store del módulo (estado visorActa). */}
-        <ActaViewerModal />
-      </ContextoTicker.Provider>
-    </Contexto.Provider>
+    <ContextoDatos.Provider value={valorDatos}>
+      <ContextoAcciones.Provider value={valorAcciones}>
+        <ContextoTicker.Provider value={valorTicker}>
+          {children}
+          {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
+              monta desde el store del módulo (estado visorActa). */}
+          <ActaViewerModal />
+        </ContextoTicker.Provider>
+      </ContextoAcciones.Provider>
+    </ContextoDatos.Provider>
   );
 }
 
+/**
+ * R4-C6 — catálogo y filas (EstadoDatos + derivados). Las filas de la
+ * matriz NO deben consumir ni siquiera este hook: sus datos ya llegan por
+ * props y sus acciones por props estables desde `useDatosAcciones()`.
+ */
 export function useDatos(): DatosContexto {
-  const ctx = useContext(Contexto);
+  const ctx = useContext(ContextoDatos);
   if (!ctx) {
     throw new Error("useDatos debe usarse dentro de <DatosProvider>");
+  }
+  return ctx;
+}
+
+/** R4-C6 — visor (estado + acciones) y acciones del módulo. Consumidores
+ *  legítimos: shell, vistas y el visor de actas — NUNCA una fila memoizada. */
+export function useDatosAcciones(): AccionesContexto {
+  const ctx = useContext(ContextoAcciones);
+  if (!ctx) {
+    throw new Error("useDatosAcciones debe usarse dentro de <DatosProvider>");
   }
   return ctx;
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
-import { useDatos } from "./datos-provider";
+import { useDatos, useDatosAcciones } from "./datos-provider";
 import { tiempoRelativo } from "./tiempo";
 import type { SeveridadAnomalia } from "../domain/types";
 
@@ -32,13 +32,10 @@ const CLASE_CHIP =
   "label-caps inline-flex h-11 items-center gap-1.5 rounded-[4px] border px-3 text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)";
 
 export function VistaAnomalias() {
-  const {
-    cargando,
-    anomalias,
-    anomaliasAbiertas,
-    marcarAnomaliaRevisada,
-    abrirVisorDeAnomalia,
-  } = useDatos();
+  const { cargando, anomalias, anomaliasAbiertas } = useDatos();
+  // R4-C6 — las acciones del visor viven en SU contexto (ya no viajan en
+  // el valor grande de datos).
+  const { marcarAnomaliaRevisada, abrirVisorDeAnomalia } = useDatosAcciones();
   const [filtro, setFiltro] = useState<Filtro>("abiertas");
 
   if (cargando) {

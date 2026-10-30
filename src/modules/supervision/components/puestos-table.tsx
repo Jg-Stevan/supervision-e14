@@ -23,7 +23,6 @@ import {
 } from "../domain/tiempo-cierre";
 import { colorDeEstado, StatusBadge } from "./status-badge";
 import { MesasSubtable } from "./mesas-subtable";
-import { useDatos } from "./datos-provider";
 
 const ENCABEZADOS = [
   "País",
@@ -246,6 +245,13 @@ interface PuestosTableProps {
   expandidoInicialId?: string;
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  /**
+   * R4-C6 — abrir el visor llega por PROPS (callbacks estables del
+   * contexto de acciones, vía monitor-global): la fila no se suscribe a
+   * contexto alguno y el flujo del visor no la re-renderiza.
+   */
+  onAbrirVisor: (puestoId: string, mesaId: string) => void;
+  onAbrirVisorDePuesto: (puestoId: string) => void;
 }
 
 export function PuestosTable({
@@ -257,6 +263,8 @@ export function PuestosTable({
   expandidoInicialId,
   mesaEnAccionId,
   onReinspeccionar,
+  onAbrirVisor,
+  onAbrirVisorDePuesto,
 }: PuestosTableProps) {
   const [expandidos, setExpandidos] = useState<Set<string>>(
     () => new Set(expandidoInicialId ? [expandidoInicialId] : [])
@@ -367,6 +375,8 @@ export function PuestosTable({
             onToggle={toggle}
             mesaEnAccionId={mesaEnAccionId}
             onReinspeccionar={onReinspeccionar}
+            onAbrirVisor={onAbrirVisor}
+            onAbrirVisorDePuesto={onAbrirVisorDePuesto}
           />
         ))}
       </table>
@@ -378,7 +388,14 @@ export function PuestosTable({
  *  de datos memoizado (D42 en datos-provider) y props estables (toggle
  *  estable, MESAS_VACIAS estable), una fila solo re-renderiza cuando SUS
  *  datos cambiaron — el re-render completo de 949 filas por tecla/tick
- *  desaparece. */
+ *  desaparece.
+ *
+ *  R4-C6 (reporte 02-b C2): además, la fila ya NO consume `useDatos()` —
+ *  el valor grande incluía visorActa/actaActual/actaCargando, así que
+ *  abrir el visor re-creaba la identidad del contexto y re-renderizaba las
+ *  949 filas (la suscripción a contexto bypasa el memo). Las acciones del
+ *  visor llegan ahora por props estables (useDatosAcciones → monitor →
+ *  props); el flujo de actas no cambia ninguna prop de la fila. */
 const PuestoRow = memo(function PuestoRow({
   puesto,
   mesas,
@@ -386,6 +403,8 @@ const PuestoRow = memo(function PuestoRow({
   onToggle,
   mesaEnAccionId,
   onReinspeccionar,
+  onAbrirVisor,
+  onAbrirVisorDePuesto,
 }: {
   puesto: Puesto;
   mesas: Mesa[];
@@ -393,9 +412,10 @@ const PuestoRow = memo(function PuestoRow({
   onToggle: (id: string) => void;
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  onAbrirVisor: (puestoId: string, mesaId: string) => void;
+  onAbrirVisorDePuesto: (puestoId: string) => void;
 }) {
   const acento = colorDeEstado(puesto.estadoGlobal);
-  const { abrirVisorDePuesto } = useDatos();
   // KIT SUP-4 T3.4 — el 👁 abre el visor en la primera mesa CON acta del
   // puesto; deshabilitado si el puesto no tiene ninguna (todas
   // NO_INICIADO).
@@ -471,7 +491,7 @@ const PuestoRow = memo(function PuestoRow({
                   aria-label={`Ver acta del puesto ${puesto.puesto}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    abrirVisorDePuesto(puesto.id);
+                    onAbrirVisorDePuesto(puesto.id);
                   }}
                   className="inline-flex size-9 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary) disabled:pointer-events-none disabled:opacity-40"
                 >
@@ -490,6 +510,7 @@ const PuestoRow = memo(function PuestoRow({
                 puestoId={puesto.id}
                 mesaEnAccionId={mesaEnAccionId}
                 onReinspeccionar={onReinspeccionar}
+                onAbrirVisor={onAbrirVisor}
               />
             </TableCell>
           </TableRow>

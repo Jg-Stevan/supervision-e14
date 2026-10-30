@@ -6,7 +6,7 @@ import { KpiCard, type TonoKpi } from "./kpi-card";
 import { PuestosTable } from "./puestos-table";
 import { ResumenChips } from "./resumen-chips";
 import { EsqueletoMonitor } from "./esqueleto";
-import { useDatos, useDatosTicker, resumenDePuestos } from "./datos-provider";
+import { useDatos, useDatosAcciones, useDatosTicker, resumenDePuestos } from "./datos-provider";
 import { tramoDeMinutos } from "../domain/tiempo-cierre";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
@@ -29,8 +29,11 @@ export function VistaMonitor() {
     puestos,
     mesasPorPuesto,
     mesaEnAccionId,
-    reinspeccionar,
   } = useDatos();
+  // R4-C6 — las acciones viven en SU contexto (el visor/acciones ya no
+  // viaja en el valor grande). abrirVisor/abrirVisorDePuesto se pasan como
+  // props estables a la matriz: las filas no se suscriben a contexto.
+  const { reinspeccionar, abrirVisor, abrirVisorDePuesto } = useDatosAcciones();
   // D42 — KIT e14-monitor-memo-v1: los segundos del ticker viven en su
   // contexto hoja — este componente (y las 949 filas) ya NO re-renderiza
   // cada 5 s; solo el chip del ticker lo hace.
@@ -166,6 +169,8 @@ export function VistaMonitor() {
           expandidoInicialId={filtrados[0]?.id}
           mesaEnAccionId={mesaEnAccionId}
           onReinspeccionar={reinspeccionar}
+          onAbrirVisor={abrirVisor}
+          onAbrirVisorDePuesto={abrirVisorDePuesto}
         />
       </section>
     </div>

@@ -32,7 +32,7 @@ import { SUPERVISOR } from "../data/mock-repository";
 // EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
 import { suscribirseRecepcion } from "../data/recepcion-log";
 import { StatusDot } from "./status-dot";
-import { DatosProvider, useDatos } from "./datos-provider";
+import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
 import { VistaRecepcion } from "./vista-recepcion";
@@ -350,8 +350,10 @@ export function SupervisionShell() {
 }
 
 function ShellInterno() {
-  const { notificacionesNoLeidas, anomaliasAbiertas, cargando, abrirVisor } =
-    useDatos();
+  const { notificacionesNoLeidas, anomaliasAbiertas, cargando } = useDatos();
+  // R4-C6 — abrirVisor vive en el contexto de ACCIONES (el visor ya no
+  // viaja en el valor de datos).
+  const { abrirVisor } = useDatosAcciones();
   const [vista, setVista] = useState<VistaId>("monitor");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
