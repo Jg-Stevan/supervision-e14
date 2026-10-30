@@ -545,34 +545,15 @@ Work Log:
 - Verificación: tsc --noEmit → baseline 9 = 9; eslint → 0/0.
 
 ---
+Task ID: 21 — KIT e75-qr-zoom-zbar-v1: tier ZOOM TL re-escalado + zbar-wasm (rescate barato antes del rescate 4096)
 
-Task ID: 21 — medicion-faltante-v1 (D45): los 5 huecos de medición del informe (gap / envío real / proceso / cancelaciones / dedup)
+Work Log:
+- Evidencia: lab de benchmark con 12 imágenes reales (6 fotos 4000×3000 rotadas + 6 escaneos ~1030×3400), 3 corridas reproducibles (docs/REPORTE-e75-qr-zoom-zbar-v1.md): 3 páginas del escáner no las leyó la cadena completa NI un GT full-frame 1600→4000 px; zbar leyó 2 actas que NINGÚN otro lector vio.
+- zbar-qr.ts NUEVO (main-only): carga diferida 1 tentativa + wasm LOCAL public/wasm/zbar.wasm (setModuleArgs/locateFile — misma doctrina zxing) + filtro typeName QR + jamás throw.
+- identidad-qr.ts: pixelesZoomTlDeCapture (banda TL 50%×30% del ORIGINAL a píxeles nativos, s=min(1,lado/max) — jamás up-escala) + decodificarQrZoomZbarDeCapture (zoom@1024: zxing GH→LA→zbar · zoom@640: zbar) enganchado en decodificarQrDeCapture (completos: tras la cadena completa, ANTES del rescate 4096 · soloZxing: antes del null). Flag kill-switch qrZoomTl (tipos/flags/politica — whitelist doble) + wiring en los 2 call sites del runner. Modo "base" (cámara) intacto.
+- DESVIACIÓN DECLARADA (medida píxel a píxel): la vía <img>+HTMLCanvasElement difiere de ImageBitmap+OffscreenCanvas en ~0.1% de píxeles (resampler del navegador según origen) y en el acta marginal p4 ESO decidía la lectura (img→null · bitmap→LEE). El tier replica la receta del lab: fetch(dataURL)→blob→createImageBitmap+OffscreenCanvas (fallback HTMLCanvas), smoothing medium, bitmap.close() inmediato.
+- Verificación: tsc --noEmit 0 (los 13 TS2307 de assets .png eran pre-existentes de next-env.d.ts ausente — verdes tras generar) · eslint 0 · E2E con agent-browser en dev :3001, Gama BAJO (perfil objetivo): 12 imágenes por la cola completa → 11 QR ✓ / 1 QR ✗ (f4, físicamente ilegible — honesto) · p4 RESCATADA tier=zoom640-zbar 263 ms (+TENTeAA…) que sin el kit quedaba sin-payload · DESENLACES ENVIADA 6 · DUPLICADA 6 (dedup foto↔escaneo por payload byte-a-byte) · ERRORES 0 · cero errores JS.
 
-- Fecha: 2026-10-30 · Origen: auditoría E15/E16 (banco de auditoría de tiempos con 3
-  relojes + medición Node independiente; informe real 2026-10-30-03-28-16).
-- metricas.ts: MetricaActa gana muroMs/gapMs (muro del despacho − lo medido dentro,
-  solo con las dos paredes mayores — jamás inventar), envioRoundMs/envioEstado (hook 2c
-  registrarMetricaEnvioRound — re-put idempotente al aterrizar la publicación),
-  dedupDetalle (diagnóstico de la comparación). EtapasMetrica gana procesoBwMs/
-  procesoOcrMs (particiones — cuelloDeEtapas las excluye). CorridaMetrica gana
-  motivoCierre ("drenada"|"pausa"|"recarga-o-abandono"). Hook 1 estampa el motivo de la
-  corrida quedada abierta; hook 4 recibe el motivo del runner.
-- store-e14.ts: registrarEnvioMasiva(acta, onPublicacion?) — cronometra el await REAL
-  de publicarDesdeActa (roundtrip de red) y reporta "publicada"|"bloqueada". Fire-and-
-  forget intacto (RL-e65b-3); callback opcional (nadie obligado a escuchar).
-- runner.ts: cerrarCorridaMetrica(stopFlag ? "pausa" : "drenada"); el despacho del
-  envío pasa el callback que llama registrarMetricaEnvioRound; registrarMetricaDesenlace
-  recibe dedupDetalle del registroListo (traza fresca de cadenaDedup).
-- scanner-core-bridge.ts (2 zonas): .then() sobre las MISMAS promesas de processImage —
-  pared individual de cada warp desde el despacho conjunto (core serializa → la 2.ª
-  acumula la cola). Subs exportadas con guard > 0 (jamás inventar).
-- store.ts (cadenaDedup): cuenta candidatas vivas + índice histórico y estampa la mejor
-  distancia de Hamming vista (incluso sobre el umbral) — dedupDetalle en el MISMO write
-  del hash (cero writes nuevos).
-- tipos.ts: RegistroMasiva.dedupDetalle (aditivo al final, contrato D57). types.ts:
-  Tiempos.procesoBwMs/procesoOcrMs.
-- InformeCorrida.tsx: sub-barras └ WARP BW / WARP LECTURA + líneas GAP SIN DUEÑO,
-  PUBLICACIÓN AL MONITOR, DEDUP SIN-MATCH (candidatas · mejor distancia vs umbral 6) +
-  cabecera «COMPLETADA · cierre: {motivo}».
-- docs/DECISIONS.md: D45.
-- Verificación: tsc --noEmit → baseline intacta; eslint → 0/0.
+Stage Summary:
+- La capa 0 gana el tier ZOOM TL+zbar sin tocar los desenlaces existentes (hereda/base/barrido/recorte-600/zxing/rotaciones/rescate4096 idénticos); kill-switch qrZoomTl=false = cadena de hoy byte-idéntica.
+- Costo: 0 en el camino feliz (early-exit antes); ~150-600 ms solo en actas donde TODO lo demás falló.

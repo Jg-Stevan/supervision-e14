@@ -63,6 +63,9 @@ import type { Binarizer, ReaderOptions } from "zxing-wasm/reader";
 import type { EstadoEntrada } from "./tipos";
 import { canvasCon, decodeImagenLru } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
 import { logger } from "../../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
+// KIT e75-qr-zoom-zbar-v1 — zbar-wasm (tier de rescate del ZOOM TL, main):
+// carga diferida LOCAL /wasm/ + filtro QR — MISMA doctrina del tier zxing.
+import { estadoZbarQr, zbarDePixeles } from "./zbar-qr";
 // ─── KIT e73-sondeo-qr-precoz-v1 (§A.2) — refactor puro ADITIVO ───────────
 // El núcleo puro de píxeles (PixelesQr · EspecieBanda · BANDAS_BASE/BANDA_A ·
 // intentoSobrePixeles · rotar90/rotarPixeles) vive en qr-pixeles.ts
@@ -380,6 +383,138 @@ export async function decodificarQrDeRecorte(
   return null;
 }
 
+// ─── KIT e75-qr-zoom-zbar-v1 — tier ZOOM TL re-escalado + zbar ────────────────
+/** Fracción del ANCHO del recorte TL del tier zoom (lab lab-e14: banda
+ *  50%×30% — contiene el QR de los escaneos E-14 y 5 de 6 fotos). */
+export const QR_ZOOM_FRAC_ANCHO = 0.5;
+/** Fracción del ALTO del recorte TL del tier zoom (lab: 30%). */
+export const QR_ZOOM_FRAC_ALTO = 0.3;
+/** Lado largo destino del zoom PRIMARIO (lab: 1024 — píxeles NATIVOS del QR
+ *  en tiras de escáner; en fotos 12MP baja la banda 2000×900 a 1024×460). */
+export const QR_ZOOM_LADO = 1024;
+/** Lado largo destino del zoom ALT (lab: 640 — zbar leyó 1 acta SOLO a esta
+ *  escala: el remuestreo distinto cambia los módulos que el finder ve). */
+export const QR_ZOOM_LADO_ALT = 640;
+
+/**
+ * Píxeles del recorte TL re-escalado DESDE el ORIGINAL (el corazón del kit
+ * e75 — la evidencia del lab: 3 páginas del escáner NO leídas por la cadena
+ * completa ni siquiera a 1600/2400/4000 px full-frame SÍ se leen cuando el
+ * QR conserva píxeles nativos: escalar la página COMPLETA a 2048 encoge los
+ * módulos ~3×; recortar la banda y escalar SOLO la banda los conserva).
+ *
+ * Receta EXACTA del lab (docs/REPORTE-e75 §5 — medida píxel a píxel):
+ * fetch(dataURL)→blob→createImageBitmap + OffscreenCanvas (fallback
+ * HTMLCanvasElement). DESVIACIÓN DECLARADA verificada en el banco: la MISMA
+ * banda dibujada desde <img>+HTMLCanvasElement difiere de la de
+ * ImageBitmap+OffscreenCanvas en ~0.1% de píxeles (el navegador usa un
+ * resampler distinto según el origen) y en el acta marginal p4 ESO decide la
+ * lectura de zbar (img→null · bitmap→LEE). La receta del lab es la que
+ * ganó: bitmap SIEMPRE, a resolución NATIVA del original (close()
+ * inmediato — gama baja).
+ *
+ * Source-rect TL (QR_ZOOM_FRAC_ANCHO × QR_ZOOM_FRAC_ALTO, redondeado,
+ * mínimo 1 px — jamás inventa píxeles) → destino escalado con
+ * s = min(1, lado/max(sw,sh)) — NUNCA up-escala más allá de nativo
+ * (upscale inventa detalle, R-4 del e64) → ImageData RGBA.
+ * imageSmoothingQuality "medium" = la receta MEDIDA del lab.
+ * null/jamás-throw (red line e64 §7-4).
+ */
+async function pixelesZoomTlDeCapture(
+  dataUrl: string,
+  ladoDestino: number,
+): Promise<PixelesQr | null> {
+  let bitmap: ImageBitmap | null = null;
+  try {
+    const respuesta = await fetch(dataUrl);
+    if (!respuesta.ok) return null;
+    bitmap = await createImageBitmap(await respuesta.blob());
+    const sw = Math.max(1, Math.round(bitmap.width * QR_ZOOM_FRAC_ANCHO));
+    const sh = Math.max(1, Math.round(bitmap.height * QR_ZOOM_FRAC_ALTO));
+    if (sw < 1 || sh < 1) return null;
+    const escala = Math.min(1, ladoDestino / Math.max(sw, sh));
+    const dw = Math.max(1, Math.round(sw * escala));
+    const dh = Math.max(1, Math.round(sh * escala));
+    let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null =
+      null;
+    if (typeof OffscreenCanvas !== "undefined") {
+      const oc = new OffscreenCanvas(dw, dh);
+      ctx = oc.getContext("2d", { willReadFrequently: true });
+    } else {
+      const cv = canvasCon(dw, dh);
+      ctx = cv.getContext("2d", { willReadFrequently: true });
+    }
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "medium";
+    ctx.drawImage(bitmap, 0, 0, sw, sh, 0, 0, dw, dh);
+    const imgData = ctx.getImageData(0, 0, dw, dh);
+    return { data: imgData.data, width: dw, height: dh };
+  } catch {
+    return null; // un fallo de render es sin-payload (fallback limpio)
+  } finally {
+    try {
+      bitmap?.close(); // libera el decode RGBA completo (gama baja)
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+/**
+ * TIER ZOOM TL re-escalado + zbar (kit e75) — corre DESPUÉS de la cadena
+ * completa (worker o main) SIN lectura y ANTES del rescate 4096 (costo
+ * ~6-50 ms vs segundos — barato primero, doc lab §3). Orden MEDIDO:
+ *
+ *   1. zoom@1024 → zxing (GlobalHistogram→LocalAverage, MISMO contrato del
+ *      barrido: QRCode-only, tryHarder/rotate/invert false) → zbar-wasm
+ *      (filtro QR — lab: 6/7 zxing + rescate p2 SOLO zbar).
+ *   2. zoom@640 → zbar (lab: p4 SOLO zbar@640; zxing@640 no añade NADA
+ *      sobre zbar@640 — unión del lab §4 — y el tier se mantiene mínimo).
+ *
+ * Early-exit al primer payload · trazas `tier=zoom1024-zxing|zoom1024-zbar|
+ * zoom640-zbar` · null si nada lee · JAMÁS throw (todas las sub-llamadas ya
+ * son a prueba de throw). Main thread SOLO (wasm — red line e73).
+ */
+export async function decodificarQrZoomZbarDeCapture(
+  dataUrl: string,
+): Promise<string | null> {
+  const t0 = Date.now();
+  const pix1024 = await pixelesZoomTlDeCapture(dataUrl, QR_ZOOM_LADO);
+  logger.info(
+    `[e14] qr-capa0 zoom-e75 pix1024=${pix1024 ? `${pix1024.width}x${pix1024.height}` : "null"} ms=${Date.now() - t0}`,
+  );
+  if (pix1024) {
+    for (const binarizador of ZXING_BINARIZADORES) {
+      const payload = await zxingDeVentana(pix1024, binarizador);
+      if (payload != null) {
+        trazaQr("zoom1024-zxing", payload, t0);
+        return payload;
+      }
+    }
+    const payloadZ = await zbarDePixeles(pix1024);
+    logger.info(
+      `[e14] qr-capa0 zoom-e75 zbar1024=${payloadZ ? "LEE" : "null"} estado=${estadoZbarQr()} ms=${Date.now() - t0}`,
+    );
+    if (payloadZ != null) {
+      trazaQr("zoom1024-zbar", payloadZ, t0);
+      return payloadZ;
+    }
+  }
+  const pix640 = await pixelesZoomTlDeCapture(dataUrl, QR_ZOOM_LADO_ALT);
+  if (pix640) {
+    const payloadZ2 = await zbarDePixeles(pix640);
+    logger.info(
+      `[e14] qr-capa0 zoom-e75 zbar640=${payloadZ2 ? "LEE" : "null"} pix640=${pix640.width}x${pix640.height} ms=${Date.now() - t0}`,
+    );
+    if (payloadZ2 != null) {
+      trazaQr("zoom640-zbar", payloadZ2, t0);
+      return payloadZ2;
+    }
+  }
+  return null;
+}
+
 /**
  * CADENA COMPLETA de decode sobre píxeles (doc hermano §1 + e64 Fase 1 —
  * el orden REAL): ladderBase → barrido jsQR → barrido NITIDEZ (T-1.1) →
@@ -554,6 +689,11 @@ export async function decodificarQrDeCapture(
     // nitidez/binarizada/rotaciones/rescate) sin leer nada. Sin re-pagar
     // trabajo: la cobertura queda EXACTA a la cadena de hoy.
     soloZxing?: boolean;
+    // KIT e75-qr-zoom-zbar-v1 (aditivo, default true = MEJORA del dueño):
+    // tier ZOOM TL re-escalado + zbar DESPUÉS de la cadena completa SIN
+    // lectura y ANTES del rescate 4096 (barato ~6-50 ms vs segundos).
+    // `false` = cadena de hoy byte-idéntica (kill-switch flag qrZoomTl).
+    zoomTl?: boolean;
   } = {},
 ): Promise<{ payload: string } | null> {
   const tiers = opciones.tiers ?? "completos";
@@ -590,6 +730,13 @@ export async function decodificarQrDeCapture(
         trazaQr("zxing", zxingZ, t0);
         return { payload: zxingZ };
       }
+      // KIT e75-qr-zoom-zbar-v1 — el worker agotó jsQR y el zxing full-frame
+      // no leyó: el ZOOM TL (píxeles nativos del QR) + zbar es el rescate
+      // RESTANTE antes de declarar null (lab: 3 páginas leídas SOLO aquí).
+      if (opciones.zoomTl !== false) {
+        const zoomZ = await decodificarQrZoomZbarDeCapture(dataUrl);
+        if (zoomZ != null) return { payload: zoomZ };
+      }
       logger.info(`[e14] qr-capa0 soloZxing tier=null ms=${Date.now() - t0}`);
       return null;
     }
@@ -597,6 +744,14 @@ export async function decodificarQrDeCapture(
       presupuestoMs: opciones.presupuestoMs ?? null,
     });
     if (payload != null) return { payload };
+    // KIT e75-qr-zoom-zbar-v1 — tier ZOOM TL re-escalado + zbar (ANTES del
+    // rescate 4096: ~6-50 ms vs segundos — barato primero). La evidencia del
+    // lab: 3 páginas del escáner no leídas NI a 1600/2400/4000 px full-frame
+    // SÍ se leen con el recorte re-escalado (píxeles nativos del QR).
+    if (opciones.zoomTl !== false) {
+      const zoomPayload = await decodificarQrZoomZbarDeCapture(dataUrl);
+      if (zoomPayload != null) return { payload: zoomPayload };
+    }
     // KIT e14-gama-adaptativa-v1 — rescate 4096 OMITIDO en gama BAJO (64 MB
     // puntual donde los abortos por memoria dominan — D74). Con flag OFF/
     // ALTO/MEDIO rescateOn=true ⇒ byte-idéntico a hoy.

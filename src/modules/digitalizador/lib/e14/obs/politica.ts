@@ -166,6 +166,11 @@ export function leerOverridesFlags(): Partial<FlagsApp> {
     // línea).
     if (typeof o.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = o.ocrMotorAdaptativo;
     if (o.ocrMotor === "ppocrv5" || o.ocrMotor === "tesseract-best-psm4" || o.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = o.ocrMotor;
+    // KIT e75-qr-zoom-zbar-v1 — mismo criterio: sin esta línea el override
+    // localStorage del kill-switch `qrZoomTl` (false = cadena de capa 0
+    // byte-idéntica a hoy) sería inalcanzable (DOBLE whitelist — cada puerta
+    // su línea).
+    if (typeof o.qrZoomTl === "boolean") limpio.qrZoomTl = o.qrZoomTl;
     return limpio;
   } catch {
     return {};
