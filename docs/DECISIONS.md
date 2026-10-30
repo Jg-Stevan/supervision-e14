@@ -1180,3 +1180,42 @@ jamás despachó el bridge).
 sondeo/prescan/dhash, precalor, pool (procesamientoConcurrenteEfectivo), presupuesto de
 gama, rutas de copia (registrarMetricaCopia) y ERROR (registrarMetricaError) — sus contratos
 quedan intactos.
+
+## D44 — KIT e14-tiempos-v2: los 4 ROJOS — sub-desglose del muro pre-OCR, herencia QR explícita, tsDespacho y re-arms del watchdog
+
+**Fecha:** 2026-10-30 · **Origen:** corrida 02:49 post-D43 (12/12 ENVIADAS) — la contabilidad
+cerró (media 15,2 s/acta) pero dejó 3 anomalías SIN dueño: `preOcrMs` es una caja negra
+(3 actas ~0,3 s vs otras 6,6/19,4/**31,2 s**), la herencia del QR se *infería* del tamaño
+(~0,3 s = heredó), y el solape entre actas era incognoscible (el JSON solo trae `tsFin`).
+
+**Los 4 ROJOS (puros `performance.now()` + campos opcionales — observador pasivo):**
+
+1. **R1 — Sub-desglose de `preOcrMs`:** `EtapasMetrica` gana `preOcrQrMs` (bloque capa-0
+   QR completo: herencia/ladder + decisiones dedup + espera APLAZADA), `preOcrOrigenMs`
+   (D63-A), `preOcrDeskewMs` (D63-B — el early-return de fotos es honesto) y
+   `preOcrMasterMs` (D66 — **0 = precalentada**, doctrina decodeMs). Son PARTICIONES del
+   mismo muro (cada segmento vive dentro de la pared que lo acumula ⇒ suma ≤ preOcrMs;
+   el residuo son logs/marco del store). NUNCA compiten por «cuello» ni suman al trabajo
+   del informe (doble contabilidad prohibida). Los reintentos ACUMULAN igual que el muro.
+2. **R2 — `qrHeredado`:** la capa 0 heredó `fila.qrPrevio` (sondeo e73 / pre-scan e107).
+   En la métrica viaja **true|false EXPLÍCITO** cuando preOcrMs corrió (false = pagó
+   ladder — el dato de la palanca ①); en `RegistroMasiva` se estampa solo `true`
+   (ausente = pagó decode/ladder o sin payload), gemelo de `qrPayload`. En el ERROR solo
+   viaja true (false prematuro mentiría — la capa 0 pudo no correr).
+3. **R3 — `tsInicio` por acta:** epoch del despacho (el `tInicio` del runner — cierre de
+   la espera de cola; para copias el `t0` de la reutilización; en ERROR solo si alcanzó
+   a nacer). Con el `tsFin` existente el informe reconstruye el **SOLAPE REAL** entre
+   actas (barrido de eventos, cierres primero en empate) — la prueba definitiva de D31.
+4. **R4 — `reintentosPreOcr`:** cuántas veces se RE-ARMÓ el cronómetro (watchdog/rescate
+   re-pagan origen/deskew/master). `preOcrMs` es la SUMA de pasadas — el contador aclara
+   si un outlier de 31 s fue 1 muro de 31 s o 3 de ~10 s. Solo viaja cuando > 0.
+
+**Informe:** la barra PRE-OCR gana 4 sub-barras indentadas (└ QR CAPA-0 · ORIGEN ·
+DESKEW · MASTER — % del PROPIO muro, no del trabajo) y 3 líneas nuevas: QR HEREDADO
+(N de M — el resto pagó ladder), PRE-OCR RE-ARMADO (N actas) y SOLAPE REAL (máx en
+vuelo + actas que compartieron turno). El export JSON gana los campos por acta
+(solo-AÑADIR, patrón D57 — los informes previos no cambian de forma).
+
+**Qué NO se tocó (conservador):** pipeline/bridge/watchdog/criterios/score/gate,
+sondeo/prescan/dhash (sus `sondeoQrMs` intactos), precalor, pool, presupuesto de gama,
+rutas de copia/ya-enviada (sus contratos de métrica solo ganan campos opcionales).

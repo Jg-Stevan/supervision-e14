@@ -394,6 +394,7 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
       esperaMs: actaCopia.diagnostico?.tiempos?.esperaMs ?? null,
       ocrMs: actaCopia.diagnostico?.tiempos?.ocrMs,
       dedup: registro.dedup,
+      tsInicio: t0, // D44-R3 — el turno de la copia también es turno (solape)
     });
     return true;
   } catch {
@@ -518,6 +519,21 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   // ("salvado" si el desenlace final ≠ RECHAZADA; "lanzado" si no).
   // Fuera del try — el catch del post-mortem TAMBIÉN la estampa.
   let rescateLanzado = false;
+  // ─── KIT e14-tiempos-v2 (D44) — los 4 ROJOS: sub-desglose del muro + trazas ───
+  // (R1) particiones del muro: cada segmento vive DENTRO de la pared que lo
+  // acumula (qr + origen + deskew + master ≤ preOcrMs SIEMPRE — el residuo
+  // son logs/marco de store). Los reintentos re-pagan y ACUMULAN igual que
+  // preOcrMs — (R4) cuenta cuántas pasadas hay en la suma. Fuera del try —
+  // el catch del post-mortem TAMBIÉN los estampa (mismo trato que watchdogUsados).
+  let preOcrQrMs: number | null = null; // bloque capa-0 QR + dedup (+ espera APLAZADA)
+  let preOcrOrigenMs = 0; // clasificarOrigenDeArchivo (D63-A) por intento
+  let preOcrDeskewMs = 0; // preProcesoEscaneo (D63-B) por intento
+  let preOcrMasterMs = 0; // master del intento (maestroDeImagen/precalor — D66)
+  let preOcrPasadas = 0; // (R4) veces que se cerró el muro (1 = sin reintento)
+  // (R2) la capa 0 HEREDÓ qrPrevio (sondeo/prescan) — sin decode ni ladder.
+  let qrHeredado = false;
+  // (R3) epoch del despacho (tInicio) — con tsFin reconstruye el solape D31.
+  let tsDespacho: number | null = null;
   try {
     // D41 — lectura RAW: el pipeline solo consume `archivo` y escribe el
     // desenlace NUEVO encima (el acta vieja, si existiera, se reemplaza
@@ -541,6 +557,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // esperaMs = tInicio − fila.agregadaEn (≥ 0 defensivo — jamás inventar).
     // SOLO masiva lo llena (el flujo individual no tiene espera de cola).
     const tInicio = Date.now();
+    tsDespacho = tInicio; // D44-R3 — el despacho ES el cierre de la espera de cola
     const esperaMs = Math.max(0, tInicio - fila.agregadaEn);
 
     // ─── KIT e14-etapas-preocr-v1 (D43) — preOcrMs: el MURO entre el fin de
@@ -604,9 +621,11 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // OFF, abort honesto, recarga, fila sin lectura) ⇒ decode de hoy
     // byte-idéntico. Todo el bloque de decisión de abajo
     // (original/nuevo/ya-enviada/APLAZADA) consume qrPayload IGUAL que ayer.
+    const tQrCapa0 = performance.now(); // D44-R1 — el bloque capa-0 se cronometra ENTERO
     const qrPrevio = fila.qrPrevio;
     if (qrPrevio) {
       qrPayload = qrPrevio;
+      qrHeredado = true; // D44-R2 — explícito: heredó (no pagó decode ni ladder)
       logger.info(
         `[e14] capa0-qr hereda-payload fila=${fila.id} nombre=${fila.nombre} (sondeo/prescan — sin re-decode)`,
       );
@@ -702,6 +721,8 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
             ...regQr,
             dedup: "qr",
             qrPayload: qrPayloadSeguro,
+            // KIT e14-tiempos-v2 (D44-R2): la herencia viaja con el write.
+            ...(qrHeredado ? { qrHeredado: true } : {}),
             // e64-qr T-0.2: el estado viaja con el write (sobrevive recarga).
             qrEstado: "leido",
           });
@@ -798,6 +819,8 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         );
       }
     }
+    // D44-R1 — cierre del bloque capa-0 (herencia/ladder + dedup + APLAZADA).
+    preOcrQrMs = Math.round(performance.now() - tQrCapa0);
 
     for (let intento = 1; intento <= WATCHDOG_INTENTOS; intento += 1) {
       const tIntento = Date.now();
@@ -822,7 +845,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         // D51: solo-AÑADIR) + campos en el diagnóstico (parche D57 de abajo).
         // D65: bloque AJENO byte-idéntico — el REINTENTO lo re-ejecuta (los
         // workers del intento anterior ya fueron muertos y re-creados).
+        const tOrigenSeg = performance.now(); // D44-R1
         veredictoOrigen = await clasificarOrigenDeArchivo(archivoIntento);
+        preOcrOrigenMs += Math.round(performance.now() - tOrigenSeg);
         logger.info(
           `[e14] origen=${veredictoOrigen.origen ?? "null"} senales=${veredictoOrigen.senales ?? "null"}`,
         );
@@ -852,7 +877,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         // de decode del bridge intacta — cero cambios). El pipeline consume el
         // master corregido (T2.2); el original duerme en IDB sin cambios.
         // D65: bloque AJENO byte-idéntico (ídem D63-A — se re-ejecuta).
+        const tDeskewSeg = performance.now(); // D44-R1
         preProceso = await preProcesoEscaneo(archivoIntento, veredictoOrigen.origen);
+        preOcrDeskewMs += Math.round(performance.now() - tDeskewSeg);
         if (veredictoOrigen.origen === "escaneo") {
           logger.info(
             `[e14] preproceso skewGrados=${preProceso.skewGrados ?? "null"} deskewMs=${preProceso.deskewMs ?? "null"} limpiezaMs=${preProceso.limpiezaMs ?? "null"} limpieza=${preProceso.limpieza} aplicado=${preProceso.aplicado} decodeMs=${preProceso.decodeMs ?? "null"}`,
@@ -892,11 +919,13 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         const fuenteMaestro: File = preProceso?.aplicado
           ? preProceso.archivo
           : archivoIntento;
+        const tMasterSeg = performance.now(); // D44-R1
         const maestro: MaestroImagen | null =
           intento === 1 && !preProceso?.aplicado
             ? (entradaPrecalor?.maestro ??
               (await maestroDeImagen(fuenteMaestro, { nombre: fila.nombre })))
             : await maestroDeImagen(fuenteMaestro, { nombre: fila.nombre });
+        preOcrMasterMs += Math.round(performance.now() - tMasterSeg);
         const decodeMsIntento = maestro
           ? intento === 1 && entradaPrecalor
             ? 0 // T3.3/T4: precalentada → el decode ya pasó en la espera
@@ -942,6 +971,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         // (capa-0 + origen + deskew + master) — justo ANTES de despachar el
         // bridge. Acumula reintentos (intento ≥ 2 re-armó arriba).
         preOcrMs = (preOcrMs ?? 0) + Math.round(performance.now() - tPreOcrIntento);
+        preOcrPasadas += 1; // D44-R4 — pasada completa del muro (reintento = re-armó)
         const resultado = await correrIntento(
           getBridge().escanearActa(opcionesMasiva),
           watchdogMsEfectivo() + WATCHDOG_GRACIA_MS,
@@ -1585,6 +1615,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // e63m — payload QR de la CAPA 0 (llave opaca): campo ADITIVO AL FINAL
       // (contrato D57) — absent = sin-payload (jamás inventar). Export-only.
       ...(qrPayload ? { qrPayload } : {}),
+      // KIT e14-tiempos-v2 (D44-R2) — la capa 0 HEREDÓ (sondeo/prescan):
+      // ausente = pagó decode/ladder completo (o sin payload). Aditivo D57.
+      ...(qrHeredado ? { qrHeredado: true } : {}),
       // e64-qr T-0.2 — estado SOLO-VISUAL de la capa 0 (chip QR ✓/✗;
       // sobrevive la recarga vía filaDeRegistro). Aditivo al final (D57).
       ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
@@ -1681,6 +1714,21 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // KIT e14-etapas-preocr-v1 (D43): el muro pre-OCR sube al informe
       // (ausente si la fila jamás despachó el bridge — jamás inventar).
       ...(preOcrMs != null ? { preOcrMs } : {}),
+      // KIT e14-tiempos-v2 (D44) — sub-desglose + trazas del despacho: los 4
+      // sub-segmentos viajan JUNTOS cuando el muro corrió (con sus 0 reales —
+      // master=0 = precalentada); qrHeredado true|false EXPLÍCITO (false =
+      // pagó ladder — el dato de la palanca ①).
+      ...(preOcrMs != null
+        ? {
+            preOcrQrMs,
+            preOcrOrigenMs,
+            preOcrDeskewMs,
+            preOcrMasterMs,
+            qrHeredado,
+          }
+        : {}),
+      ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
+      ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
       dedup: registro?.dedup,
     });
   } catch (err) {
@@ -1704,6 +1752,12 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       nombre: fila.nombre,
       error: motivoCorto(err),
       sondeoQrMs: fila.sondeoQrMs,
+      // KIT e14-tiempos-v2 (D44) — post-mortem honesto: qrHeredado SOLO true
+      // (false prematuro mentiría — la capa 0 pudo no correr); el contador de
+      // re-arms y el tsInicio viajan si alcanzaron a nacer.
+      ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
+      ...(qrHeredado ? { qrHeredado: true } : {}),
+      ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
     });
     if (registro) {
       try {
@@ -1713,6 +1767,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           // e63m: si el QR decodificó antes de que el pipeline fallara, el
           // payload viaja también en la fila ERROR (post-mortem honesto).
           ...(qrPayload ? { qrPayload } : {}),
+          // KIT e14-tiempos-v2 (D44-R2): herencia — ídem (solo true; false
+          // prematuro mentiría si el throw fue antes de la capa 0).
+          ...(qrHeredado ? { qrHeredado: true } : {}),
           // e64-qr T-0.2: el estado de la capa 0 ídem — si la capa 0 corrió
           // antes del fallo, "leido"/"sin-payload" viajan; si el throw fue
           // ANTES de la capa 0, el campo viaja AUSENTE (jamás inventar).

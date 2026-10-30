@@ -16,7 +16,7 @@
  * · Cero ruido cuando no hay corridas: el panel NO se renderiza.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   corridaVivaEstado,
   exportarInformeMetricas,
@@ -55,6 +55,17 @@ const ETAPAS_TRABAJO: { key: EtapaKey; label: string }[] = [
   { key: "ocrMs", label: "OCR" },
   { key: "persistMs", label: "PERSISTENCIA" },
   { key: "envioMs", label: "ENVÍO" },
+];
+
+// KIT e14-tiempos-v2 (D44-R1) — particiones del muro PRE-OCR (sub-barras
+// indentadas bajo su barra madre): NO son etapas — son segmentos del MISMO
+// muro (qr+origen+deskew+master ≤ preOcrMs). Su % es del PROPIO muro.
+type PreOcrSubKey = "preOcrQrMs" | "preOcrOrigenMs" | "preOcrDeskewMs" | "preOcrMasterMs";
+const PRE_OCR_SUBS: { key: PreOcrSubKey; label: string }[] = [
+  { key: "preOcrQrMs", label: "QR CAPA-0" },
+  { key: "preOcrOrigenMs", label: "ORIGEN" },
+  { key: "preOcrDeskewMs", label: "DESKEW" },
+  { key: "preOcrMasterMs", label: "MASTER" },
 ];
 
 function fmtMs(ms: number | null | undefined): string {
@@ -167,6 +178,12 @@ export default function InformeCorrida() {
     for (const a of actas) porDesenlace.set(a.desenlace, (porDesenlace.get(a.desenlace) ?? 0) + 1);
 
     const sumas = new Map<EtapaKey, number>();
+    // KIT e14-tiempos-v2 (D44) — sub-desglose del muro + trazas del despacho:
+    const preOcrSubSum = new Map<PreOcrSubKey, number>();
+    let qrHeredadas = 0; // capa-0 heredó qrPrevio (palanca ① — cobertura)
+    let conPreOcr = 0; // actas con muro medido (denominador honesto)
+    let reintentoActas = 0; // muro RE-ARMADO ≥ 1 vez (watchdog/rescate)
+    const intervalos: { ini: number; fin: number }[] = []; // [tsInicio, tsFin]
     let trabajoTotal = 0;
     let sondeoSum = 0;
     let sondeoN = 0;
@@ -188,9 +205,21 @@ export default function InformeCorrida() {
           thumbN += 1;
           continue; // D35 — cosmético post-pipeline: línea propia, no barra
         }
+        // D44-R1 — particiones del muro PRE-OCR: línea propia bajo la barra
+        // madre (jamás suman al trabajo — sería DOBLE contabilidad del muro).
+        if (k !== "preOcrMs" && k.startsWith("preOcr")) {
+          const sk = k as PreOcrSubKey;
+          preOcrSubSum.set(sk, (preOcrSubSum.get(sk) ?? 0) + v);
+          continue;
+        }
         sumas.set(k as EtapaKey, (sumas.get(k as EtapaKey) ?? 0) + v);
         trabajoTotal += v;
       }
+      // D44 — trazas por acta (herencia / re-arms / solape):
+      if (a.etapas.preOcrMs != null) conPreOcr += 1;
+      if (a.qrHeredado === true) qrHeredadas += 1;
+      if ((a.reintentosPreOcr ?? 0) > 0) reintentoActas += 1;
+      if (typeof a.tsInicio === "number") intervalos.push({ ini: a.tsInicio, fin: a.tsFin });
       if (a.esperaMs != null) {
         esperaSum += a.esperaMs;
         esperaN += 1;
@@ -204,9 +233,40 @@ export default function InformeCorrida() {
       .sort((a, b) => (b.totalMs ?? -1) - (a.totalMs ?? -1))
       .slice(0, 5);
     const fallos = actas.filter((a) => a.desenlace === "ERROR");
+    // D44-R3 — SOLAPE REAL (prueba D31 del pool): barrido de eventos sobre
+    // [tsInicio, tsFin]. En empate cierran primero (sin fantasma de 1 ms).
+    let maxSimultaneas = 0;
+    let solapadas = 0;
+    if (intervalos.length > 1) {
+      const eventos: { t: number; d: number }[] = [];
+      for (const iv of intervalos) eventos.push({ t: iv.ini, d: 1 }, { t: iv.fin, d: -1 });
+      eventos.sort((x, y) => x.t - y.t || x.d - y.d);
+      let cur = 0;
+      for (const ev of eventos) {
+        cur += ev.d;
+        if (cur > maxSimultaneas) maxSimultaneas = cur;
+      }
+      const enSolape = new Set<number>();
+      for (let i = 0; i < intervalos.length; i += 1) {
+        for (let j = i + 1; j < intervalos.length; j += 1) {
+          if (intervalos[i].ini < intervalos[j].fin && intervalos[j].ini < intervalos[i].fin) {
+            enSolape.add(i);
+            enSolape.add(j);
+          }
+        }
+      }
+      solapadas = enSolape.size;
+    }
     return {
       porDesenlace,
       sumas,
+      preOcrSubSum,
+      qrHeredadas,
+      conPreOcr,
+      reintentoActas,
+      maxSimultaneas,
+      solapadas,
+      nConTs: intervalos.length,
       trabajoTotal,
       sondeoSum,
       sondeoN,
@@ -332,20 +392,49 @@ export default function InformeCorrida() {
             {ETAPAS_TRABAJO.filter(({ key }) => (agg.sumas.get(key) ?? 0) > 0).map(({ key, label }) => {
               const ms = agg.sumas.get(key) ?? 0;
               const pct = agg.trabajoTotal > 0 ? Math.round((ms / agg.trabajoTotal) * 100) : 0;
+              const preOcrSuma = agg.sumas.get("preOcrMs") ?? 0;
               return (
-                <div key={key} className="flex items-center gap-2" role="row">
-                  <span className="w-28 shrink-0 font-mono text-[10px] uppercase tracking-wider text-slate-400">{label}</span>
-                  <div className="flex-1 h-3.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
-                    <div
-                      className="h-full rounded-md bg-[#10b981]/70"
-                      style={{ width: `${Math.max(2, pct)}%` }}
-                      aria-hidden
-                    />
+                <Fragment key={key}>
+                  <div className="flex items-center gap-2" role="row">
+                    <span className="w-28 shrink-0 font-mono text-[10px] uppercase tracking-wider text-slate-400">{label}</span>
+                    <div className="flex-1 h-3.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+                      <div
+                        className="h-full rounded-md bg-[#10b981]/70"
+                        style={{ width: `${Math.max(2, pct)}%` }}
+                        aria-hidden
+                      />
+                    </div>
+                    <span className="w-40 shrink-0 text-right font-mono text-[10px] text-slate-300" role="cell">
+                      {fmtMs(ms)} · {pct}%
+                    </span>
                   </div>
-                  <span className="w-40 shrink-0 text-right font-mono text-[10px] text-slate-300" role="cell">
-                    {fmtMs(ms)} · {pct}%
-                  </span>
-                </div>
+                  {/* KIT e14-tiempos-v2 (D44-R1) — sub-desglose del muro PRE-OCR:
+                      particiones del MISMO muro → % del PROPIO muro, no del trabajo. */}
+                  {key === "preOcrMs" &&
+                    PRE_OCR_SUBS.filter(({ key: sk }) => (agg.preOcrSubSum.get(sk) ?? 0) > 0).map(
+                      ({ key: sk, label: slabel }) => {
+                        const sMs = agg.preOcrSubSum.get(sk) ?? 0;
+                        const sPct = preOcrSuma > 0 ? Math.round((sMs / preOcrSuma) * 100) : 0;
+                        return (
+                          <div key={sk} className="flex items-center gap-2 pl-5" role="row">
+                            <span className="w-24 shrink-0 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                              └ {slabel}
+                            </span>
+                            <div className="flex-1 h-2.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+                              <div
+                                className="h-full rounded-md bg-[#10b981]/30"
+                                style={{ width: `${Math.max(2, sPct)}%` }}
+                                aria-hidden
+                              />
+                            </div>
+                            <span className="w-40 shrink-0 text-right font-mono text-[9px] text-slate-500" role="cell">
+                              {fmtMs(sMs)} · {sPct}% del PRE-OCR
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                </Fragment>
               );
             })}
             {agg.sondeoN > 0 && (
@@ -361,6 +450,23 @@ export default function InformeCorrida() {
             {agg.thumbN > 0 && (
               <p className="font-mono text-[10px] text-slate-500">
                 + THUMBS DE BANDEJA (post-pipeline): {fmtMs(agg.thumbSum)} en {agg.thumbN} acta(s)
+              </p>
+            )}
+            {/* KIT e14-tiempos-v2 (D44) — trazas de los 4 ROJOS: herencia (①),
+                re-arms (④) y solape real (③ — prueba D31 del pool). */}
+            {agg.conPreOcr > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + QR HEREDADO (capa-0 sin ladder — sondeo/prescan): {agg.qrHeredadas} de {agg.conPreOcr} acta(s) · el resto pagó ladder
+              </p>
+            )}
+            {agg.reintentoActas > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + PRE-OCR RE-ARMADO (watchdog/rescate): {agg.reintentoActas} acta(s) — su PRE-OCR es la SUMA de pasadas
+              </p>
+            )}
+            {agg.nConTs > 1 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + SOLAPE REAL (tsInicio→tsFin): máx {agg.maxSimultaneas} acta(s) en vuelo a la vez · {agg.solapadas} compartieron turno
               </p>
             )}
             {agg.trabajoTotal === 0 && (

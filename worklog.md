@@ -515,3 +515,31 @@ Work Log:
 - Verificación: tsc --noEmit → baseline 9 = 9; eslint → 0/0.
 - KPI «TRABAJO PIPELINE» → «TRABAJO ACTAS» + subtítulo de barras aclara que preOcrMs
   NO está dentro de totalMs (honestidad de etiqueta — el pre-OCR es del runner).
+
+---
+
+Task ID: 20 — tiempos-v2 (D44): los 4 ROJOS — el muro pre-OCR deja de ser caja negra
+Task: Cerrar los huecos de medición que D43 dejó abiertos (varianza 0,3→31,2 s de
+preOcrMs sin desglose; herencia QR inferida; solape entre actas incognoscible;
+re-arms del watchdog invisibles en la suma).
+
+Work Log:
+- runner.ts: 4 cronómetros de partición del muro — preOcrQrMs (bloque capa-0 entero:
+  tQrCapa0 → cierre antes del for), preOcrOrigenMs/preOcrDeskewMs/preOcrMasterMs
+  (por intento, acumulan reintentos igual que preOcrMs) + preOcrPasadas (R4) +
+  qrHeredado (R2 — true en la rama qrPrevio) + tsDespacho = tInicio (R3).
+- runner.ts: estampado — registrarMetricaDesenlace recibe los 4 sub-segmentos JUNTOS
+  (solo cuando preOcrMs corrió, con sus 0 reales) + qrHeredado true|false EXPLÍCITO +
+  tsInicio + reintentosPreOcr (>0); registrarMetricaError recibe tsInicio + qrHeredado
+  SOLO-true + reintentos; registrarMetricaCopia recibe tsInicio (t0). Writes IDB:
+  qrHeredado:true en registroListo, re-save de reutilizarViaQr y post-mortem ERROR.
+- metricas.ts: EtapasMetrica gana preOcrQrMs/preOcrOrigenMs/preOcrDeskewMs/
+  preOcrMasterMs (particiones — cuelloDeEtapas las excluye, doble contabilidad
+  prohibida; 0 = dato real, doctrina decodeMs). MetricaActa gana tsInicio/qrHeredado/
+  reintentosPreOcr. Los 3 hooks amplían su contrato con campos opcionales.
+- tipos.ts: RegistroMasiva.qrHeredado (aditivo al final, contrato D57).
+- InformeCorrida.tsx: sub-barras └ QR CAPA-0/ORIGEN/DESKEW/MASTER (% del propio muro)
+  + líneas QR HEREDADO (N de M), PRE-OCR RE-ARMADO (N actas) y SOLAPE REAL (máx en
+  vuelo por barrido de eventos + actas que compartieron turno — prueba D31).
+- docs/DECISIONS.md: D44.
+- Verificación: tsc --noEmit → baseline 9 = 9; eslint → 0/0.

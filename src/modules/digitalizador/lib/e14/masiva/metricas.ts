@@ -76,6 +76,24 @@ export interface EtapasMetrica {
    *  del watchdog) y no se cuenta. Ausente = la fila jamás llegó al bridge
    *  (YA-ENVIADA/copias tempranas — su métrica no pasa por este hook). */
   preOcrMs?: number;
+  // ─── KIT e14-tiempos-v2 (D44) — SUB-DESGLOSE del muro preOcrMs (los 4 ROJOS, R1) ───
+  // Particiones del MISMO muro (qr + origen + deskew + master ≤ preOcrMs — cada
+  // segmento vive DENTRO del muro que lo contiene). NUNCA compiten por «cuello»
+  // ni suman al trabajo del informe (¡sería doble contabilidad!). El 0 es dato
+  // real: master=0 = precalentada (misma doctrina decodeMs=0, D66/T4); los
+  // reintentos del watchdog/rescate ACUMULAN igual que preOcrMs.
+  /** (D44-R1) bloque CAPA-0 QR completo: herencia de qrPrevio (≈0) o ladder
+   *  jsQR (decode del original + barridos + rotaciones + rescate) + decisiones
+   *  dedup + espera APLAZADA por gemela si hubo (tiempo mural honesto). */
+  preOcrQrMs?: number;
+  /** (D44-R1) clasificarOrigenDeArchivo (D63-A) — acumula reintentos. */
+  preOcrOrigenMs?: number;
+  /** (D44-R1) preProcesoEscaneo (D63-B — detección de ángulo + deskew +
+   *  limpieza; para fotos es el early-return honesto) — acumula reintentos. */
+  preOcrDeskewMs?: number;
+  /** (D44-R1) master del intento (maestroDeImagen o consumo del precalor —
+   *  0 = precalentada) — acumula reintentos. */
+  preOcrMasterMs?: number;
   /** OCR puro (2 pasadas sumadas — el total del reconocedor). */
   ocrMs?: number;
   /** D61 — persistencia del desenlace en IDB. */
@@ -113,6 +131,23 @@ export interface MetricaActa {
   error?: string | null; // motivo corto del ERROR (estado ERROR)
   /** true = la fila nació copiada (reutilizarResultado — jamás pagó OCR). */
   copia: boolean;
+  // ─── KIT e14-tiempos-v2 (D44) — campos ADITIVOS AL FINAL (contrato D57) ───
+  /** (D44-R3) epoch del DESPACHO de la fila: arranque del pre-OCR en el
+   *  runner (tInicio — cierre de la espera de cola) para la copia (t0 de la
+   *  reutilización) o null si el ERROR fue ANTES (jamás inventar). Con tsFin
+   *  reconstruye el SOLAPE real entre actas (prueba D31 del pool). */
+  tsInicio?: number;
+  /** (D44-R2) la CAPA 0 heredó el payload del sondeo/prescan (fila.
+   *  qrPrevio) — no pagó fileToCaptureDataUrl ni ladder. true|false EXPLÍCITO
+   *  en el desenlace con preOcrMs (false = pagó ladder — dato para la
+   *  palanca ①); AUSENTE = sin dato (copia/ERROR temprano/jamás despachó).
+   *  En el ERROR solo se estampa true (false prematuro sería mentir). */
+  qrHeredado?: boolean;
+  /** (D44-R4) cuántas veces se RE-ARMÓ el cronómetro pre-OCR (reintentos del
+   *  watchdog/rescate que re-pagaron origen/deskew/master). 0/ausente = el
+   *  muro corrió UNA vez. preOcrMs es la SUMA de pasadas — este contador
+   *  aclara los outliers (¿1 muro de 31 s o 3 muros de ~10 s?). */
+  reintentosPreOcr?: number;
 }
 
 /** Una corrida = un PROCESAR (o su rearranque) hasta que el bucle drena o
@@ -195,12 +230,16 @@ function notificar(): void {
  *  nuevas SON trabajo del camino crítico: compiten igual que el OCR).
  *  La espera de cola, el sondeo y el thumb NO compiten por «cuello» (el
  *  sondeo es paralelo a la ingesta; el thumb es post-pipeline cosmético).
+ *  D44: las particiones preOcr* (QR/origen/deskew/master) tampoco — son
+ *  segmentos del MISMO muro preOcrMs (que siempre las domina o iguala).
  *  null = sin etapas de trabajo medidas. */
 export function cuelloDeEtapas(e: EtapasMetrica): string | null {
   let mejor: string | null = null;
   let maxMs = 0;
   for (const [k, v] of Object.entries(e)) {
     if (k === "sondeoQrMs" || k === "thumbMs") continue;
+    // D44 — particiones del muro preOcrMs: jamás cuello (doble contabilidad)
+    if (k !== "preOcrMs" && k.startsWith("preOcr")) continue;
     if (typeof v === "number" && v > maxMs) {
       maxMs = v;
       mejor = k.replace(/Ms$/, "");
@@ -274,6 +313,20 @@ export function registrarMetricaDesenlace(args: {
    *  origen + deskew + master → ver EtapasMetrica.preOcrMs). Ausente = la
    *  fila jamás despachó el bridge (jamás inventar). */
   preOcrMs?: number;
+  // ─── KIT e14-tiempos-v2 (D44) — sub-desglose + trazas del despacho ───
+  /** (D44-R1) particiones del muro — ver EtapasMetrica.preOcr*Ms. El runner
+   *  las manda SOLO cuando preOcrMs corrió (los 4 juntos, con sus 0 reales). */
+  preOcrQrMs?: number;
+  preOcrOrigenMs?: number;
+  preOcrDeskewMs?: number;
+  preOcrMasterMs?: number;
+  /** (D44-R3) epoch del despacho — ver MetricaActa.tsInicio. */
+  tsInicio?: number;
+  /** (D44-R2) capa-0 heredó qrPrevio — ver MetricaActa.qrHeredado. El
+   *  desenlace manda true|false EXPLÍCITO cuando preOcrMs corrió. */
+  qrHeredado?: boolean;
+  /** (D44-R4) re-arms del cronómetro — ver MetricaActa.reintentosPreOcr. */
+  reintentosPreOcr?: number;
   dedup?: string;
 }): void {
   void (async () => {
@@ -296,6 +349,12 @@ export function registrarMetricaDesenlace(args: {
         etapas.orientacionProbeMs = args.acta.diagnostico.orientacionProbeMs;
       }
       if (typeof args.preOcrMs === "number") etapas.preOcrMs = args.preOcrMs;
+      // KIT e14-tiempos-v2 (D44-R1) — particiones del muro (sin guard > 0:
+      // el 0 es dato real — master=0 = precalentada, doctrina decodeMs D66).
+      if (typeof args.preOcrQrMs === "number") etapas.preOcrQrMs = args.preOcrQrMs;
+      if (typeof args.preOcrOrigenMs === "number") etapas.preOcrOrigenMs = args.preOcrOrigenMs;
+      if (typeof args.preOcrDeskewMs === "number") etapas.preOcrDeskewMs = args.preOcrDeskewMs;
+      if (typeof args.preOcrMasterMs === "number") etapas.preOcrMasterMs = args.preOcrMasterMs;
       if (typeof t?.ocrMs === "number") etapas.ocrMs = t.ocrMs;
       if (typeof t?.persistMs === "number") etapas.persistMs = t.persistMs;
       if (typeof t?.envioMs === "number") etapas.envioMs = t.envioMs;
@@ -315,6 +374,12 @@ export function registrarMetricaDesenlace(args: {
         esperaMs: typeof t?.esperaMs === "number" ? t.esperaMs : null,
         dedup: args.dedup,
         copia: false,
+        // KIT e14-tiempos-v2 (D44) — trazas del despacho (aditivas al final):
+        ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
+        ...(typeof args.qrHeredado === "boolean" ? { qrHeredado: args.qrHeredado } : {}),
+        ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
+          ? { reintentosPreOcr: args.reintentosPreOcr }
+          : {}),
       };
       await persistirActa(m);
     } catch {
@@ -336,6 +401,9 @@ export function registrarMetricaCopia(args: {
   esperaMs: number | null;
   ocrMs?: number;
   dedup?: string;
+  /** (D44-R3) arranque de la REUTILIZACIÓN (t0 del caller) — la copia sí
+   *  ocupa turno en el pool: con su tsFin reconstruye el solape real. */
+  tsInicio?: number;
 }): void {
   void (async () => {
     try {
@@ -356,6 +424,8 @@ export function registrarMetricaCopia(args: {
         esperaMs: args.esperaMs,
         dedup: args.dedup,
         copia: true,
+        // D44-R3 — el turno de la copia también es turno (solape real):
+        ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
       };
       await persistirActa(m);
     } catch {
@@ -371,6 +441,15 @@ export function registrarMetricaError(args: {
   nombre: string;
   error: string;
   sondeoQrMs?: number;
+  /** (D44-R3) epoch del despacho si alcanzó a nacer (null si el throw fue
+   *  ANTES del tInicio del runner — jamás inventar). */
+  tsInicio?: number;
+  /** (D44-R2) SOLO true se estampa en ERROR (false prematuro sería mentir
+   *  — la capa 0 pudo no correr). Ausente = sin dato. */
+  qrHeredado?: boolean;
+  /** (D44-R4) re-arms consumidos antes del error real (los reintentos del
+   *  watchdog re-pagan el muro — post-mortem honesto). */
+  reintentosPreOcr?: number;
 }): void {
   void (async () => {
     try {
@@ -391,6 +470,12 @@ export function registrarMetricaError(args: {
         esperaMs: null,
         error: args.error,
         copia: false,
+        // D44 — trazas del post-mortem (aditivas; ausente = sin dato):
+        ...(typeof args.tsInicio === "number" ? { tsInicio: args.tsInicio } : {}),
+        ...(args.qrHeredado === true ? { qrHeredado: true } : {}),
+        ...(typeof args.reintentosPreOcr === "number" && args.reintentosPreOcr > 0
+          ? { reintentosPreOcr: args.reintentosPreOcr }
+          : {}),
       };
       await persistirActa(m);
     } catch {

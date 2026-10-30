@@ -322,6 +322,14 @@ export interface RegistroMasiva {
    *  sondeo leyó payload ("con payload" del informe) — ausente = sondeó sin
    *  lectura (jamás inventar). */
   sondeoQrTier?: string;
+  // ---------- KIT e14-tiempos-v2 (D44-R2) — campos ADITIVOS AL FINAL (contrato D57) ----------
+  /** (D44-R2) true = la CAPA 0 del runner HEREDÓ el payload (fila.qrPrevio —
+   *  sondeo de ingesta e73 o pre-scan e107): no pagó fileToCaptureDataUrl ni
+   *  ladder jsQR (peor caso sin-QR ~15-17 s). Ausente = la capa 0 pagó el
+   *  decode/ladder completo (o sin payload — jamás inventar). Gemelo del flag
+   *  del informe (MetricaActa.qrHeredado) — persiste junto a qrPayload para
+   *  el post-mortem de la palanca ① (cobertura del sondeo/prescan). */
+  qrHeredado?: boolean;
 }
 
 /** KIT e14-carga-masiva-v1 (helper compartido runner/store): página corta del
