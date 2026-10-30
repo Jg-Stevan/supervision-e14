@@ -467,11 +467,10 @@ interface CtxProcesarUno {
   decodeMasterMs: number | null;
   intentoDesenlace: number;
   // STAGE 3 — desenlace (faseDesenlace: relectura + capa 2 + dedup contenido).
+  actaParcheada: Acta | null; // desenlace parcheado D57 PRE-relectura — el thumb del stage 5 y el fallback del liviano consumen ESTE acta (byte-idéntico incluso con re-lectura: la re-lectura no cambia fotos)
   actaDesenlace: Acta | null; // post re-lectura (e63f)
   relecturaDesenlace: "auto" | "sin-cambio" | null;
-  relecturaToken: "auto" | "sin-cambio" | "tope" | null;
   identidad: IdentidadActa | null; // e63k capa 2
-  originalIdentidad: FilaMasiva | null;
   falsoPositivoEvitado: boolean; // e63k — banda aplazada resuelta sin-match
   // STAGE 4 — envío (faseEnvio).
   actaFinal: Acta | null; // post envío (ENVIADA) o desenlace de siempre
@@ -493,6 +492,80 @@ type DesenlaceStage = { resuelto: boolean; ctx: CtxProcesarUno; error?: unknown 
 type SalidaPipelineIntentos =
   | { fallo: false; ctx: CtxProcesarUno & { actaBruta: Acta } }
   | { fallo: true; ctx: CtxProcesarUno; error: unknown };
+
+/** Ctx POST-pipeline: el stage 2 garantizó actaBruta (fallback del watchdog). */
+type CtxPostPipeline = CtxPipeline & { actaBruta: Acta };
+
+/** Salida del STAGE 3: sin resuelto el ctx garantiza los DOS acta del
+ *  desenlace (parcheada pre-relectura + post re-lectura) — el stage 4 las
+ *  consume Acta no-null. */
+type SalidaDesenlace =
+  | { resuelto: true; ctx: CtxProcesarUno }
+  | {
+      resuelto: false;
+      ctx: CtxProcesarUno & { actaParcheada: Acta; actaDesenlace: Acta };
+    };
+
+/** Trazas post-mortem del re-save (el spread EXACTO que estampaban los 3
+ *  sitios duplicados + registroListo — campo por campo opcional). */
+type TrazasPostMortem = {
+  qrPayload?: string;
+  qrHeredado?: true;
+  qrEstado?: "leido" | "sin-payload";
+  watchdog?: number;
+  etapaAlMorir?: string;
+  elapsedMs?: number;
+  rescateRechazo?: "salvado" | "lanzado";
+};
+
+/** PUNTO ÚNICO del estampado de trazas (misión punto 3 / C-1 de la zona:
+ *  hoy el estampado vive en 3 sitios — re-saves de capa-2/dedup-contenido,
+ *  registroListo y el catch — y cada traza nueva debía recordarse en todos).
+ *  Los writes consumen ESTE builder: cada sitio declara qué subset estampa
+ *  HOY, con las MISMAS condiciones byte-idénticas —
+ *  · qrPayload/qrEstado: SIEMPRE que existan (todos los sitios).
+ *  · heredado — stamp `qrHeredado: true` SOLO si la capa 0 heredó (false
+ *    prematuro mentiría — registroListo/catch).
+ *  · watchdog — stamp watchdog/etapaAlMorir/elapsedMs SOLO si
+ *    watchdogUsados > 0 (catch).
+ *  · rescate — "auto": salvado|lanzado por el status del desenlace
+ *    (registroListo); "salvado" fijo (dup tras rescate cuenta como salvada);
+ *    "lanzado" fijo (ERROR tardío); ausente = no estampa (re-saves de dup
+ *    sin rescate en su traza).
+ *  Añadir una traza nueva = UNA edición aquí. */
+function trazasPostMortemDe(
+  ctx: CtxProcesarUno,
+  subset: {
+    heredado?: boolean;
+    watchdog?: boolean;
+    rescate?: "auto" | "salvado" | "lanzado";
+    statusDesenlace?: Acta["status"];
+  },
+): TrazasPostMortem {
+  const { qrPayload, qrEstadoCapa0, qrHeredado, watchdogUsados, etapaAlMorir, elapsedMuerteMs, rescateLanzado } = ctx;
+  return {
+    ...(qrPayload ? { qrPayload } : {}),
+    ...(subset.heredado && qrHeredado ? { qrHeredado: true } : {}),
+    ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
+    ...(subset.watchdog && watchdogUsados > 0
+      ? {
+          watchdog: watchdogUsados,
+          ...(etapaAlMorir != null ? { etapaAlMorir } : {}),
+          ...(elapsedMuerteMs != null ? { elapsedMs: elapsedMuerteMs } : {}),
+        }
+      : {}),
+    ...(rescateLanzado && subset.rescate
+      ? {
+          rescateRechazo:
+            subset.rescate === "auto"
+              ? ((subset.statusDesenlace ?? "RECHAZADA") !== "RECHAZADA"
+                  ? ("salvado" as const)
+                  : ("lanzado" as const))
+              : subset.rescate,
+        }
+      : {}),
+  };
+}
 
 // ─── R8 · STAGE 1/5 — faseCapa0Qr (e63m/D30/D40/e65b) ──────────────────────
 /** CAPA 0 IDENTIDAD QR PRE-OCR (punto ÚNICO del kit — ANTES de despachar OCR:
@@ -1030,6 +1103,369 @@ async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipe
   }
 }
 
+// ─── R8 · STAGE 3/5 — faseDesenlace (e63f · e63k · e72-P2.1v2) ─────────────
+/** DESENLACE del pipeline: parche D57 del diagnóstico del actaBruta (esperaMs
+ *  + origen/deskew del ÚLTIMO intento) → guard anti-zombi M8 → RE-LECTURA
+ *  INTERNA (e63f — UNA pasada, conTope RELECTURA_TOPE_MS, traza console.info
+ *  ANCLA QA) → CAPA 2 IDENTIDAD (e63k — mutexada, DUPLICADA con SU PROPIO
+ *  desenlace) → resolución del falso-positivo visual → DEDUP POR CONTENIDO
+ *  (e72 P2.1-v2 — reutiliza o DUPLICADA propia). Los `return` (M8/dups) salen
+ *  como resuelto:true — el finally del orquestador limpia igual; cualquier
+ *  throw cae al MISMO catch de procesarUno (jamás tumba la cola). Las trazas
+ *  de los re-saves salen del PUNTO ÚNICO trazasPostMortemDe (subset de cada
+ *  sitio, byte-idéntico). Función PURA salvo los efectos de siempre
+ *  (store/IDB/logger/workers): recibe ctx y devuelve ctx nuevo — jamás muta
+ *  el que recibe. */
+async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
+  const fila = ctx.fila;
+  const registro = ctx.registro;
+  const actaBruta = ctx.actaBruta;
+  const veredictoOrigen = ctx.veredictoOrigen;
+  const preProceso = ctx.preProceso;
+  const esperaMs = ctx.esperaMs;
+  // (bloque movido VERBATIM de procesarUno — mismo orden, mismos literales)
+    // D57 (T1): parche INMUTABLE del diagnóstico (kit §4-T1). ADITIVO — no
+    // toca score/status/gate; si el diagnóstico no existe (no debería: el
+    // bridge lo monta en todo desenlace fuera de SIM), se omite el campo.
+    // D63-A (T2): las trazas de origen viajan en el MISMO parche (aditivas,
+    // al final del contrato D57 — origen/origenSenales, ver origen.ts).
+    // D65: veredictoOrigen/preProceso son del ÚLTIMO intento ejecutado (si el
+    // desenlace existe, al menos un intento completó sus bloques D63).
+    const acta =
+      actaBruta.diagnostico != null
+        ? {
+            ...actaBruta,
+            diagnostico: {
+              ...actaBruta.diagnostico,
+              tiempos: { ...actaBruta.diagnostico.tiempos, esperaMs },
+              origen: veredictoOrigen?.origen ?? null,
+              origenSenales: veredictoOrigen?.senales ?? null,
+              // D63-B (T2/T3): trazas del pre-proceso de escaneos (aditivas,
+              // al final del contrato — null cuando no aplicó/no es escaneo).
+              skewGrados: preProceso?.skewGrados ?? null,
+              deskewMs: preProceso?.deskewMs ?? null,
+              limpieza: preProceso?.limpieza ?? null,
+              // D63-A2 (T0): provenance del master que el bridge CONSUMIÓ —
+              // "corregido" (deskew aplicado) | "original". Aditivo al final
+              // del contrato D57; el informe T2 lo consume como
+              // preprocesoAplicado (bool, presente si origen escaneo).
+              // preProceso existe SIEMPRE en MASIVA (nulo para no-escaneos →
+              // "original") — null solo si no hay diagnóstico (jamás inventar).
+              maestroFuente: preProceso
+                ? preProceso.aplicado
+                  ? ("corregido" as const)
+                  : ("original" as const)
+                : null,
+            },
+          }
+        : actaBruta;
+
+    // FIX M8 (auditoría 2-c): la decisión del dueño manda TAMBIÉN para el
+    // ENVÍO — si quitó la fila mientras el OCR corría, el desenlace NO se
+    // transmite (antes registrarEnvioMasiva corría ANTES del guard: fila de
+    // historial + completadas + hueco archivado de un acta descartado).
+    if (!storeMasiva().getState().filas.some((f) => f.id === fila.id))
+      return { resuelto: true, ctx: { ...ctx, actaParcheada: acta, actaDesenlace: acta } };
+
+    // ─── e63f — KIT e63f-autoenvio-v1 (F2): RE-LECTURA INTERNA antes de
+    // «repetir-primero» ─── SUGERIDA/MANUAL con captura PERFECTA (score ≥ 8 ∧
+    // lectura FUERTE ∧ gate completa) no vuelve a capturar: se RE-LEE el
+    // MISMO bitmap (reconocerTexto — re-warp con el quad horneado SIN
+    // re-detección + rapidocr a cap fino DET_CAP_PROD, la pasada-2 del
+    // escalonado) → re-clasificar → re-evaluar el gate (desenlaceTrasRelec-
+    // tura). AUTO → OPTIMA → autoenvío normal más abajo; si no → revisión
+    // humana como hoy. UNA pasada MÁXIMA (RED LINE 5) y el humano NUNCA la
+    // ve (intento de LECTURA, no de captura — el «repetir-primero» físico
+    // del flujo individual NO cambia). NUNCA aplica a RECHAZADAS por calidad
+    // (score < 6.5 — ahí re-escanear SÍ ayuda), ADVERTENCIA (red line) ni
+    // gate incompleta. Trazas aditivas: token ` RelecturaInterna=` (D51) y
+    // flag `relectura` en la fila. Cualquier falla interna (runtime OCR,
+    // base divipol) deja el veredicto de siempre — jamás empeora.
+    //
+    // e63g (E1/F0): el bloque va envuelto en conTope (RELECTURA_TOPE_MS) —
+    // era el ÚNICO await de la fila sin presupuesto propio (el watchdog D65
+    // no lo cubre) y un colgaje de reconocerTexto congelaba la cola PARA
+    // SIEMPRE. Tríada: valor → desenlace de la re-lectura; error →
+    // sin-cambio (como el catch de siempre); VENCIDO → matarYRecrear-
+    // Workers() + veredicto de la 1.ª lectura INTACTO (actaDesenlace sigue
+    // siendo `acta`) + token `tope` (D51 aditivo) + CERO reintentos. La
+    // traza SIEMPRE (también con tope).
+    let actaDesenlace = acta;
+    let relecturaDesenlace: "auto" | "sin-cambio" | null = null;
+    let relecturaToken: "auto" | "sin-cambio" | "tope" | null = null;
+    if (procedeRelecturaInterna(acta)) {
+      const tRelectura = performance.now();
+      const r = await conTope(
+        (async () => {
+          const textoRe = await getBridge().reconocerTexto(acta);
+          const clasifRe = clasificarCabecera(textoRe, await cargarDivipol());
+          return desenlaceTrasRelectura(acta, textoRe, clasifRe);
+        })(),
+        RELECTURA_TOPE_MS,
+      );
+      if (r.vencido) {
+        // Tope vencido — infraestructura muerta y re-creada (misma doctrina
+        // del watchdog T1.2); el VEREDICTO de la 1.ª lectura queda intacto.
+        // La relectura JAMÁS reintenta (red line): sin-cambio y fuera.
+        await matarYRecrearWorkers();
+        relecturaDesenlace = "sin-cambio";
+        relecturaToken = "tope";
+      } else if ("valor" in r) {
+        actaDesenlace = r.valor.acta;
+        relecturaDesenlace = r.valor.desenlace;
+        relecturaToken = r.valor.desenlace;
+      } else {
+        relecturaDesenlace = "sin-cambio";
+        relecturaToken = "sin-cambio";
+      }
+      // console.info LITERAL — ancla QA (qa-watchdog-relectura.ts Bloque 3:
+      // «traza SIEMPRE» grepea console.info( en este bloque). No migra al logger.
+      console.info(
+        `[e14] relectura-interna fila=${fila.id} ms=${Math.round(performance.now() - tRelectura)} RelecturaInterna=${relecturaToken}`,
+      );
+    }
+
+    // ─── e63k — KIT e63k-capa2-identidad-v1 (F1.4): CAPA 2 DEDUP POR
+    // IDENTIDAD (punto ÚNICO del kit, POST-OCR) ─── La identidad nace SOLO
+    // del código 1D consensuado (identidad.ts — RED LINE 2: sin consenso no
+    // hay identidad, jamás regex suelto sobre el texto). La marca pre-OCR
+    // quedó APLAZADA en la banda 3..6 (store); AQUÍ decide la serie impresa.
+    const identidad = identidadDeActa(actaDesenlace);
+    // ¿Original por identidad? OTRA fila (f.id !== fila.id) con la MISMA
+    // identidadActa (13 dígitos = formulario+PAG — P1 y P2 del mismo
+    // formulario son actas DISTINTAS, nunca se deduplican entre sí) en
+    // estado LISTA|DUPLICADA; la de agregadaEn MÍNIMA es la original.
+    // forzarDedupOff (el dueño pulsó PROCESAR IGUAL) manda sobre la capa 2.
+    // e71 (Opt-3) — SECCIÓN CRÍTICA (kit: «encolar la verificación de dedup
+    // en un solo hilo»): DOS filas con la MISMA serie aterrizando juntas
+    // veían AMBAS «sin original» y se enviaban DOBLE. Dentro del mutex la
+    // segunda ve la marca de la primera → DUPLICADA — el envío doble es
+    // IMPOSIBLE por construcción. El thumb/IDB (~50 ms) dentro de la
+    // sección: el OCR queda fuera (paralelo de verdad).
+    let originalIdentidad: FilaMasiva | null = null;
+    if (identidad && !fila.forzarDedupOff) {
+      // Capturas para la closure (el narrowing de registro no entra en las
+      // funciones async — misma técnica de qrPayloadSeguro arriba).
+      const registroCritico = registro;
+      const marcadaIdentidad = await conExclusionMutua(async () => {
+        const original =
+          storeMasiva()
+            .getState()
+            .filas.filter(
+              (f) =>
+                f.id !== fila.id &&
+                f.serie != null &&
+                f.serie.slice(0, 13) === identidad.identidadActa &&
+                (f.estado === "LISTA" || f.estado === "DUPLICADA"),
+            )
+            .sort((a, b) => a.agregadaEn - b.agregadaEn)[0] ?? null;
+        if (!original) return false;
+        originalIdentidad = original;
+        // DUPLICADA por identidad — SU PROPIO desenlace (no el de la
+        // original): NO reenvía, NO borra, revisión disponible. La capa 2
+        // decide por CUALQUIER status del desenlace (un dup RECHAZADO por
+        // blur de la misma acta también es dup) → return ANTES del envío y
+        // del contador (kit §1.4-5). El guard anti-zombi M8 ya corrió antes
+        // en el flujo (la fila está viva al llegar aquí) — NO se duplica.
+        const thumbIdentidad = await hacerThumb(
+          actaDesenlace.fotoProcesada ?? actaDesenlace.fotoOriginal,
+        );
+        await guardarRegistro({
+          ...registroCritico,
+          estado: "DUPLICADA",
+          dupOf: original.id,
+          acta: actaDesenlace,
+          thumb: thumbIdentidad,
+          serie: identidad.serie,
+          dedup: "identidad",
+          infoTitulo: tituloDeActa(actaDesenlace),
+          // e63m + e64-qr T-0.2 — trazas post-mortem de ESTA fila (qrPayload
+          // + qrEstado): PUNTO ÚNICO trazasPostMortemDe (subset de ESTE sitio
+          // — sin heredado/watchdog/rescate — byte-idéntico a ayer).
+          ...trazasPostMortemDe(ctx, {}),
+        });
+        marcarFila(fila.id, {
+          estado: "DUPLICADA",
+          dupOf: original.id,
+          statusActa: actaDesenlace.status,
+          score: actaDesenlace.score,
+          nivel: actaDesenlace.clasificacion?.nivel ?? null,
+          pagina: paginaDeActa(actaDesenlace),
+          infoTitulo: tituloDeActa(actaDesenlace),
+          motivo: actaDesenlace.rechazo?.tipo ?? null,
+          thumb: thumbIdentidad,
+          enviadaAuto: false,
+          // e63k (decisión declarada en el REPORTE §1): la serie TAMBIÉN al
+          // mapa en memoria (regla general del kit — el mapa de identidad de
+          // la sesión ve esta fila aunque la original se haya quitado).
+          serie: identidad.serie,
+          error: null,
+        });
+        logger.info(
+          `[e14] dedup-identidad fila=${fila.id} serie=${identidad.identidadActa} original=${original.id}`,
+        );
+        return true;
+      });
+      if (marcadaIdentidad) {
+        // NO registrarEnvioMasiva NI contarMotivoNoEnvioActa (kit §1.4-5)
+        return { resuelto: true, ctx: { ...ctx, actaParcheada: acta, actaDesenlace, relecturaDesenlace, identidad } };
+      }
+    }
+    // Falso-positivo visual EVITADO (el caso 3992/3993 de la consola del
+    // dueño — QA §3.2): la banda visual 3..6 la había dejado sospechosa y
+    // la serie impresa demuestra que es OTRA acta → resolución final
+    // "sin-match" en el registroListo de abajo (conservando dedupDistancia
+    // y dedupVisualDe del write aplazado — post-mortem). La fila sigue al
+    // envío normal — SU desenlace, NUNCA el de otra. La traza vive en el
+    // REGISTRO (kit §1.2 — dedupVisualDe es de RegistroMasiva; el store no
+    // la restaura a la fila).
+    const dedupVisualDeAplazada = registro?.dedupVisualDe ?? null;
+    // Solo se RESUELVE una banda que SIGUE aplazada (registro.dedup ===
+    // "visual-aplazada"): jamás revertir un veredicto "identidad" previo
+    // (el dueño pudo PROCESAR IGUAL una dup real — su traza queda intacta).
+    const falsoPositivoEvitado =
+      identidad != null &&
+      originalIdentidad == null &&
+      dedupVisualDeAplazada != null &&
+      registro?.dedup === "visual-aplazada";
+    if (falsoPositivoEvitado) {
+      logger.info(
+        `[e14] dedup-identidad fila=${fila.id} falso-positivo-visual evitado serie=${identidad!.serie} original-visual=${dedupVisualDeAplazada}`,
+      );
+    }
+
+    // ─── e72 — P2.1-v2: el veredicto de dedup por CONTENIDO manda sobre el
+    // envío ─── Segundo plano de la MISMA race del smoke del dueño
+    // (imagen9/imagen10): la fila llegó AL DESENLACE con el veredicto puesto
+    // (traza «v2» de cadenaDedup — cinta cierta, estampada aunque el guard
+    // anti-zombi bloqueara la marca pre-OCR) o con una gemela EXACTA
+    // (hashBytes sha256 idéntico) ya resuelta. El desenlace NUNCA envía:
+    // resolver por la maquinaria P2.1 (reutilizarResultado — la copia hereda
+    // DUPLICADA o RECHAZADA) o, sin original resoluble, DUPLICADA con SU
+    // PROPIO desenlace (doctrina capa-2 e63k: revisión disponible, cero
+    // envío, cero contador). LA ORIGINAL JAMÁS CAE AQUÍ: su traza es
+    // «sin-match» (la cadena es FIFO — sus candidatas son ANTERIORES) y una
+    // gemela en cola (DUPLICADA/PENDIENTE posterior) sin traza v2 no activa
+    // el guard. La gemela en vuelo cuenta SOLO si es ANTERIOR (agregadaEn
+    // menor): esperar a una POSTERIOR sería esperarla a ELLA que espera por
+    // ESTA — deadlock imposible por construcción. forzarDedupOff (PROCESAR
+    // IGUAL) manda SIEMPRE (RL-e65b-6 — el escape del dueño es sagrado).
+    if (!fila.forzarDedupOff && registro != null && registro.hashBytes != null) {
+      const hashNeto: string = registro.hashBytes;
+      // Whitelist de estados (T-5 e65: la literal YA-ENVIADA jamás se escribe
+      // en el runner — el QA la veta; AUSENTE/ERROR/ya-enviada quedan fuera
+      // por construcción: sin acta copiable no hay resolución posible).
+      const gemelasHash = storeMasiva()
+        .getState()
+        .filas.filter(
+          (f) =>
+            f.id !== fila.id &&
+            f.hashBytes === hashNeto &&
+            (f.estado === "PENDIENTE" ||
+              f.estado === "PROCESANDO" ||
+              f.estado === "LISTA" ||
+              f.estado === "DUPLICADA"),
+        )
+        .sort((a, b) => a.agregadaEn - b.agregadaEn);
+      const originalLista =
+        gemelasHash.find((f) => f.estado === "LISTA") ?? null;
+      const originalEnVuelo =
+        gemelasHash.find(
+          (f) =>
+            (f.estado === "PENDIENTE" || f.estado === "PROCESANDO") &&
+            f.agregadaEn < fila.agregadaEn,
+        ) ?? null;
+      if (registro.dedup === "v2" || originalLista != null) {
+        const tNet = Date.now();
+        let copiado = false;
+        if (originalLista != null) {
+          const filaGemela: FilaMasiva = {
+            ...fila,
+            estado: "DUPLICADA",
+            dupOf: originalLista.id,
+          };
+          copiado = await reutilizarResultado(filaGemela, tNet);
+        }
+        if (!copiado && originalEnVuelo != null) {
+          // La gemela cierta aún no aterriza (profunda en la cola/vuelo) →
+          // esperar su desenlace (mismo guard acotado de la rama DUPLICADA)
+          // y copiar: la OCR de ESTA fila ya se pagó (precio de la race) —
+          // el desenlace correcto sigue siendo el de la original.
+          if (await esperarDesenlaceOriginal(fila.id, originalEnVuelo.id)) {
+            const filaGemela: FilaMasiva = {
+              ...fila,
+              estado: "DUPLICADA",
+              dupOf: originalEnVuelo.id,
+            };
+            copiado = await reutilizarResultado(filaGemela, tNet);
+          }
+        }
+        if (copiado)
+          return { resuelto: true, ctx: { ...ctx, actaParcheada: acta, actaDesenlace, relecturaDesenlace, identidad, falsoPositivoEvitado } };
+        // (c) Sin original resoluble (gemela QUITADA en la carrera / «v2»
+        // por dHash de bytes distintos / gemela desaparecida) → DUPLICADA
+        // con SU PROPIO desenlace (revisión disponible — cero envío, cero
+        // contador; el OCR pagado fue el precio de la race y el informe lo
+        // muestra honesto con sus tiempos reales). La voluntad del dueño
+        // manda: una fila QUITADA en la espera no resucita registro.
+        if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) {
+          return { resuelto: true, ctx: { ...ctx, actaParcheada: acta, actaDesenlace, relecturaDesenlace, identidad, falsoPositivoEvitado } };
+        }
+        const thumbNet = await hacerThumb(
+          actaDesenlace.fotoProcesada ?? actaDesenlace.fotoOriginal,
+        );
+        await guardarRegistro({
+          ...registro,
+          estado: "DUPLICADA",
+          acta: {
+            ...actaDesenlace,
+            status: "DUPLICADA",
+            enviadoAutomaticamente: null,
+            ...(actaDesenlace.diagnostico
+              ? {
+                  diagnostico: {
+                    ...actaDesenlace.diagnostico,
+                    status: "DUPLICADA" as const,
+                  },
+                }
+              : {}),
+          },
+          thumb: thumbNet,
+          infoTitulo: tituloDeActa(actaDesenlace),
+          ...(identidad ? { serie: identidad.serie } : {}),
+          // e63m + e64-qr T-0.2 + WAVE3 §B (la DUPLICADA tras un rescate
+          // cuenta como SALVADA — desenlace final ≠ RECHAZADA, traza honesta
+          // del informe): PUNTO ÚNICO trazasPostMortemDe (subset de ESTE
+          // sitio — byte-idéntico a ayer).
+          ...trazasPostMortemDe(ctx, { rescate: "salvado" }),
+        });
+        marcarFila(fila.id, {
+          estado: "DUPLICADA",
+          dupOf: originalLista?.id ?? originalEnVuelo?.id ?? null,
+          statusActa: "DUPLICADA",
+          score: actaDesenlace.score,
+          nivel: actaDesenlace.clasificacion?.nivel ?? null,
+          pagina: paginaDeActa(actaDesenlace),
+          infoTitulo: tituloDeActa(actaDesenlace),
+          motivo: actaDesenlace.rechazo?.tipo ?? null,
+          thumb: thumbNet,
+          enviadaAuto: false,
+          ...(identidad ? { serie: identidad.serie } : {}),
+          error: null,
+        });
+        logger.info(
+          `[e14] dedup fila=${fila.id} desenlace-contenido DUPLICADA v2=${registro.dedup === "v2"} gemela=${originalLista?.id ?? originalEnVuelo?.id ?? "sin-original"} (sin envío propio)`,
+        );
+        // NO registrarEnvioMasiva NI contarMotivoNoEnvioActa (patrón capa-2)
+        return { resuelto: true, ctx: { ...ctx, actaParcheada: acta, actaDesenlace, relecturaDesenlace, identidad, falsoPositivoEvitado } };
+      }
+    }
+    return {
+      resuelto: false,
+      ctx: { ...ctx, actaParcheada: acta, actaDesenlace, relecturaDesenlace, identidad, falsoPositivoEvitado },
+    };
+}
+
 /** Desenlace de UNA foto — byte a byte el pipeline real (kit §6-C: el
  *  desenlace DEBE ser idéntico al del IMPORTAR normal).
  *  D66 — KIT e14-decode-unico-precalor-v1: el pipeline recibe el MASTER
@@ -1204,11 +1640,10 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     maestroDesenlace: null,
     decodeMasterMs: null,
     intentoDesenlace: 0,
+    actaParcheada: null,
     actaDesenlace: null,
     relecturaDesenlace: null,
-    relecturaToken: null,
     identidad: null,
-    originalIdentidad: null,
     falsoPositivoEvitado: false,
     actaFinal: null,
     enviadaAuto: false,
@@ -1286,18 +1721,6 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // arranca YA (incluye la capa-0 QR completa — el cronómetro vive en ctx);
     // los reintentos re-pagan origen/deskew/master → se ACUMULAN (T1).
     let preOcrMs: number | null = null; // null = jamás llegó al bridge (YA-ENVIADA/copias tempranas)
-    // D65 (T1) — el estado del intento del watchdog viaja en ctx (los stages
-    // devuelven ctx nuevo; los espejos de abajo conservan las lets mientras
-    // los stages 3-5 se extraen).
-    let veredictoOrigen: OrigenVeredicto | null = null;
-    let preProceso: PreProcesoEscaneo | null = null;
-    let actaBruta: Acta | null = null;
-    // D66 — trazas del master del DESENLACE (el del intento que produjo
-    // actaBruta; los reintentos re-hornean — la traza describe el master que
-    // SÍ sirvió; jamás inventar).
-    let maestroDesenlace: MaestroImagen | null = null;
-    let decodeMasterMs: number | null = null;
-    let intentoDesenlace = 0;
     ctx = { ...ctx, preOcrMs: null, tPreOcrIntento: performance.now() }; // intento 1: incluye la capa-0 (T1)
 
     // ─── R8 · STAGE 1/5 (split de procesarUno — misión punto 3): CAPA 0 QR ───
@@ -1341,14 +1764,8 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     ctx = r2.ctx;
     if (r2.ctx.registro) registro = r2.ctx.registro; // el reintento re-leyó de IDB
     // Espejos transitorios (estrangulamiento incremental): mueren cuando los
-    // stages 3-5 se extraigan. actaBruta se lee de r2.ctx (sin error el stage
-    // la garantiza Acta — el fallback actaTimeoutWatchdog corrió).
-    veredictoOrigen = ctx.veredictoOrigen;
-    preProceso = ctx.preProceso;
-    actaBruta = r2.ctx.actaBruta;
-    maestroDesenlace = ctx.maestroDesenlace;
-    decodeMasterMs = ctx.decodeMasterMs;
-    intentoDesenlace = ctx.intentoDesenlace;
+    // stages 3-5 se extraigan — SOLO sobreviven los que consume el catch del
+    // post-mortem y la métrica de desenlace (stages 4-5 aún no extraídos).
     preOcrMs = ctx.preOcrMs;
     preOcrOrigenMs = ctx.preOcrOrigenMs;
     preOcrDeskewMs = ctx.preOcrDeskewMs;
@@ -1359,339 +1776,27 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     elapsedMuerteMs = ctx.elapsedMuerteMs;
     rescateLanzado = ctx.rescateLanzado;
     entradaPrecalor = ctx.entradaPrecalor;
-    // D57 (T1): parche INMUTABLE del diagnóstico (kit §4-T1). ADITIVO — no
-    // toca score/status/gate; si el diagnóstico no existe (no debería: el
-    // bridge lo monta en todo desenlace fuera de SIM), se omite el campo.
-    // D63-A (T2): las trazas de origen viajan en el MISMO parche (aditivas,
-    // al final del contrato D57 — origen/origenSenales, ver origen.ts).
-    // D65: veredictoOrigen/preProceso son del ÚLTIMO intento ejecutado (si el
-    // desenlace existe, al menos un intento completó sus bloques D63).
-    const acta =
-      actaBruta.diagnostico != null
-        ? {
-            ...actaBruta,
-            diagnostico: {
-              ...actaBruta.diagnostico,
-              tiempos: { ...actaBruta.diagnostico.tiempos, esperaMs },
-              origen: veredictoOrigen?.origen ?? null,
-              origenSenales: veredictoOrigen?.senales ?? null,
-              // D63-B (T2/T3): trazas del pre-proceso de escaneos (aditivas,
-              // al final del contrato — null cuando no aplicó/no es escaneo).
-              skewGrados: preProceso?.skewGrados ?? null,
-              deskewMs: preProceso?.deskewMs ?? null,
-              limpieza: preProceso?.limpieza ?? null,
-              // D63-A2 (T0): provenance del master que el bridge CONSUMIÓ —
-              // "corregido" (deskew aplicado) | "original". Aditivo al final
-              // del contrato D57; el informe T2 lo consume como
-              // preprocesoAplicado (bool, presente si origen escaneo).
-              // preProceso existe SIEMPRE en MASIVA (nulo para no-escaneos →
-              // "original") — null solo si no hay diagnóstico (jamás inventar).
-              maestroFuente: preProceso
-                ? preProceso.aplicado
-                  ? ("corregido" as const)
-                  : ("original" as const)
-                : null,
-            },
-          }
-        : actaBruta;
-
-    // FIX M8 (auditoría 2-c): la decisión del dueño manda TAMBIÉN para el
-    // ENVÍO — si quitó la fila mientras el OCR corría, el desenlace NO se
-    // transmite (antes registrarEnvioMasiva corría ANTES del guard: fila de
-    // historial + completadas + hueco archivado de un acta descartado).
-    if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) return;
-
-    // ─── e63f — KIT e63f-autoenvio-v1 (F2): RE-LECTURA INTERNA antes de
-    // «repetir-primero» ─── SUGERIDA/MANUAL con captura PERFECTA (score ≥ 8 ∧
-    // lectura FUERTE ∧ gate completa) no vuelve a capturar: se RE-LEE el
-    // MISMO bitmap (reconocerTexto — re-warp con el quad horneado SIN
-    // re-detección + rapidocr a cap fino DET_CAP_PROD, la pasada-2 del
-    // escalonado) → re-clasificar → re-evaluar el gate (desenlaceTrasRelec-
-    // tura). AUTO → OPTIMA → autoenvío normal más abajo; si no → revisión
-    // humana como hoy. UNA pasada MÁXIMA (RED LINE 5) y el humano NUNCA la
-    // ve (intento de LECTURA, no de captura — el «repetir-primero» físico
-    // del flujo individual NO cambia). NUNCA aplica a RECHAZADAS por calidad
-    // (score < 6.5 — ahí re-escanear SÍ ayuda), ADVERTENCIA (red line) ni
-    // gate incompleta. Trazas aditivas: token ` RelecturaInterna=` (D51) y
-    // flag `relectura` en la fila. Cualquier falla interna (runtime OCR,
-    // base divipol) deja el veredicto de siempre — jamás empeora.
-    //
-    // e63g (E1/F0): el bloque va envuelto en conTope (RELECTURA_TOPE_MS) —
-    // era el ÚNICO await de la fila sin presupuesto propio (el watchdog D65
-    // no lo cubre) y un colgaje de reconocerTexto congelaba la cola PARA
-    // SIEMPRE. Tríada: valor → desenlace de la re-lectura; error →
-    // sin-cambio (como el catch de siempre); VENCIDO → matarYRecrear-
-    // Workers() + veredicto de la 1.ª lectura INTACTO (actaDesenlace sigue
-    // siendo `acta`) + token `tope` (D51 aditivo) + CERO reintentos. La
-    // traza SIEMPRE (también con tope).
-    let actaDesenlace = acta;
-    let relecturaDesenlace: "auto" | "sin-cambio" | null = null;
-    let relecturaToken: "auto" | "sin-cambio" | "tope" | null = null;
-    if (procedeRelecturaInterna(acta)) {
-      const tRelectura = performance.now();
-      const r = await conTope(
-        (async () => {
-          const textoRe = await getBridge().reconocerTexto(acta);
-          const clasifRe = clasificarCabecera(textoRe, await cargarDivipol());
-          return desenlaceTrasRelectura(acta, textoRe, clasifRe);
-        })(),
-        RELECTURA_TOPE_MS,
-      );
-      if (r.vencido) {
-        // Tope vencido — infraestructura muerta y re-creada (misma doctrina
-        // del watchdog T1.2); el VEREDICTO de la 1.ª lectura queda intacto.
-        // La relectura JAMÁS reintenta (red line): sin-cambio y fuera.
-        await matarYRecrearWorkers();
-        relecturaDesenlace = "sin-cambio";
-        relecturaToken = "tope";
-      } else if ("valor" in r) {
-        actaDesenlace = r.valor.acta;
-        relecturaDesenlace = r.valor.desenlace;
-        relecturaToken = r.valor.desenlace;
-      } else {
-        relecturaDesenlace = "sin-cambio";
-        relecturaToken = "sin-cambio";
-      }
-      // console.info LITERAL — ancla QA (qa-watchdog-relectura.ts Bloque 3:
-      // «traza SIEMPRE» grepea console.info( en este bloque). No migra al logger.
-      console.info(
-        `[e14] relectura-interna fila=${fila.id} ms=${Math.round(performance.now() - tRelectura)} RelecturaInterna=${relecturaToken}`,
-      );
-    }
-
-    // ─── e63k — KIT e63k-capa2-identidad-v1 (F1.4): CAPA 2 DEDUP POR
-    // IDENTIDAD (punto ÚNICO del kit, POST-OCR) ─── La identidad nace SOLO
-    // del código 1D consensuado (identidad.ts — RED LINE 2: sin consenso no
-    // hay identidad, jamás regex suelto sobre el texto). La marca pre-OCR
-    // quedó APLAZADA en la banda 3..6 (store); AQUÍ decide la serie impresa.
-    const identidad = identidadDeActa(actaDesenlace);
-    // ¿Original por identidad? OTRA fila (f.id !== fila.id) con la MISMA
-    // identidadActa (13 dígitos = formulario+PAG — P1 y P2 del mismo
-    // formulario son actas DISTINTAS, nunca se deduplican entre sí) en
-    // estado LISTA|DUPLICADA; la de agregadaEn MÍNIMA es la original.
-    // forzarDedupOff (el dueño pulsó PROCESAR IGUAL) manda sobre la capa 2.
-    // e71 (Opt-3) — SECCIÓN CRÍTICA (kit: «encolar la verificación de dedup
-    // en un solo hilo»): DOS filas con la MISMA serie aterrizando juntas
-    // veían AMBAS «sin original» y se enviaban DOBLE. Dentro del mutex la
-    // segunda ve la marca de la primera → DUPLICADA — el envío doble es
-    // IMPOSIBLE por construcción. El thumb/IDB (~50 ms) dentro de la
-    // sección: el OCR queda fuera (paralelo de verdad).
-    let originalIdentidad: FilaMasiva | null = null;
-    if (identidad && !fila.forzarDedupOff) {
-      // Capturas para la closure (el narrowing de registro no entra en las
-      // funciones async — misma técnica de qrPayloadSeguro arriba).
-      const registroCritico = registro;
-      const marcadaIdentidad = await conExclusionMutua(async () => {
-        const original =
-          storeMasiva()
-            .getState()
-            .filas.filter(
-              (f) =>
-                f.id !== fila.id &&
-                f.serie != null &&
-                f.serie.slice(0, 13) === identidad.identidadActa &&
-                (f.estado === "LISTA" || f.estado === "DUPLICADA"),
-            )
-            .sort((a, b) => a.agregadaEn - b.agregadaEn)[0] ?? null;
-        if (!original) return false;
-        originalIdentidad = original;
-        // DUPLICADA por identidad — SU PROPIO desenlace (no el de la
-        // original): NO reenvía, NO borra, revisión disponible. La capa 2
-        // decide por CUALQUIER status del desenlace (un dup RECHAZADO por
-        // blur de la misma acta también es dup) → return ANTES del envío y
-        // del contador (kit §1.4-5). El guard anti-zombi M8 ya corrió antes
-        // en el flujo (la fila está viva al llegar aquí) — NO se duplica.
-        const thumbIdentidad = await hacerThumb(
-          actaDesenlace.fotoProcesada ?? actaDesenlace.fotoOriginal,
-        );
-        await guardarRegistro({
-          ...registroCritico,
-          estado: "DUPLICADA",
-          dupOf: original.id,
-          acta: actaDesenlace,
-          thumb: thumbIdentidad,
-          serie: identidad.serie,
-          dedup: "identidad",
-          infoTitulo: tituloDeActa(actaDesenlace),
-          // e63m: el payload QR de esta fila viaja con SU desenlace (post-mortem).
-          ...(qrPayload ? { qrPayload } : {}),
-          // e64-qr T-0.2: el estado SOLO-VISUAL de la capa 0 también (honesto:
-          // la capa 0 corrió si qrEstadoCapa0 != null).
-          ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
-        });
-        marcarFila(fila.id, {
-          estado: "DUPLICADA",
-          dupOf: original.id,
-          statusActa: actaDesenlace.status,
-          score: actaDesenlace.score,
-          nivel: actaDesenlace.clasificacion?.nivel ?? null,
-          pagina: paginaDeActa(actaDesenlace),
-          infoTitulo: tituloDeActa(actaDesenlace),
-          motivo: actaDesenlace.rechazo?.tipo ?? null,
-          thumb: thumbIdentidad,
-          enviadaAuto: false,
-          // e63k (decisión declarada en el REPORTE §1): la serie TAMBIÉN al
-          // mapa en memoria (regla general del kit — el mapa de identidad de
-          // la sesión ve esta fila aunque la original se haya quitado).
-          serie: identidad.serie,
-          error: null,
-        });
-        logger.info(
-          `[e14] dedup-identidad fila=${fila.id} serie=${identidad.identidadActa} original=${original.id}`,
-        );
-        return true;
-      });
-      if (marcadaIdentidad) {
-        return; // NO registrarEnvioMasiva NI contarMotivoNoEnvioActa
-      }
-    }
-    // Falso-positivo visual EVITADO (el caso 3992/3993 de la consola del
-    // dueño — QA §3.2): la banda visual 3..6 la había dejado sospechosa y
-    // la serie impresa demuestra que es OTRA acta → resolución final
-    // "sin-match" en el registroListo de abajo (conservando dedupDistancia
-    // y dedupVisualDe del write aplazado — post-mortem). La fila sigue al
-    // envío normal — SU desenlace, NUNCA el de otra. La traza vive en el
-    // REGISTRO (kit §1.2 — dedupVisualDe es de RegistroMasiva; el store no
-    // la restaura a la fila).
-    const dedupVisualDeAplazada = registro?.dedupVisualDe ?? null;
-    // Solo se RESUELVE una banda que SIGUE aplazada (registro.dedup ===
-    // "visual-aplazada"): jamás revertir un veredicto "identidad" previo
-    // (el dueño pudo PROCESAR IGUAL una dup real — su traza queda intacta).
-    const falsoPositivoEvitado =
-      identidad != null &&
-      originalIdentidad == null &&
-      dedupVisualDeAplazada != null &&
-      registro?.dedup === "visual-aplazada";
-    if (falsoPositivoEvitado) {
-      logger.info(
-        `[e14] dedup-identidad fila=${fila.id} falso-positivo-visual evitado serie=${identidad!.serie} original-visual=${dedupVisualDeAplazada}`,
-      );
-    }
-
-    // ─── e72 — P2.1-v2: el veredicto de dedup por CONTENIDO manda sobre el
-    // envío ─── Segundo plano de la MISMA race del smoke del dueño
-    // (imagen9/imagen10): la fila llegó AL DESENLACE con el veredicto puesto
-    // (traza «v2» de cadenaDedup — cinta cierta, estampada aunque el guard
-    // anti-zombi bloqueara la marca pre-OCR) o con una gemela EXACTA
-    // (hashBytes sha256 idéntico) ya resuelta. El desenlace NUNCA envía:
-    // resolver por la maquinaria P2.1 (reutilizarResultado — la copia hereda
-    // DUPLICADA o RECHAZADA) o, sin original resoluble, DUPLICADA con SU
-    // PROPIO desenlace (doctrina capa-2 e63k: revisión disponible, cero
-    // envío, cero contador). LA ORIGINAL JAMÁS CAE AQUÍ: su traza es
-    // «sin-match» (la cadena es FIFO — sus candidatas son ANTERIORES) y una
-    // gemela en cola (DUPLICADA/PENDIENTE posterior) sin traza v2 no activa
-    // el guard. La gemela en vuelo cuenta SOLO si es ANTERIOR (agregadaEn
-    // menor): esperar a una POSTERIOR sería esperarla a ELLA que espera por
-    // ESTA — deadlock imposible por construcción. forzarDedupOff (PROCESAR
-    // IGUAL) manda SIEMPRE (RL-e65b-6 — el escape del dueño es sagrado).
-    if (!fila.forzarDedupOff && registro != null && registro.hashBytes != null) {
-      const hashNeto: string = registro.hashBytes;
-      // Whitelist de estados (T-5 e65: la literal YA-ENVIADA jamás se escribe
-      // en el runner — el QA la veta; AUSENTE/ERROR/ya-enviada quedan fuera
-      // por construcción: sin acta copiable no hay resolución posible).
-      const gemelasHash = storeMasiva()
-        .getState()
-        .filas.filter(
-          (f) =>
-            f.id !== fila.id &&
-            f.hashBytes === hashNeto &&
-            (f.estado === "PENDIENTE" ||
-              f.estado === "PROCESANDO" ||
-              f.estado === "LISTA" ||
-              f.estado === "DUPLICADA"),
-        )
-        .sort((a, b) => a.agregadaEn - b.agregadaEn);
-      const originalLista =
-        gemelasHash.find((f) => f.estado === "LISTA") ?? null;
-      const originalEnVuelo =
-        gemelasHash.find(
-          (f) =>
-            (f.estado === "PENDIENTE" || f.estado === "PROCESANDO") &&
-            f.agregadaEn < fila.agregadaEn,
-        ) ?? null;
-      if (registro.dedup === "v2" || originalLista != null) {
-        const tNet = Date.now();
-        let copiado = false;
-        if (originalLista != null) {
-          const filaGemela: FilaMasiva = {
-            ...fila,
-            estado: "DUPLICADA",
-            dupOf: originalLista.id,
-          };
-          copiado = await reutilizarResultado(filaGemela, tNet);
-        }
-        if (!copiado && originalEnVuelo != null) {
-          // La gemela cierta aún no aterriza (profunda en la cola/vuelo) →
-          // esperar su desenlace (mismo guard acotado de la rama DUPLICADA)
-          // y copiar: la OCR de ESTA fila ya se pagó (precio de la race) —
-          // el desenlace correcto sigue siendo el de la original.
-          if (await esperarDesenlaceOriginal(fila.id, originalEnVuelo.id)) {
-            const filaGemela: FilaMasiva = {
-              ...fila,
-              estado: "DUPLICADA",
-              dupOf: originalEnVuelo.id,
-            };
-            copiado = await reutilizarResultado(filaGemela, tNet);
-          }
-        }
-        if (copiado) return;
-        // (c) Sin original resoluble (gemela QUITADA en la carrera / «v2»
-        // por dHash de bytes distintos / gemela desaparecida) → DUPLICADA
-        // con SU PROPIO desenlace (revisión disponible — cero envío, cero
-        // contador; el OCR pagado fue el precio de la race y el informe lo
-        // muestra honesto con sus tiempos reales). La voluntad del dueño
-        // manda: una fila QUITADA en la espera no resucita registro.
-        if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) {
-          return;
-        }
-        const thumbNet = await hacerThumb(
-          actaDesenlace.fotoProcesada ?? actaDesenlace.fotoOriginal,
-        );
-        await guardarRegistro({
-          ...registro,
-          estado: "DUPLICADA",
-          acta: {
-            ...actaDesenlace,
-            status: "DUPLICADA",
-            enviadoAutomaticamente: null,
-            ...(actaDesenlace.diagnostico
-              ? {
-                  diagnostico: {
-                    ...actaDesenlace.diagnostico,
-                    status: "DUPLICADA" as const,
-                  },
-                }
-              : {}),
-          },
-          thumb: thumbNet,
-          infoTitulo: tituloDeActa(actaDesenlace),
-          ...(identidad ? { serie: identidad.serie } : {}),
-          ...(qrPayload ? { qrPayload } : {}),
-          ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
-          // WAVE3 §B — la DUPLICADA tras un rescate cuenta como SALVADA
-          // (desenlace final ≠ RECHAZADA — traza honesta del informe).
-          ...(rescateLanzado ? { rescateRechazo: "salvado" as const } : {}),
-        });
-        marcarFila(fila.id, {
-          estado: "DUPLICADA",
-          dupOf: originalLista?.id ?? originalEnVuelo?.id ?? null,
-          statusActa: "DUPLICADA",
-          score: actaDesenlace.score,
-          nivel: actaDesenlace.clasificacion?.nivel ?? null,
-          pagina: paginaDeActa(actaDesenlace),
-          infoTitulo: tituloDeActa(actaDesenlace),
-          motivo: actaDesenlace.rechazo?.tipo ?? null,
-          thumb: thumbNet,
-          enviadaAuto: false,
-          ...(identidad ? { serie: identidad.serie } : {}),
-          error: null,
-        });
-        logger.info(
-          `[e14] dedup fila=${fila.id} desenlace-contenido DUPLICADA v2=${registro.dedup === "v2"} gemela=${originalLista?.id ?? originalEnVuelo?.id ?? "sin-original"} (sin envío propio)`,
-        );
-        return; // NO registrarEnvioMasiva NI contarMotivoNoEnvioActa (patrón capa-2)
-      }
-    }
+    // ─── R8 · STAGE 3/5 (split de procesarUno): DESENLACE ───
+    // Parche D57 del desenlace + guard M8 + re-lectura interna (e63f) +
+    // capa 2 identidad (e63k) + falso-positivo evitado + dedup por contenido
+    // (e72 P2.1-v2) — el bloque vive en faseDesenlace (arriba). Los `return`
+    // del bloque (M8/dups) salen como resuelto:true (el finally del
+    // orquestador limpia igual); cualquier throw cae al MISMO catch de siempre
+    // (fila ERROR — la cola jamás se tumba).
+    const r3 = await faseDesenlace({ ...ctx, registro, archivo, actaBruta: r2.ctx.actaBruta });
+    if (r3.resuelto) return;
+    ctx = r3.ctx;
+    // Espejos transitorios (estrangulamiento incremental): los stages 4-5 aún
+    // no extraídos leen las variables locales — mueren en sus commits. Los
+    // acta los garantiza la SALIDA del stage (SalidaDesenlace, no-null).
+    const actaDesenlace = r3.ctx.actaDesenlace;
+    const actaParcheada = r3.ctx.actaParcheada;
+    const identidad = r3.ctx.identidad;
+    const falsoPositivoEvitado = r3.ctx.falsoPositivoEvitado;
+    const relecturaDesenlace = r3.ctx.relecturaDesenlace;
+    const maestroDesenlace = r3.ctx.maestroDesenlace;
+    const decodeMasterMs = r3.ctx.decodeMasterMs;
+    const intentoDesenlace = r3.ctx.intentoDesenlace;
 
     // Desenlace → la MISMA vía que el flujo normal (T3.3/T3.2). El envío
     // automático reutiliza registrarEnvio (historial + completadas + hueco
@@ -1891,7 +1996,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // thread post-pipeline (decode completo + canvas + JPEG). Cronometrado
     // para decidir su destino (quitar/degradar) con datos del INFORME.
     const tThumb0 = performance.now();
-    const thumb = await hacerThumb(acta.fotoProcesada ?? acta.fotoOriginal);
+    const thumb = await hacerThumb(actaParcheada.fotoProcesada ?? actaParcheada.fotoOriginal);
     const thumbMs = performance.now() - tThumb0;
     const registroListo: RegistroMasiva = {
       ...registro,
