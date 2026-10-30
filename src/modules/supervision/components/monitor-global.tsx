@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FiltrosBar } from "./filtros-bar";
 import { KpiCard, type TonoKpi } from "./kpi-card";
 import { PuestosTable } from "./puestos-table";
 import { ResumenChips } from "./resumen-chips";
 import { EsqueletoMonitor } from "./esqueleto";
 import { useDatos, useDatosAcciones, useDatosTicker, resumenDePuestos } from "./datos-provider";
+// R4-M7 — espejo de los filtros en location.hash (D11: espejo, NO router).
+import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import { tramoDeMinutos } from "../domain/tiempo-cierre";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
@@ -43,6 +45,25 @@ export function VistaMonitor() {
   // («no cargue todos los puestos de todos los días»). «Todos los días»
   // sigue disponible a mano desde el select FECHA.
   const [filtros, setFiltros] = useState<FiltrosPuestos>({ fecha: "LUNES" });
+
+  // R4-M7 — restauración de los filtros desde el espejo hash, UNA vez al
+  // montar (ref anti-doble-invoke). setState diferido a microtask (misma
+  // regla de lint que C8). El merge conserva el default del dueño para las
+  // claves que el hash no trae.
+  const filtrosRestauradosRef = useRef(false);
+  useEffect(() => {
+    if (filtrosRestauradosRef.current) return;
+    filtrosRestauradosRef.current = true;
+    const { filtros: delHash } = leerEstadoHash();
+    if (Object.keys(delHash).length === 0) return;
+    queueMicrotask(() => setFiltros((prev) => ({ ...prev, ...delHash })));
+  }, []);
+
+  // R4-M7 — espejo de escritura de los filtros (merge con las otras
+  // claves del hash; LUNES = default → la clave día se omite).
+  useEffect(() => {
+    escribirHashParcial({ filtros });
+  }, [filtros]);
 
   // Conjunto del DÍA (solo filtro de fecha): alimenta KPIs y resumen —
   // los otros filtros (país/zona/puesto/búsqueda/estado toggle) siguen

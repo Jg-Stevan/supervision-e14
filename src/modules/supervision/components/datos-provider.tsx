@@ -18,6 +18,8 @@ import {
 } from "../data/mock-repository";
 import { tieneActa } from "../data/actas-mock";
 import { suscribirseActasRuntime } from "../data/actas-runtime";
+// R4-M7 — espejo del visor en location.hash (D11: espejo, NO router).
+import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import type {
   ActaMesa,
   FormularioTipo,
@@ -380,6 +382,48 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       vivo = false;
     };
   }, [puestoIdVisor, mesaIdVisor]);
+
+  // R4-M7 — espejo del visor en location.hash: escritura en cada cambio y
+  // restauración UNA vez, recién terminada la carga (ref anti-doble-invoke
+  // + setState diferido a microtask — misma regla de lint que C8). El hash
+  // JAMÁS inventa estado: puesto y mesa se validan contra el catálogo ya
+  // cargado; un enlace viejo/foráneo se ignora en silencio.
+  const visorRestauradoRef = useRef(false);
+  useEffect(() => {
+    if (estado.cargando || visorRestauradoRef.current) return;
+    visorRestauradoRef.current = true;
+    const { visor } = leerEstadoHash();
+    if (!visor) return;
+    queueMicrotask(() => {
+      const existePuesto = estado.puestos.some((p) => p.id === visor.puestoId);
+      const existeMesa =
+        visor.mesaId !== null &&
+        (estado.mesasPorPuesto[visor.puestoId] ?? []).some(
+          (m) => m.id === visor.mesaId
+        );
+      if (!existePuesto || (visor.mesaId !== null && !existeMesa)) return;
+      setVisorActa({
+        puestoId: visor.puestoId,
+        mesaId: visor.mesaId,
+        tipo: visor.tipo ?? "TRANSMISION",
+        pagina: visor.pagina ?? 1,
+      });
+    });
+  }, [estado.cargando, estado.puestos, estado.mesasPorPuesto]);
+
+  // R4-M7 — espejo de escritura del visor (merge con las otras claves).
+  useEffect(() => {
+    escribirHashParcial({
+      visor: visorActa
+        ? {
+            puestoId: visorActa.puestoId,
+            mesaId: visorActa.mesaId,
+            tipo: visorActa.tipo,
+            pagina: visorActa.pagina,
+          }
+        : null,
+    });
+  }, [visorActa]);
 
   // Derivaciones: ¿la respuesta en memoria corresponde a la mesa abierta?
   const actaAlDia =
