@@ -1466,6 +1466,232 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
     };
 }
 
+/** Ctx POST-desenlace: el stage 3 garantizó los DOS acta del desenlace
+ *  (parcheada pre-relectura + post re-lectura) al seguir al envío. */
+type CtxPostDesenlace = CtxPostPipeline & { actaParcheada: Acta; actaDesenlace: Acta };
+
+/** Salida del STAGE 4: sin resuelto el ctx garantiza actaFinal (ENVIADA o el
+ *  desenlace de siempre — el parche D61 con envioMs/remotoMs ya aplicado) —
+ *  el stage 5 la consume Acta no-null. */
+type SalidaFaseEnvio =
+  | { resuelto: true; ctx: CtxProcesarUno }
+  | { resuelto: false; ctx: CtxProcesarUno & { actaFinal: Acta } };
+
+// ─── R8 · STAGE 4/5 — faseEnvio (H1 · WAVE3 §A.3 · H2 · D61) ────────────────
+/** ENVÍO del desenlace: veto ya-enviada POST-OCR (H1 — ledger local) → veto
+ *  REMOTO (WAVE3 §A.3 — SHA-256 del payload, jamás el payload) → envío propio
+ *  (registrarEnvioMasiva + métrica del roundtrip D45 + acta ENVIADA) → H2
+ *  ledger de enviadas (llaves FRESCAS de la fila) → registro remoto
+ *  fire-and-forget → parche D61 del diagnóstico (envioMs/remotoMs/red).
+ *  Los vetos salen como resuelto:true (sin envío — el OCR pagado es costo
+ *  hundido); cualquier throw cae al MISMO catch de procesarUno (jamás tumba
+ *  la cola). Función PURA salvo los efectos de siempre (store/IDB/ledger/
+ *  logger): recibe ctx y devuelve ctx nuevo — jamás muta el que recibe. */
+async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
+  const fila = ctx.fila;
+  const registro = ctx.registro;
+  const actaDesenlace = ctx.actaDesenlace;
+  const qrPayload = ctx.qrPayload;
+  const identidad = ctx.identidad;
+  // (bloque movido VERBATIM de procesarUno — mismo orden, mismos literales)
+    // Desenlace → la MISMA vía que el flujo normal (T3.3/T3.2). El envío
+    // automático reutiliza registrarEnvio (historial + completadas + hueco
+    // archivado + cola offline); el resto cae al contador T5 con las
+    // MISMAS claves.
+    let actaFinal = actaDesenlace;
+    let enviadaAuto = false;
+    // D61 — KIT e14-tiempos-ocultos-v1 (T3): coste del ENVÍO del desenlace —
+    // registrarEnvioMasiva (hash + historial + completadas + hueco archivado +
+    // cola offline; la sección síncrona del envío). SOLO hay envío real ONLINE:
+    // offline/EN COLA y no-OPTIMA → campo OMITIDO (jamás 0 falso — kit §2-T3).
+    let envioMs: number | null = null;
+    // WAVE3 G.5 — latencia del CHECK remoto (ledger D1 — §A.3). Estampa en
+    // el MISMO parche D61 (viaja solo en envíos online — mismos nulls
+    // honestos: sin check → omitido, jamás inventar).
+    let remotoMs: number | null = null;
+    if (actaDesenlace.status === "OPTIMA") {
+      // HOTFIX H1 (fix/ya-enviada-veto-postocr-v1) — veto ya-enviada POST-OCR:
+      // si el payload del QR (presente en el desenlace) ya pertenece a una
+      // ENVIADA del histórico, el envío JAMÁS sale. La capa 0 consulta el
+      // ledger pre-OCR (L543-562) pero SOLO en la rama sin original de sesión
+      // (`if (!originalQr)`) — las rutas que llegan aquí CON payload en mano
+      // (fallback de reutilizarResultado=false, original PENDIENTE/ERROR,
+      // techo-vencido de la APLAZADA) hoy envían sin volver a consultar.
+      // ADAPTACIÓN al árbol real (el kit cita `diag.qrPayload` — el bridge
+      // OMITE qrCam en masiva, scanner-core-bridge L1156): las fuentes reales
+      // del payload en el punto de envío son la capa 0 de ESTA corrida
+      // (qrPayload local), el acta (futuro-proof — undefined hoy en masiva) y
+      // el registro (payload persistido por una pasada previa del MISMO
+      // registro — ERROR/DUPLICADA reprocesada). MISMA llave exacta y
+      // maquinaria de capa0-qr (marcarYaEnviada via "payload") — RED LINES:
+      // sin fuzzy. Índice caído → null conservador (RL-e65b-3): la fila sigue
+      // su curso como hoy. forzarDedupOff manda SIEMPRE (RL-e65b-6 — el
+      // escape del dueño es sagrado, mismas capas L543/L580).
+      const diagQr =
+        qrPayload ?? actaDesenlace.qrPayload ?? registro.qrPayload ?? null;
+      if (diagQr && !fila.forzarDedupOff) {
+        const enviadaPostOcr = await enviadaPorPayload(diagQr);
+        if (enviadaPostOcr && enviadaPostOcr.id !== fila.id) {
+          if (
+            await marcarYaEnviada(
+              fila.id,
+              enviadaPostOcr.id,
+              "payload",
+              undefined,
+              undefined,
+              diagQr,
+              true,
+              "ya-enviada-postocr", // WAVE3 C.2 — puerta del veto AL FINAL (D57): distingue el veto post-OCR (OCR ya pagado)
+            )
+          ) {
+            logger.info(
+              `[e14] veto ya-enviada post-ocr ${qrCorto(diagQr)} fila=${fila.id} hist=${enviadaPostOcr.id}`,
+            );
+            // sin envío — el OCR pagado es costo hundido (caso raro)
+            return { resuelto: true, ctx };
+          }
+        }
+      }
+      // WAVE3 §A.3 — veto ya-enviada REMOTO (ledger D1 en Cloudflare — la
+      // garantía definitiva vive FUERA del navegador): el gap real del lote
+      // 9 fue doble envío tras borrar IndexedDB + cambiar de origen. El
+      // check SOLO usa el SHA-256 del payload (privacidad dura — jamás el
+      // payload). MISMO escape del dueño: forzarDedupOff salta TAMBIÉN el
+      // remoto (RL-e65b-6). Timeout 3 s / fallo → continuar como hoy
+      // (doctrina del conservador: el remoto es una red EXTRA, jamás una
+      // dependencia). El marcado fallido (IDB caído) también continúa.
+      if (diagQr && !fila.forzarDedupOff) {
+        const payloadHashRemoto = await sha256HexDeTexto(diagQr);
+        if (payloadHashRemoto) {
+          const tRemoto = Date.now();
+          const remoto = await consultarEnvioRemoto(payloadHashRemoto);
+          remotoMs = Date.now() - tRemoto;
+          if (remoto && remoto.duplicado) {
+            const marcadoRemoto = await marcarYaEnviada(
+              fila.id,
+              remoto.filaOriginal ?? "remoto",
+              "payload-remoto", // WAVE3 §A.3/D57 — valor NUEVO AL FINAL
+              undefined,
+              undefined,
+              diagQr,
+              true,
+            );
+            if (marcadoRemoto) {
+              logger.info(
+                `[e14] veto ya-enviada REMOTO ${qrCorto(diagQr)} fila=${fila.id} remoto=${remoto.filaOriginal ?? "?"}`,
+              );
+              // sin envío — igual que H1 (costo OCR hundido)
+              return { resuelto: true, ctx };
+            }
+          } else if (remoto === null) {
+            logger.info("[e14] ledger remoto indisponible — continúo");
+          }
+        }
+      }
+      // KIT e14-masiva-ux-v1 (T3.2): el envío respeta la conexión del momento
+      // (misma semántica que registrarEnvio para actaActual): OFFLINE →
+      // hashSha256 "EN COLA" — la fila pinta «EN COLA» y refrescarEnviosTrasDrenaje
+      // la drena al reconectar. Online → el hash lo maneja el flujo normal.
+      const onlineAlEnviar = useE14Store.getState().online;
+      const tEnvio = onlineAlEnviar ? performance.now() : 0;
+      useE14Store.getState().registrarEnvioMasiva(actaDesenlace, (pub) => {
+        // D45 — KIT e14-medicion-faltante-v1: la PUBLICACIÓN al monitor
+        // aterrizó — este es el roundtrip REAL de red (envioMs de D61 solo
+        // medía la sección síncrona, ≈1 ms). Observador pasivo: re-put
+        // idempotente de la métrica (llega DESPUÉS del desenlace — fire-
+        // and-forget, jamás bloquea ni tumba nada — RL-e65b-3).
+        registrarMetricaEnvioRound({
+          filaId: fila.id,
+          envioRoundMs: pub.ms,
+          envioEstado: pub.estado,
+        });
+      });
+      actaFinal = {
+        ...actaDesenlace, // e63f F2: el desenlace POST re-lectura manda (si AUTO → clasificación nueva viaja al envío)
+        status: "ENVIADA",
+        enviadoAutomaticamente: getBridge().horaEnvio(),
+        ...(onlineAlEnviar ? {} : { hashSha256: "EN COLA" }),
+      };
+      enviadaAuto = true;
+      // e65b (T-3a): el envío propio alimenta el LEDGER (historico.ts —
+      // sobrevive vaciar/recargas, D-e65b-1) — fire-and-forget, jamás
+      // bloquea ni tumba el envío (RL-e65b-2/3). El payload/serie VIVOS de
+      // ESTA corrida mandan sobre los del registro leído (la capa 0 acaba
+      // de decodificar el QR y la capa 2 la serie).
+      // HOTFIX H2 (fix/ya-enviada-veto-postocr-v1) — el ledger lleva las
+      // llaves FRESCAS de la fila: `registro` se leyó al ENTRAR al pipeline
+      // (L427) y cadenaDedup persiste hashDedup/hashBytes DESPUÉS (carrera
+      // ingesta×pipeline — el valor del snapshot viaja undefined). La fila
+      // viva del store lleva lo que cadenaDedup estampó (guardarRegistro +
+      // patchFila de la cadena). Sin estos campos el cinturón
+      // dhash-vs-histórico D-e65-6 SALTA la entrada del índice
+      // (`if (!h.hashDedup ...) continue`) — caso imagen10: una copia
+      // re-saved a Hamming 0 de una enviada no era atrapada en ingesta.
+      // Sin campos nuevos: completar la escritura de campos ya declarados
+      // (EntradaHistorica.hashDedup/hashBytes — mismo contrato del índice).
+      const filaViva = storeMasiva().getState().filas.find(
+        (f) => f.id === fila.id,
+      );
+      void registrarEnviadaHistorico({
+        id: fila.id,
+        ts: Date.now(),
+        hashBytes: filaViva?.hashBytes ?? registro.hashBytes,
+        hashDedup: filaViva?.hashDedup ?? registro.hashDedup,
+        payloadQr: qrPayload ?? undefined,
+        serie: identidad?.serie ?? registro.serie ?? undefined,
+      }).catch(() => {}); // fire-and-forget — jamás bloquea ni tumba el envío (RL-e65b-3)
+      // WAVE3 §A.3 — registro REMOTO tras el envío local exitoso (junto al
+      // H2, MISMA disciplina RL-e65b-3: fire-and-forget). Dirección del
+      // riesgo asumida y documentada (kit §1): registrar DESPUÉS del envío —
+      // un duplicado es detectable; un acta perdida no. SOLO online (offline
+      // → el registro nace en refrescarEnviosTrasDrenaje). forzarDedupOff
+      // salta TAMBIÉN el remoto (RL-e65b-6 — el escape del dueño manda).
+      if (diagQr && onlineAlEnviar && !fila.forzarDedupOff) {
+        const payloadRegistro = diagQr;
+        const serieRegistro = identidad?.serie ?? registro.serie ?? undefined;
+        const filaRegistro = fila.id;
+        void (async () => {
+          const payloadHash = await sha256HexDeTexto(payloadRegistro);
+          if (!payloadHash) return; // sin crypto — sin registro (conservador)
+          await registrarEnvioRemoto({
+            payloadHash,
+            serie: serieRegistro,
+            filaId: filaRegistro,
+            origenUrl: origenActual() ?? undefined,
+          });
+        })().catch(() => {});
+      }
+      if (onlineAlEnviar) envioMs = Math.round(performance.now() - tEnvio);
+    } else {
+      useE14Store.getState().contarMotivoNoEnvioActa(actaDesenlace);
+    }
+    // D61 (T3): parche INMUTABLE del diagnóstico con envioMs — MISMO patrón
+    // del parche esperaMs de D57 (spread, solo si diagnostico != null). Va
+    // ANTES de construir registroListo → viaja en la PRIMERA persistencia.
+    if (envioMs != null && actaFinal.diagnostico != null) {
+      // §G.2 — ORDEN-WAVE3-add-envio-individual-v1: la red del momento del
+      // envío viaja JUNTO al envioMs D61 (mismo parche inmutable — mismos
+      // nulls honestos: sin navigator.connection → null, jamás inventar).
+      // WAVE3 G.5 — remotoMs (latencia del check del ledger) viaja en el
+      // MISMO parche cuando el check corrió (omitido si no — jamás inventar).
+      const redEnvio = redActual();
+      actaFinal = {
+        ...actaFinal,
+        diagnostico: {
+          ...actaFinal.diagnostico,
+          tiempos: {
+            ...actaFinal.diagnostico.tiempos,
+            envioMs,
+            ...(remotoMs != null ? { remotoMs } : {}),
+          },
+          envioRedTipo: redEnvio?.tipo ?? null,
+          envioDownlinkMbps: redEnvio?.downlinkMbps ?? null,
+        },
+      };
+    }
+    return { resuelto: false, ctx: { ...ctx, actaFinal, enviadaAuto } };
+}
+
 /** Desenlace de UNA foto — byte a byte el pipeline real (kit §6-C: el
  *  desenlace DEBE ser idéntico al del IMPORTAR normal).
  *  D66 — KIT e14-decode-unico-precalor-v1: el pipeline recibe el MASTER
@@ -1798,199 +2024,27 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     const decodeMasterMs = r3.ctx.decodeMasterMs;
     const intentoDesenlace = r3.ctx.intentoDesenlace;
 
-    // Desenlace → la MISMA vía que el flujo normal (T3.3/T3.2). El envío
-    // automático reutiliza registrarEnvio (historial + completadas + hueco
-    // archivado + cola offline); el resto cae al contador T5 con las
-    // MISMAS claves.
-    let actaFinal = actaDesenlace;
-    let enviadaAuto = false;
-    // D61 — KIT e14-tiempos-ocultos-v1 (T3): coste del ENVÍO del desenlace —
-    // registrarEnvioMasiva (hash + historial + completadas + hueco archivado +
-    // cola offline; la sección síncrona del envío). SOLO hay envío real ONLINE:
-    // offline/EN COLA y no-OPTIMA → campo OMITIDO (jamás 0 falso — kit §2-T3).
-    let envioMs: number | null = null;
-    // WAVE3 G.5 — latencia del CHECK remoto (ledger D1 — §A.3). Estampa en
-    // el MISMO parche D61 (viaja solo en envíos online — mismos nulls
-    // honestos: sin check → omitido, jamás inventar).
-    let remotoMs: number | null = null;
-    if (actaDesenlace.status === "OPTIMA") {
-      // HOTFIX H1 (fix/ya-enviada-veto-postocr-v1) — veto ya-enviada POST-OCR:
-      // si el payload del QR (presente en el desenlace) ya pertenece a una
-      // ENVIADA del histórico, el envío JAMÁS sale. La capa 0 consulta el
-      // ledger pre-OCR (L543-562) pero SOLO en la rama sin original de sesión
-      // (`if (!originalQr)`) — las rutas que llegan aquí CON payload en mano
-      // (fallback de reutilizarResultado=false, original PENDIENTE/ERROR,
-      // techo-vencido de la APLAZADA) hoy envían sin volver a consultar.
-      // ADAPTACIÓN al árbol real (el kit cita `diag.qrPayload` — el bridge
-      // OMITE qrCam en masiva, scanner-core-bridge L1156): las fuentes reales
-      // del payload en el punto de envío son la capa 0 de ESTA corrida
-      // (qrPayload local), el acta (futuro-proof — undefined hoy en masiva) y
-      // el registro (payload persistido por una pasada previa del MISMO
-      // registro — ERROR/DUPLICADA reprocesada). MISMA llave exacta y
-      // maquinaria de capa0-qr (marcarYaEnviada via "payload") — RED LINES:
-      // sin fuzzy. Índice caído → null conservador (RL-e65b-3): la fila sigue
-      // su curso como hoy. forzarDedupOff manda SIEMPRE (RL-e65b-6 — el
-      // escape del dueño es sagrado, mismas capas L543/L580).
-      const diagQr =
-        qrPayload ?? actaDesenlace.qrPayload ?? registro.qrPayload ?? null;
-      if (diagQr && !fila.forzarDedupOff) {
-        const enviadaPostOcr = await enviadaPorPayload(diagQr);
-        if (enviadaPostOcr && enviadaPostOcr.id !== fila.id) {
-          if (
-            await marcarYaEnviada(
-              fila.id,
-              enviadaPostOcr.id,
-              "payload",
-              undefined,
-              undefined,
-              diagQr,
-              true,
-              "ya-enviada-postocr", // WAVE3 C.2 — puerta del veto AL FINAL (D57): distingue el veto post-OCR (OCR ya pagado)
-            )
-          ) {
-            logger.info(
-              `[e14] veto ya-enviada post-ocr ${qrCorto(diagQr)} fila=${fila.id} hist=${enviadaPostOcr.id}`,
-            );
-            return; // sin envío — el OCR pagado es costo hundido (caso raro)
-          }
-        }
-      }
-      // WAVE3 §A.3 — veto ya-enviada REMOTO (ledger D1 en Cloudflare — la
-      // garantía definitiva vive FUERA del navegador): el gap real del lote
-      // 9 fue doble envío tras borrar IndexedDB + cambiar de origen. El
-      // check SOLO usa el SHA-256 del payload (privacidad dura — jamás el
-      // payload). MISMO escape del dueño: forzarDedupOff salta TAMBIÉN el
-      // remoto (RL-e65b-6). Timeout 3 s / fallo → continuar como hoy
-      // (doctrina del conservador: el remoto es una red EXTRA, jamás una
-      // dependencia). El marcado fallido (IDB caído) también continúa.
-      if (diagQr && !fila.forzarDedupOff) {
-        const payloadHashRemoto = await sha256HexDeTexto(diagQr);
-        if (payloadHashRemoto) {
-          const tRemoto = Date.now();
-          const remoto = await consultarEnvioRemoto(payloadHashRemoto);
-          remotoMs = Date.now() - tRemoto;
-          if (remoto && remoto.duplicado) {
-            const marcadoRemoto = await marcarYaEnviada(
-              fila.id,
-              remoto.filaOriginal ?? "remoto",
-              "payload-remoto", // WAVE3 §A.3/D57 — valor NUEVO AL FINAL
-              undefined,
-              undefined,
-              diagQr,
-              true,
-            );
-            if (marcadoRemoto) {
-              logger.info(
-                `[e14] veto ya-enviada REMOTO ${qrCorto(diagQr)} fila=${fila.id} remoto=${remoto.filaOriginal ?? "?"}`,
-              );
-              return; // sin envío — igual que H1 (costo OCR hundido)
-            }
-          } else if (remoto === null) {
-            logger.info("[e14] ledger remoto indisponible — continúo");
-          }
-        }
-      }
-      // KIT e14-masiva-ux-v1 (T3.2): el envío respeta la conexión del momento
-      // (misma semántica que registrarEnvio para actaActual): OFFLINE →
-      // hashSha256 "EN COLA" — la fila pinta «EN COLA» y refrescarEnviosTrasDrenaje
-      // la drena al reconectar. Online → el hash lo maneja el flujo normal.
-      const onlineAlEnviar = useE14Store.getState().online;
-      const tEnvio = onlineAlEnviar ? performance.now() : 0;
-      useE14Store.getState().registrarEnvioMasiva(actaDesenlace, (pub) => {
-        // D45 — KIT e14-medicion-faltante-v1: la PUBLICACIÓN al monitor
-        // aterrizó — este es el roundtrip REAL de red (envioMs de D61 solo
-        // medía la sección síncrona, ≈1 ms). Observador pasivo: re-put
-        // idempotente de la métrica (llega DESPUÉS del desenlace — fire-
-        // and-forget, jamás bloquea ni tumba nada — RL-e65b-3).
-        registrarMetricaEnvioRound({
-          filaId: fila.id,
-          envioRoundMs: pub.ms,
-          envioEstado: pub.estado,
-        });
-      });
-      actaFinal = {
-        ...actaDesenlace, // e63f F2: el desenlace POST re-lectura manda (si AUTO → clasificación nueva viaja al envío)
-        status: "ENVIADA",
-        enviadoAutomaticamente: getBridge().horaEnvio(),
-        ...(onlineAlEnviar ? {} : { hashSha256: "EN COLA" }),
-      };
-      enviadaAuto = true;
-      // e65b (T-3a): el envío propio alimenta el LEDGER (historico.ts —
-      // sobrevive vaciar/recargas, D-e65b-1) — fire-and-forget, jamás
-      // bloquea ni tumba el envío (RL-e65b-2/3). El payload/serie VIVOS de
-      // ESTA corrida mandan sobre los del registro leído (la capa 0 acaba
-      // de decodificar el QR y la capa 2 la serie).
-      // HOTFIX H2 (fix/ya-enviada-veto-postocr-v1) — el ledger lleva las
-      // llaves FRESCAS de la fila: `registro` se leyó al ENTRAR al pipeline
-      // (L427) y cadenaDedup persiste hashDedup/hashBytes DESPUÉS (carrera
-      // ingesta×pipeline — el valor del snapshot viaja undefined). La fila
-      // viva del store lleva lo que cadenaDedup estampó (guardarRegistro +
-      // patchFila de la cadena). Sin estos campos el cinturón
-      // dhash-vs-histórico D-e65-6 SALTA la entrada del índice
-      // (`if (!h.hashDedup ...) continue`) — caso imagen10: una copia
-      // re-saved a Hamming 0 de una enviada no era atrapada en ingesta.
-      // Sin campos nuevos: completar la escritura de campos ya declarados
-      // (EntradaHistorica.hashDedup/hashBytes — mismo contrato del índice).
-      const filaViva = storeMasiva().getState().filas.find(
-        (f) => f.id === fila.id,
-      );
-      void registrarEnviadaHistorico({
-        id: fila.id,
-        ts: Date.now(),
-        hashBytes: filaViva?.hashBytes ?? registro.hashBytes,
-        hashDedup: filaViva?.hashDedup ?? registro.hashDedup,
-        payloadQr: qrPayload ?? undefined,
-        serie: identidad?.serie ?? registro.serie ?? undefined,
-      }).catch(() => {}); // fire-and-forget — jamás bloquea ni tumba el envío (RL-e65b-3)
-      // WAVE3 §A.3 — registro REMOTO tras el envío local exitoso (junto al
-      // H2, MISMA disciplina RL-e65b-3: fire-and-forget). Dirección del
-      // riesgo asumida y documentada (kit §1): registrar DESPUÉS del envío —
-      // un duplicado es detectable; un acta perdida no. SOLO online (offline
-      // → el registro nace en refrescarEnviosTrasDrenaje). forzarDedupOff
-      // salta TAMBIÉN el remoto (RL-e65b-6 — el escape del dueño manda).
-      if (diagQr && onlineAlEnviar && !fila.forzarDedupOff) {
-        const payloadRegistro = diagQr;
-        const serieRegistro = identidad?.serie ?? registro.serie ?? undefined;
-        const filaRegistro = fila.id;
-        void (async () => {
-          const payloadHash = await sha256HexDeTexto(payloadRegistro);
-          if (!payloadHash) return; // sin crypto — sin registro (conservador)
-          await registrarEnvioRemoto({
-            payloadHash,
-            serie: serieRegistro,
-            filaId: filaRegistro,
-            origenUrl: origenActual() ?? undefined,
-          });
-        })().catch(() => {});
-      }
-      if (onlineAlEnviar) envioMs = Math.round(performance.now() - tEnvio);
-    } else {
-      useE14Store.getState().contarMotivoNoEnvioActa(actaDesenlace);
-    }
-    // D61 (T3): parche INMUTABLE del diagnóstico con envioMs — MISMO patrón
-    // del parche esperaMs de D57 (spread, solo si diagnostico != null). Va
-    // ANTES de construir registroListo → viaja en la PRIMERA persistencia.
-    if (envioMs != null && actaFinal.diagnostico != null) {
-      // §G.2 — ORDEN-WAVE3-add-envio-individual-v1: la red del momento del
-      // envío viaja JUNTO al envioMs D61 (mismo parche inmutable — mismos
-      // nulls honestos: sin navigator.connection → null, jamás inventar).
-      // WAVE3 G.5 — remotoMs (latencia del check del ledger) viaja en el
-      // MISMO parche cuando el check corrió (omitido si no — jamás inventar).
-      const redEnvio = redActual();
-      actaFinal = {
-        ...actaFinal,
-        diagnostico: {
-          ...actaFinal.diagnostico,
-          tiempos: {
-            ...actaFinal.diagnostico.tiempos,
-            envioMs,
-            ...(remotoMs != null ? { remotoMs } : {}),
-          },
-          envioRedTipo: redEnvio?.tipo ?? null,
-          envioDownlinkMbps: redEnvio?.downlinkMbps ?? null,
-        },
-      };
-    }
+    // ─── R8 · STAGE 4/5 (split de procesarUno): ENVÍO ───
+    // Veto H1 + veto remoto + envío propio + ledger H2 + registro remoto +
+    // parche D61 — el bloque vive en faseEnvio (arriba). Los vetos salen como
+    // resuelto:true (el finally del orquestador limpia igual); cualquier
+    // throw cae al MISMO catch de siempre (fila ERROR — la cola jamás se
+    // tumba).
+    const r4 = await faseEnvio({
+      ...ctx,
+      registro,
+      archivo,
+      actaBruta: r2.ctx.actaBruta,
+      actaDesenlace: r3.ctx.actaDesenlace,
+      actaParcheada: r3.ctx.actaParcheada,
+    });
+    if (r4.resuelto) return;
+    ctx = r4.ctx;
+    // Espejo transitorio (estrangulamiento incremental): el stage 5 aún no
+    // extraído lee la variable local — muere en su commit. actaFinal la
+    // garantiza la SALIDA del stage (SalidaFaseEnvio, no-null).
+    const actaFinal = r4.ctx.actaFinal;
+    const enviadaAuto = r4.ctx.enviadaAuto;
 
     // D35 — thumbMs: la miniatura de la bandeja es TRABAJO REAL del main
     // thread post-pipeline (decode completo + canvas + JPEG). Cronometrado
