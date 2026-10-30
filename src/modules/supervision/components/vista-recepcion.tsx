@@ -199,13 +199,30 @@ export function VistaRecepcion({
   /** Ids de llegadas frescas (destello 1.6 s — .fila-llegada). */
   const [frescas, setFrescas] = useState<Set<string>>(() => new Set());
   const temporizadores = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  /** R4-lint — la lectura inicial corre UNA vez aunque el effect se monte
+   * dos veces (StrictMode); el state persiste entre esos remontajes. */
+  const leimosRef = useRef(false);
+  /** R4-lint — ¿hay una instancia viva de la vista AHORA? (el microtask de
+   * la lectura inicial consulta esto: nada de setState tras desmontar). */
+  const montadoRef = useRef(false);
 
   useEffect(() => {
     let vivo = true;
+    montadoRef.current = true;
     // El sembrado del ancla estático corre 1 vez (idempotente) ANTES de
     // la primera lectura — la vista abre con la ingesta inicial visible.
     asegurarSemilla();
-    setEntradas(consultarRecepciones());
+    // R4-lint (vista-recepcion.tsx:208) — la primera lectura ya NO es un
+    // setState sincrónico en el cuerpo del effect (react-hooks/
+    // set-state-in-effect): se difiere a una microtarea. Mismo resultado
+    // observable: el skeleton ya está pintado y el log aterriza una
+    // microtask después; el ref evita la doble lectura en StrictMode.
+    if (!leimosRef.current) {
+      leimosRef.current = true;
+      queueMicrotask(() => {
+        if (montadoRef.current) setEntradas(consultarRecepciones());
+      });
+    }
     const desuscribir = suscribirseRecepcion((entrada) => {
       if (!vivo) return;
       setEntradas(consultarRecepciones());
@@ -223,6 +240,7 @@ export function VistaRecepcion({
     });
     return () => {
       vivo = false;
+      montadoRef.current = false;
       desuscribir();
       for (const t of temporizadores.current) clearTimeout(t);
       temporizadores.current.clear();
