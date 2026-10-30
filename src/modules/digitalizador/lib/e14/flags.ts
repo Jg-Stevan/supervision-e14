@@ -14,8 +14,9 @@
  */
 import { leerOverridesFlags } from "./obs/politica";
 import type { FlagsApp } from "./obs/tipos";
+// R2 — PUBLIC_BASE único (src/shared/env.ts, era const local §B2 #10).
+import { PUBLIC_BASE } from "@/shared/env";
 
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const REFRESH_MS = 24 * 60 * 60 * 1000;
 const REINTENTO_BASE_MS = 60_000;
 const REINTENTO_TOPE_MS = REFRESH_MS;

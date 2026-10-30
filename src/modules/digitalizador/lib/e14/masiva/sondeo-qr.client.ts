@@ -50,8 +50,9 @@ export type FabricaWorkerSondeo = () => WorkerSondeo | null;
 
 /** Base pública de assets — MISMO patrón del repo (flags.ts/rapidocr.ts/
  *  scanner-core WORKER_URL): assets servidos desde public/ con prefijo
- *  NEXT_PUBLIC_BASE_PATH (Vercel sirve bajo /digielect14). */
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+ *  NEXT_PUBLIC_BASE_PATH (Vercel sirve bajo /digielect14).
+ *  R2 — único en src/shared/env.ts (era const local §B2 #10). */
+import { PUBLIC_BASE } from "@/shared/env";
 
 function fabricaProduccion(): WorkerSondeo | null {
   // FIX DICTAMEN-e73-implementacion-v1 §3.1: Turbopack trató

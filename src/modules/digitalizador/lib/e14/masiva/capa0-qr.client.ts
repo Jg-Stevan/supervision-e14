@@ -45,8 +45,9 @@ export type OpcionesCapa0Worker = {
   presupuestoMs: number | null;
 };
 
-/** Base pública de assets — MISMO patrón del repo (sondeo-qr.client.ts). */
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+/** Base pública de assets — MISMO patrón del repo (sondeo-qr.client.ts).
+ *  R2 — único en src/shared/env.ts (era const local §B2 #10). */
+import { PUBLIC_BASE } from "@/shared/env";
 
 /** Cache-busting del worker precompilado (mismo patrón ?v=N del
  *  detection-worker — bump al regenerar el bundle). */

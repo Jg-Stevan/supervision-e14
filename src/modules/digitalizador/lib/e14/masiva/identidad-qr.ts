@@ -63,6 +63,9 @@ import type { Binarizer, ReaderOptions } from "zxing-wasm/reader";
 import type { EstadoEntrada } from "./tipos";
 import { canvasCon, decodeImagenLru } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
 import { logger } from "../../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
+// R2 — PUBLIC_BASE único (src/shared/env.ts; el inline de locateFile era la
+// copia #8 del §B2 #10).
+import { PUBLIC_BASE } from "@/shared/env";
 // ─── KIT e73-sondeo-qr-precoz-v1 (§A.2) — refactor puro ADITIVO ───────────
 // El núcleo puro de píxeles (PixelesQr · EspecieBanda · BANDAS_BASE/BANDA_A ·
 // intentoSobrePixeles · rotar90/rotarPixeles) vive en qr-pixeles.ts
@@ -239,7 +242,7 @@ export async function moduloZxingDe(): Promise<ModZxing | null> {
     const mod = await import("zxing-wasm/reader");
     mod.setZXingModuleOverrides({
       locateFile: (archivo: string) =>
-        `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/wasm/${archivo}`,
+        `${PUBLIC_BASE}/wasm/${archivo}`,
     });
     modZxing = mod;
   } catch {

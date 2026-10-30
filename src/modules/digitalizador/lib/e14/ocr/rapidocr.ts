@@ -44,8 +44,8 @@ import {
 } from "./router-ocr";
 import { leerFlags } from "../flags";
 import { obtenerDispositivo } from "../obs/dispositivo";
-
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+// R2 — PUBLIC_BASE único (src/shared/env.ts, era const local §B2 #10).
+import { PUBLIC_BASE } from "@/shared/env";
 
 // ─── Tipos ORT mínimos (el módulo se importa dinámicamente) ─────────────────
 

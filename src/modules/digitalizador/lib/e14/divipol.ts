@@ -18,6 +18,8 @@
  */
 
 import { logger } from "../logger";
+// R2 — PUBLIC_BASE único (src/shared/env.ts, era const local §B2 #10).
+import { PUBLIC_BASE } from "@/shared/env";
 
 /** Puesto de votación (stand): nombre + número de mesas (countTable).
  *  Overnight 3B-B3c: de-export (uso interno en la jerarquía; knip). */
@@ -54,7 +56,6 @@ type EstadoDivipol = "cargando" | "cargada" | "fallo";
 // GitHub Pages sirve la app bajo /web-scanner/ → el asset se referencia con
 // el prefijo público del build (vacío en dev/servidor local) — mismo patrón
 // que detector-client.ts L160-161 del core (WORKER_URL).
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const DIVIPOL_URL = `${PUBLIC_BASE}/e14/divipol.json`;
 
 let cache: DivipolBase | null = null;
