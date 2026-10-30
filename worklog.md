@@ -543,3 +543,36 @@ Work Log:
   vuelo por barrido de eventos + actas que compartieron turno — prueba D31).
 - docs/DECISIONS.md: D44.
 - Verificación: tsc --noEmit → baseline 9 = 9; eslint → 0/0.
+
+---
+
+Task ID: 21 — medicion-faltante-v1 (D45): los 5 huecos de medición del informe (gap / envío real / proceso / cancelaciones / dedup)
+
+- Fecha: 2026-10-30 · Origen: auditoría E15/E16 (banco de auditoría de tiempos con 3
+  relojes + medición Node independiente; informe real 2026-10-30-03-28-16).
+- metricas.ts: MetricaActa gana muroMs/gapMs (muro del despacho − lo medido dentro,
+  solo con las dos paredes mayores — jamás inventar), envioRoundMs/envioEstado (hook 2c
+  registrarMetricaEnvioRound — re-put idempotente al aterrizar la publicación),
+  dedupDetalle (diagnóstico de la comparación). EtapasMetrica gana procesoBwMs/
+  procesoOcrMs (particiones — cuelloDeEtapas las excluye). CorridaMetrica gana
+  motivoCierre ("drenada"|"pausa"|"recarga-o-abandono"). Hook 1 estampa el motivo de la
+  corrida quedada abierta; hook 4 recibe el motivo del runner.
+- store-e14.ts: registrarEnvioMasiva(acta, onPublicacion?) — cronometra el await REAL
+  de publicarDesdeActa (roundtrip de red) y reporta "publicada"|"bloqueada". Fire-and-
+  forget intacto (RL-e65b-3); callback opcional (nadie obligado a escuchar).
+- runner.ts: cerrarCorridaMetrica(stopFlag ? "pausa" : "drenada"); el despacho del
+  envío pasa el callback que llama registrarMetricaEnvioRound; registrarMetricaDesenlace
+  recibe dedupDetalle del registroListo (traza fresca de cadenaDedup).
+- scanner-core-bridge.ts (2 zonas): .then() sobre las MISMAS promesas de processImage —
+  pared individual de cada warp desde el despacho conjunto (core serializa → la 2.ª
+  acumula la cola). Subs exportadas con guard > 0 (jamás inventar).
+- store.ts (cadenaDedup): cuenta candidatas vivas + índice histórico y estampa la mejor
+  distancia de Hamming vista (incluso sobre el umbral) — dedupDetalle en el MISMO write
+  del hash (cero writes nuevos).
+- tipos.ts: RegistroMasiva.dedupDetalle (aditivo al final, contrato D57). types.ts:
+  Tiempos.procesoBwMs/procesoOcrMs.
+- InformeCorrida.tsx: sub-barras └ WARP BW / WARP LECTURA + líneas GAP SIN DUEÑO,
+  PUBLICACIÓN AL MONITOR, DEDUP SIN-MATCH (candidatas · mejor distancia vs umbral 6) +
+  cabecera «COMPLETADA · cierre: {motivo}».
+- docs/DECISIONS.md: D45.
+- Verificación: tsc --noEmit → baseline intacta; eslint → 0/0.

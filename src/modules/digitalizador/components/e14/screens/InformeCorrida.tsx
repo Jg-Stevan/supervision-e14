@@ -68,6 +68,16 @@ const PRE_OCR_SUBS: { key: PreOcrSubKey; label: string }[] = [
   { key: "preOcrMasterMs", label: "MASTER" },
 ];
 
+// KIT e14-medicion-faltante-v1 (D45) — particiones del muro PROCESO (los 2
+// warps SERIALIZADOS por el core): sub-barras indentadas bajo su barra madre.
+// La 2.ª pared acumula la cola de la 1.ª — el coste propio del segundo warp
+// es la DIFERENCIA entre ambas paredes.
+type ProcesoSubKey = "procesoBwMs" | "procesoOcrMs";
+const PROCESO_SUBS: { key: ProcesoSubKey; label: string }[] = [
+  { key: "procesoBwMs", label: "WARP BW" },
+  { key: "procesoOcrMs", label: "WARP LECTURA" },
+];
+
 function fmtMs(ms: number | null | undefined): string {
   if (ms == null) return "—";
   if (ms < 1000) return `${Math.round(ms)} ms`;
@@ -180,6 +190,19 @@ export default function InformeCorrida() {
     const sumas = new Map<EtapaKey, number>();
     // KIT e14-tiempos-v2 (D44) — sub-desglose del muro + trazas del despacho:
     const preOcrSubSum = new Map<PreOcrSubKey, number>();
+    // KIT e14-medicion-faltante-v1 (D45) — subs del muro PROCESO + los 3
+    // faltantes del informe real (gap / publicación / dedup sin-match):
+    const procesoSubSum = new Map<ProcesoSubKey, number>();
+    let gapN = 0; // actas con residual medido
+    let gapPeor: number | null = null; // peor residual (valor absoluto)
+    let gapSobreUmbral = 0; // actas con gap > 50 ms (el "sin dueño" real)
+    let envioRoundSum = 0; // roundtrip REAL de la publicación al monitor
+    let envioRoundN = 0;
+    let envioBloqueadas = 0;
+    let dedupSinMatch = 0; // actas dedup:"sin-match"
+    let dedupDetalleN = 0; // de ellas, con diagnóstico de comparación
+    let dedupMejorDist: number | null = null; // mejor distancia vista (global)
+    let dedupCandidatasSum = 0; // candidatas totales comparadas (vivas + índice)
     let qrHeredadas = 0; // capa-0 heredó qrPrevio (palanca ① — cobertura)
     let conPreOcr = 0; // actas con muro medido (denominador honesto)
     let reintentoActas = 0; // muro RE-ARMADO ≥ 1 vez (watchdog/rescate)
@@ -212,8 +235,39 @@ export default function InformeCorrida() {
           preOcrSubSum.set(sk, (preOcrSubSum.get(sk) ?? 0) + v);
           continue;
         }
+        // D45 — particiones del muro PROCESO (2 warps): ídem — línea propia.
+        if (k !== "procesoMs" && k.startsWith("proceso")) {
+          const sk = k as ProcesoSubKey;
+          procesoSubSum.set(sk, (procesoSubSum.get(sk) ?? 0) + v);
+          continue;
+        }
         sumas.set(k as EtapaKey, (sumas.get(k as EtapaKey) ?? 0) + v);
         trabajoTotal += v;
+      }
+      // D45 — gap sin dueño / publicación del envío / dedup sin-match:
+      if (typeof a.gapMs === "number") {
+        gapN += 1;
+        if (gapPeor === null || Math.abs(a.gapMs) > Math.abs(gapPeor)) gapPeor = a.gapMs;
+        if (a.gapMs > 50) gapSobreUmbral += 1;
+      }
+      if (typeof a.envioRoundMs === "number") {
+        envioRoundSum += a.envioRoundMs;
+        envioRoundN += 1;
+        if (a.envioEstado === "bloqueada") envioBloqueadas += 1;
+      }
+      if (a.dedup === "sin-match") {
+        dedupSinMatch += 1;
+        const dd = a.dedupDetalle;
+        if (dd) {
+          dedupDetalleN += 1;
+          dedupCandidatasSum += dd.candidatas + dd.indice;
+          if (
+            typeof dd.mejorDistancia === "number" &&
+            (dedupMejorDist === null || dd.mejorDistancia < dedupMejorDist)
+          ) {
+            dedupMejorDist = dd.mejorDistancia;
+          }
+        }
       }
       // D44 — trazas por acta (herencia / re-arms / solape):
       if (a.etapas.preOcrMs != null) conPreOcr += 1;
@@ -261,6 +315,18 @@ export default function InformeCorrida() {
       porDesenlace,
       sumas,
       preOcrSubSum,
+      // D45 — subs del proceso + los 3 faltantes:
+      procesoSubSum,
+      gapN,
+      gapPeor,
+      gapSobreUmbral,
+      envioRoundSum,
+      envioRoundN,
+      envioBloqueadas,
+      dedupSinMatch,
+      dedupDetalleN,
+      dedupMejorDist,
+      dedupCandidatasSum,
       qrHeredadas,
       conPreOcr,
       reintentoActas,
@@ -329,7 +395,11 @@ export default function InformeCorrida() {
           role="status"
         >
           {enCurso && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse mr-1.5 align-middle" />}
-          {enCurso ? `EN CURSO · ${fmtMs(wallCorrida)}` : `COMPLETADA · ${fmtMs(wallCorrida)}`}
+          {/* D45 — el motivo de cierre viaja: "drenada" | "pausa" |
+              "recarga-o-abandono" — el fin=null sin dueño ya no existe. */}
+          {enCurso
+            ? `EN CURSO · ${fmtMs(wallCorrida)}`
+            : `COMPLETADA${seleccionadaInfo?.motivoCierre ? ` · cierre: ${seleccionadaInfo.motivoCierre}` : ""} · ${fmtMs(wallCorrida)}`}
         </span>
         <span className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
           {seleccionadaInfo ? fmtFechaRelativa(seleccionadaInfo.inicio) : ""}
@@ -434,6 +504,32 @@ export default function InformeCorrida() {
                         );
                       },
                     )}
+                  {/* KIT e14-medicion-faltante-v1 (D45) — sub-desglose del muro
+                      PROCESO (2 warps serializados): ídem — % del PROPIO muro. */}
+                  {key === "procesoMs" &&
+                    PROCESO_SUBS.filter(({ key: sk }) => (agg.procesoSubSum.get(sk) ?? 0) > 0).map(
+                      ({ key: sk, label: slabel }) => {
+                        const sMs = agg.procesoSubSum.get(sk) ?? 0;
+                        const sPct = ms > 0 ? Math.round((sMs / ms) * 100) : 0;
+                        return (
+                          <div key={sk} className="flex items-center gap-2 pl-5" role="row">
+                            <span className="w-24 shrink-0 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                              └ {slabel}
+                            </span>
+                            <div className="flex-1 h-2.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+                              <div
+                                className="h-full rounded-md bg-[#10b981]/30"
+                                style={{ width: `${Math.max(2, sPct)}%` }}
+                                aria-hidden
+                              />
+                            </div>
+                            <span className="w-40 shrink-0 text-right font-mono text-[9px] text-slate-500" role="cell">
+                              {fmtMs(sMs)} · {sPct}% del WARP+REALCE
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
                 </Fragment>
               );
             })}
@@ -467,6 +563,24 @@ export default function InformeCorrida() {
             {agg.nConTs > 1 && (
               <p className="font-mono text-[10px] text-slate-500">
                 + SOLAPE REAL (tsInicio→tsFin): máx {agg.maxSimultaneas} acta(s) en vuelo a la vez · {agg.solapadas} compartieron turno
+              </p>
+            )}
+            {/* KIT e14-medicion-faltante-v1 (D45) — los 3 faltantes del
+                informe real: GAP sin dueño · PUBLICACIÓN (roundtrip real) ·
+                DEDUP sin-match (por qué no matcheó). */}
+            {agg.gapN > 0 && (
+              <p className={`font-mono text-[10px] ${agg.gapSobreUmbral > 0 ? "text-amber-400" : "text-slate-500"}`}>
+                + GAP SIN DUEÑO (muro − totalMs − preOcr − thumb − persist − envío): {agg.gapSobreUmbral} de {agg.gapN} acta(s) &gt; 50 ms · peor {fmtMs(agg.gapPeor)}
+              </p>
+            )}
+            {agg.envioRoundN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + PUBLICACIÓN AL MONITOR (roundtrip real — envioMs de D61 solo media el dispatch): media {fmtMs(Math.round(agg.envioRoundSum / agg.envioRoundN))} en {agg.envioRoundN} acta(s){agg.envioBloqueadas > 0 ? ` · ${agg.envioBloqueadas} BLOQUEADA(S)` : ""}
+              </p>
+            )}
+            {agg.dedupSinMatch > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + DEDUP SIN-MATCH: {agg.dedupSinMatch} acta(s){agg.dedupDetalleN > 0 ? ` · candidatas comparadas ${Math.round(agg.dedupCandidatasSum / agg.dedupDetalleN)}/acta · mejor distancia ${agg.dedupMejorDist ?? "—"} (umbral 6)` : " · sin diagnóstico de comparación (dhash omitido por gama o falló)"}
               </p>
             )}
             {agg.trabajoTotal === 0 && (

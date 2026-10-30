@@ -1137,7 +1137,7 @@ export class RealCoreBridge implements E14Bridge {
     parcial: ParcialPipeline,
     emitir: (p: ProgresoAnalisis) => void,
   ): Promise<Acta> {
-    const ms = { decode: 0, detect: 0, proceso: 0, calidad: 0, ocr: 0, total: 0 };
+    const ms = { decode: 0, detect: 0, proceso: 0, procesoBw: 0, procesoOcr: 0, calidad: 0, ocr: 0, total: 0 };
     const inicio = performance.now();
 
     // 1) Entrada → data URL crudo (F-IMPORT del core: HEIC/EXIF/12MP seguros;
@@ -1337,15 +1337,28 @@ export class RealCoreBridge implements E14Bridge {
       // si processImage("original") rechaza, Promise.all NO rechaza — decide
       // con el resultado null → bw-fallback (§5). El pipeline NUNCA muere por
       // la variante nueva.
+      // D45 — pared individual de CADA warp (el core SERIALIZA: la 2.ª
+      // pared acumula la cola de la 1.ª — su coste propio es la DIFERENCIA
+      // entre ambas). Observador pasivo: mismas promesas, solo cronómetro.
+      let tProcesoBw = 0;
+      let tProcesoOcr = 0;
       const [resultado, resultadoOcr] = await conRampa(
         Promise.all([
           // Fuente: apps/scanner-lab/src/components/scanner/CameraView.tsx L602-604
           // (captura arranca en B/N adaptativo) + types.ts L50 (default del
           // producto) — D36: e14 no tiene ajustes → el default fijo es "bw".
-          processImage(fotoOriginal, quad, "bw"),
+          processImage(fotoOriginal, quad, "bw").then((r) => {
+            tProcesoBw = performance.now();
+            return r;
+          }),
           // PROD-1: la misma geometría (mismo warp, MISMA convención
           // POST-warp — pitfall §9.5), solo cambia el filtro final.
-          processImage(fotoOriginal, quad, "original").catch(() => null),
+          processImage(fotoOriginal, quad, "original")
+            .catch(() => null)
+            .then((r) => {
+              tProcesoOcr = performance.now();
+              return r;
+            }),
         ]),
         // msEstimados 1400→2200 (§4.1): el segundo warp (~0.6-1.3 s, §1.4)
         // se cubre con la MISMA rampa (el core serializa en su worker).
@@ -1358,6 +1371,9 @@ export class RealCoreBridge implements E14Bridge {
         emitir,
       );
       ms.proceso = performance.now() - tProceso;
+      // D45 — subs del muro (guard > 0 al exportar — jamás inventar).
+      if (tProcesoBw > 0) ms.procesoBw = Math.round(tProcesoBw - tProceso);
+      if (tProcesoOcr > 0) ms.procesoOcr = Math.round(tProcesoOcr - tProceso);
       emitir({ etapa: "REALZANDO", progreso: 1 });
       fotoProcesada = resultado.processed;
       filtroActa = "bw";
@@ -1869,6 +1885,10 @@ export class RealCoreBridge implements E14Bridge {
           },
           tiempos: {
             procesoMs: ms.proceso,
+            // D45 — sub-desglose de los 2 warps (omitidos si no corrieron —
+            // jamás inventar; doctrina guard > 0 de D43).
+            ...(ms.procesoBw > 0 ? { procesoBwMs: ms.procesoBw } : {}),
+            ...(ms.procesoOcr > 0 ? { procesoOcrMs: ms.procesoOcr } : {}),
             calidadMs: ms.calidad,
             ocrMs: ms.ocr,
             totalMs: ms.total,
@@ -2132,7 +2152,7 @@ export class RealCoreBridge implements E14Bridge {
     // timeout de recortar() resuelve con él (patrón `parcial` del escaneo).
     parcial: ParcialRecorte,
   ): Promise<Acta> {
-    const ms = { proceso: 0, calidad: 0, ocr: 0, total: 0 };
+    const ms = { proceso: 0, procesoBw: 0, procesoOcr: 0, calidad: 0, ocr: 0, total: 0 };
     const inicio = performance.now();
     // F2/D36: el recorte conserva el filtro del acta (default del producto "bw").
     const filtro: PageFilter = acta.filtro ?? "bw";
@@ -2147,13 +2167,24 @@ export class RealCoreBridge implements E14Bridge {
     //    (fallback bw-fallback §5). msEstimados 1400→2200 (2.º warp, §1.4).
     emitir({ etapa: "RECORTANDO", progreso: 0.2 });
     const tProceso = performance.now();
-    const pBw = processImage(fotoOriginal, quad, filtro, rotacion, { manual: true });
+    // D45 — pared individual de CADA warp (misma doctrina de la zona
+    // principal): el core serializa → la 2.ª pared acumula la cola. Cuando
+    // pOcr === pBw (filtro ya-original) el segundo cronómetro queda a 0.
+    let tProcesoBw = 0;
+    let tProcesoOcr = 0;
+    const pBw = processImage(fotoOriginal, quad, filtro, rotacion, { manual: true }).then((r) => {
+      tProcesoBw = performance.now();
+      return r;
+    });
     const pOcr =
       filtro === "original"
         ? pBw
-        : processImage(fotoOriginal, quad, "original", rotacion, { manual: true }).catch(
-            () => null,
-          );
+        : processImage(fotoOriginal, quad, "original", rotacion, { manual: true })
+            .catch(() => null)
+            .then((r) => {
+              tProcesoOcr = performance.now();
+              return r;
+            });
     const [resultado, resultadoOcr] = await conRampa(
       Promise.all([pBw, pOcr]),
       2200,
@@ -2165,6 +2196,9 @@ export class RealCoreBridge implements E14Bridge {
       emitir,
     );
     ms.proceso = performance.now() - tProceso;
+    // D45 — subs del muro (guard > 0 al exportar — jamás inventar).
+    if (tProcesoBw > 0) ms.procesoBw = Math.round(tProcesoBw - tProceso);
+    if (tProcesoOcr > 0) ms.procesoOcr = Math.round(tProcesoOcr - tProceso);
     emitir({ etapa: "REALZANDO", progreso: 1 });
     // KIT e14-orientacion-auto-v1 (T-A3): let — el probe puede reemplazarla
     // por la YA derecha (§2.1 paso 4); el horneado `parcial` de abajo consume
@@ -2511,6 +2545,9 @@ export class RealCoreBridge implements E14Bridge {
           },
           tiempos: {
             procesoMs: ms.proceso,
+            // D45 — sub-desglose de los 2 warps (omitidos si no corrieron).
+            ...(ms.procesoBw > 0 ? { procesoBwMs: ms.procesoBw } : {}),
+            ...(ms.procesoOcr > 0 ? { procesoOcrMs: ms.procesoOcr } : {}),
             calidadMs: ms.calidad,
             ocrMs: ms.ocr,
             totalMs: ms.total,

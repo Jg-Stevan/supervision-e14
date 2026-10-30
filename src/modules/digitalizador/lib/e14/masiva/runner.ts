@@ -77,6 +77,7 @@ import {
   iniciarCorridaMetrica,
   registrarMetricaCopia,
   registrarMetricaDesenlace,
+  registrarMetricaEnvioRound, // D45 — la publicación al monitor aterrizó (re-put idempotente)
   registrarMetricaError,
 } from "./metricas";
 import { logger } from "../../logger";
@@ -1490,7 +1491,18 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // la drena al reconectar. Online → el hash lo maneja el flujo normal.
       const onlineAlEnviar = useE14Store.getState().online;
       const tEnvio = onlineAlEnviar ? performance.now() : 0;
-      useE14Store.getState().registrarEnvioMasiva(actaDesenlace);
+      useE14Store.getState().registrarEnvioMasiva(actaDesenlace, (pub) => {
+        // D45 — KIT e14-medicion-faltante-v1: la PUBLICACIÓN al monitor
+        // aterrizó — este es el roundtrip REAL de red (envioMs de D61 solo
+        // medía la sección síncrona, ≈1 ms). Observador pasivo: re-put
+        // idempotente de la métrica (llega DESPUÉS del desenlace — fire-
+        // and-forget, jamás bloquea ni tumba nada — RL-e65b-3).
+        registrarMetricaEnvioRound({
+          filaId: fila.id,
+          envioRoundMs: pub.ms,
+          envioEstado: pub.estado,
+        });
+      });
       actaFinal = {
         ...actaDesenlace, // e63f F2: el desenlace POST re-lectura manda (si AUTO → clasificación nueva viaja al envío)
         status: "ENVIADA",
@@ -1730,6 +1742,12 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
       ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
       dedup: registro?.dedup,
+      // D45 — diagnóstico del dedup de ingesta (POR QUÉ sin-match): la traza
+      // fresca del registroListo manda (el spread de arriba la trae de
+      // cadenaDedup; el override "sin-match" de e63k solo toca `dedup`).
+      ...(registroListo.dedupDetalle
+        ? { dedupDetalle: registroListo.dedupDetalle }
+        : {}),
     });
   } catch (err) {
     // Errores de IDB/decode/pipeline NUNCA tumban la UI (kit §3): la
@@ -1864,7 +1882,10 @@ export function iniciarRunner(): void {
   iniciarCorridaMetrica(); // D34 — abre corrida de métricas (fire-and-forget)
   void bucle().finally(() => {
     corriendoFlag = false;
-    cerrarCorridaMetrica(); // D34 — cierra la corrida (drenada o pausada)
+    // D34/D45 — cierra la corrida con su MOTIVO (drenada o pausa — stopFlag
+    // manda: manual o auto-pausa de REVISIÓN; el informe ya no tiene fin=null
+    // sin dueño).
+    cerrarCorridaMetrica(stopFlag ? "pausa" : "drenada");
     useMasivaStore.setState({ corriendo: false, progreso: null });
   });
 }
