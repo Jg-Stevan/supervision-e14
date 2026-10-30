@@ -145,7 +145,7 @@ describe("lecturas null-honest del navigator (referencias incrustadas)", () => {
       return typeof m === "number" ? m : null;
     };
     const vacio = {} as Navigator;
-    const conDato = { deviceMemory: 8 } as Navigator;
+    const conDato = { deviceMemory: 8 } as unknown as Navigator;
     expect(memoriaGBDe(vacio)).toBe(null);
     expect(memoriaGBDe(vacio)).toBe(refMemoriaGBDe(vacio));
     expect(memoriaGBDe(conDato)).toBe(8);
@@ -209,7 +209,7 @@ describe("lecturas null-honest del navigator (referencias incrustadas)", () => {
     const vacio = {} as Navigator;
     const conRed = {
       connection: { effectiveType: "4g", downlink: 2.3, saveData: false, type: "wifi" },
-    } as Navigator;
+    } as unknown as Navigator;
     expect(redDe(vacio)).toEqual({ tipo: null, downlinkMbps: null, saveData: false, wifi: false });
     expect(redDe(vacio)).toEqual(refRed(vacio));
     expect(redDe(conRed)).toEqual({ tipo: "4g", downlinkMbps: 2.3, saveData: false, wifi: true });
