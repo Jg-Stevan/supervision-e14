@@ -52,6 +52,8 @@ import {
 import { VistaPerfil } from "@/modules/perfil-dispositivo/components/panel-perfil";
 import { tonoTier } from "@/modules/perfil-dispositivo/lib/clasificador";
 import { etiquetaForma } from "@/modules/perfil-dispositivo/lib/senales";
+// R2 — mapa tono→token único (§B2 #8).
+import { colorDeTono } from "@/shared/ui/tono";
 
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
  * (el export estático sigue siendo trivial: una sola página).
@@ -315,12 +317,10 @@ function VistaActual({
 function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
   const { perfil } = usePerfilRecursos();
   if (!perfil.listo || perfil.tier === "PENDIENTE" || !perfil.senales) return null;
-  const color =
-    tonoTier(perfil.tier) === "success"
-      ? "var(--success)"
-      : tonoTier(perfil.tier) === "warning"
-        ? "var(--warning)"
-        : "var(--danger)";
+  // R2 — mapa tono→token único (src/shared/ui/tono.ts, §B2 #8): reemplaza el
+  // ternario duplicado. Equivalencia exacta en el dominio real: tonoTier()
+  // jamás devuelve "neutral" para ALTO/MEDIO/BAJO (test de paridad lo fija).
+  const color = colorDeTono(tonoTier(perfil.tier));
   return (
     <button
       type="button"

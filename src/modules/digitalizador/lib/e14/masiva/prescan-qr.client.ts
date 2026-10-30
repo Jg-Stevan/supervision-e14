@@ -43,8 +43,9 @@ import { flagsMasivaEfectivos } from "../gama";
 
 /** Base pública de assets — MISMO patrón del repo (sondeo-qr.client.ts:54/
  * flags.ts/rapidocr.ts): assets servidos desde public/ con prefijo
- * NEXT_PUBLIC_BASE_PATH (Vercel/OpenNext sirve bajo base path). */
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+ * NEXT_PUBLIC_BASE_PATH (Vercel/OpenNext sirve bajo base path).
+ * R2 — único en src/shared/env.ts (era const local §B2 #10). */
+import { PUBLIC_BASE } from "@/shared/env";
 
 export const WORKER_URLS = [
   `${PUBLIC_BASE}/scanner/detection-worker.js?v=8`,

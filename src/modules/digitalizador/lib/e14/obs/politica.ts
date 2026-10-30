@@ -14,6 +14,10 @@ import { appendEvento } from "./buffer";
 import { digestDe } from "./digest";
 import { obtenerBreadcrumbs } from "./breadcrumbs";
 import type { FlagsApp, PoliticaDatos } from "./tipos";
+// R2 — tabla ÚNICA de flags + whitelist de saneo (§B2 #11): sanearFlags
+// (flags.ts) y leerOverridesFlags derivan del MISMO esquema (fin de la
+// doble whitelist «cada puerta su línea»).
+import { sanearConEsquema } from "@/shared/e14/flags-schema";
 
 const CLAVE_POLITICA = "e14-obs-politica";
 export const CLAVE_MODO_DEV = "e14-dev-mode";
@@ -105,68 +109,23 @@ export function guardarModoDev(on: boolean): void {
 }
 
 /** Overrides de flags — la MÁXIMA prioridad en leerFlags (kill switch
- *  manual del dueño, D6). JSON corrupto → {} silencioso. */
+ *  manual del dueño, D6). JSON corrupto → {} silencioso.
+ *
+ *  R2 (§B2 #11) — DERIVA de la tabla única `sanearConEsquema` (src/shared/
+ *  e14/flags-schema.ts): mismas condiciones y clamps por clave que la
+ *  whitelist manual que reemplaza. DELTA ADITIVO documentado (test de
+ *  paridad lo fija): la tabla es la UNIÓN de las 2 whitelists históricas →
+ *  el override localStorage ahora también alcanza `sondeoQrPresupuestoMs`,
+ *  `sondeoQrCortocircuito`, `prescanQrCola` y `qrBrujulaOrientacion`
+ *  (antes solo por flags.json vía sanearFlags). Nada que antes se aceptaba
+ *  se rechaza. */
 export function leerOverridesFlags(): Partial<FlagsApp> {
   try {
     const raw = window.localStorage.getItem(CLAVE_OVERRIDES);
     if (!raw) return {};
     const o = JSON.parse(raw) as Partial<FlagsApp>;
     if (typeof o !== "object" || o === null) return {};
-    const limpio: Partial<FlagsApp> = {};
-    if (o.poolWorkers === 1 || o.poolWorkers === 2) limpio.poolWorkers = o.poolWorkers;
-    if (typeof o.thumbsOn === "boolean") limpio.thumbsOn = o.thumbsOn;
-    // cola-persistente-v1 (ANEXO Agente B): el override del dueño pasa por
-    // ESTE whitelist — sin esta línea el MODO PRUEBAS (colaPersistente:false)
-    // sería inalcanzable vía e14-flags-overrides.
-    if (typeof o.colaPersistente === "boolean") limpio.colaPersistente = o.colaPersistente;
-    if (typeof o.ocrThreadsTope === "number" && Number.isFinite(o.ocrThreadsTope)) {
-      limpio.ocrThreadsTope = Math.max(1, Math.min(8, Math.round(o.ocrThreadsTope)));
-    }
-    if (typeof o.telemetriaSalud === "boolean") limpio.telemetriaSalud = o.telemetriaSalud;
-    if (o.endpointReportes === null || typeof o.endpointReportes === "string") {
-      limpio.endpointReportes = o.endpointReportes;
-    }
-    // KIT e14-obs-hang-atribucion-v1 (§D) — el kill-switch `hangEnCurso` del
-    // dueño pasa por ESTE whitelist: sin esta línea el override localStorage
-    // (§G.3.d del smoke) sería inalcanzable — mismo criterio de
-    // colaPersistente arriba (el override MANUAL es la máxima prioridad, D6).
-    if (typeof o.hangEnCurso === "boolean") limpio.hangEnCurso = o.hangEnCurso;
-    // KIT flujo-dueno-v1 (K2 — brief Agente B) — mismo criterio: sin esta
-    // línea el override localStorage de `masivaSondeoCrudo` sería
-    // inalcanzable (el whitelist de leerOverridesFlags es INDEPENDIENTE del
-    // de sanearFlags en flags.ts — cada puerta necesita su línea).
-    if (typeof o.masivaSondeoCrudo === "boolean") limpio.masivaSondeoCrudo = o.masivaSondeoCrudo;
-    // sondeoQrPrecoz (kill-switch e73) — mismo criterio: sin esta línea el
-    // override localStorage sería inalcanzable — ya estaba en el whitelist
-    // de sanearFlags (flags.ts) pero FALTABA ESTA puerta (DOBLE whitelist —
-    // cada puerta su línea).
-    if (typeof o.sondeoQrPrecoz === "boolean") limpio.sondeoQrPrecoz = o.sondeoQrPrecoz;
-    // KIT e14-prescan-warp-lado-v1 — mismo criterio: sin estas líneas los
-    // overrides localStorage de las válvulas del pre-scan serían
-    // inalcanzables (DOBLE whitelist — cada puerta su línea).
-    if (typeof o.prescanQrPresupuestoMs === "number" && Number.isFinite(o.prescanQrPresupuestoMs)) {
-      limpio.prescanQrPresupuestoMs = Math.max(1000, Math.min(30_000, Math.round(o.prescanQrPresupuestoMs)));
-    }
-    if (typeof o.prescanWarpLado === "number" && Number.isFinite(o.prescanWarpLado)) {
-      limpio.prescanWarpLado = Math.max(256, Math.min(4032, Math.round(o.prescanWarpLado)));
-    }
-    // KIT e14-gama-adaptativa-v1 — mismo criterio: sin esta línea el
-    // override localStorage del kill-switch `masivaAdaptativoGama` (OFF =
-    // byte-idéntico a hoy en TODOS los dispositivos — D74) sería
-    // inalcanzable (DOBLE whitelist — cada puerta su línea).
-    if (typeof o.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = o.masivaAdaptativoGama;
-    // KIT e14-capa0-qr-worker-v1 (D40) — mismo criterio: sin esta línea el
-    // override localStorage del kill-switch `capa0QrWorker` (false = cadena
-    // de capa 0 en main byte-idéntica a hoy) sería inalcanzable (DOBLE
-    // whitelist — cada puerta su línea).
-    if (typeof o.capa0QrWorker === "boolean") limpio.capa0QrWorker = o.capa0QrWorker;
-    // KIT ocr-router-v1 — mismo criterio: sin estas líneas los overrides
-    // localStorage del kill-switch `ocrMotorAdaptativo` y del motor manual
-    // `ocrMotor` serían inalcanzables (DOBLE whitelist — cada puerta su
-    // línea).
-    if (typeof o.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = o.ocrMotorAdaptativo;
-    if (o.ocrMotor === "ppocrv5" || o.ocrMotor === "tesseract-best-psm4" || o.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = o.ocrMotor;
-    return limpio;
+    return sanearConEsquema(o) as Partial<FlagsApp>;
   } catch {
     return {};
   }

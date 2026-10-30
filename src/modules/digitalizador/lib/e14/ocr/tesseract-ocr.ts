@@ -20,7 +20,8 @@
 import { logger } from "../../logger";
 import type { RapidOcrLinea, RapidOcrResultado } from "./rapidocr"; // type-only: sin ciclo en runtime
 
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+// R2 — PUBLIC_BASE único (src/shared/env.ts, era const local §B2 #10).
+import { PUBLIC_BASE } from "@/shared/env";
 
 /** Timeout de la init del worker (descarga gz + compile WASM en frío). */
 const TIMEOUT_INIT_MS = 20_000;
