@@ -17,10 +17,11 @@
  *
  * RED LINES heredadas (kit e63m §3 + e64 §7 — vigentes byte a byte):
  * · Payload EXACTO jamás fuzzy (llave opaca — jamás prefijos, red line 10).
- * · jsQR 1.4.0 VENDIDO byte-idéntico al de #72 (vendor/jsQR.js).
+ * · jsQR 1.4.0 VENDIDO byte-idéntico al de #72 (R7b: MOVIDO a ../vendor —
+ *   git mv byte-idéntico, red line 9 intacta; consumido vía ../vendor).
  * · Jamás throw: un intento que falla = null (el caller decide).
  */
-import jsQR from "./vendor/jsQR.js";
+import jsQR from "../vendor/jsQR.js"; // R7b (M10-fin): antes "./vendor" — el vendor vive ahora en el núcleo
 
 /** Fuente de píxeles RGBA — la MISMA forma que devuelve getImageData
  *  (canal a canal, 4 bytes por píxel, fila por fila). */

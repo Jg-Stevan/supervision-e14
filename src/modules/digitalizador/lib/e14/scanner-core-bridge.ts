@@ -45,11 +45,17 @@
  *   · acta-factory.ts            (R7b/M5b) — construirActa/firmas/capturarFrame
  *   · auditoria.ts               (R7b/M4)  — payload del registro del desenlace
  *   · qr-zxing.ts                (R7b/M10) — loader zxing-wasm (antes en masiva/)
+ *   · vendor/jsQR.js(.d.ts)      (R7b/M10-fin) — jsQR vendido byte-idéntico
+ *                                (git mv de masiva/vendor — 0 imports estáticos
+ *                                núcleo→masiva; qr-pixeles.ts lo consume vía
+ *                                ../vendor, dirección correcta masiva→núcleo)
  * PENDIENTE (dueño, r7c/R8): unificar los CUERPOS gemelos de pipeline()/
  * pipelineRecorte() (M6 — banda dirigida, clasificación+lazo, escudo e71,
- * log de auditoría ~60 l ×2), la extracción rapidocr (R4/M8) y el
- * vendor/jsQR.js que orientacion-qr aún toma de masiva/vendor (activo
- * byte-idéntico, red line 9).
+ * log de auditoría ~60 l ×2), la extracción rapidocr (R4/M8) y el import
+ * DINÁMICO de rescate scanner-core-bridge→masiva/identidad-qr
+ * (decodificarQrDeCapture, e64-qr T-2.1 — moverlo exige arrastrar la cadena
+ * completa de tiers QR de masiva; lazy intencional, no es inversión de
+ * símbolos estática).
  */
 import {
   detectDocumentEdgesDetail,

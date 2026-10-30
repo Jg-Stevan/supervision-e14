@@ -63,7 +63,9 @@ const eslintConfig = defineConfig([
     // assets del core copiados (opencv/detection-worker/onnxruntime) — JS de
     // terceros/minificado, no código fuente del repo (mismo criterio del
     // repo origen).
-    "src/modules/digitalizador/lib/e14/masiva/vendor/**",
+    // R7b (M10-fin): el vendor jsQR se MOVIO de masiva/vendor a vendor/ del
+    // nucleo (git mv byte-idéntico) — el ignore viaja con el activo.
+    "src/modules/digitalizador/lib/e14/vendor/**",
     "public/vendor/**",
     "public/scanner/**",
     "public/wasm/**",
