@@ -63,9 +63,13 @@ import type { Binarizer, ReaderOptions } from "zxing-wasm/reader";
 import type { EstadoEntrada } from "./tipos";
 import { canvasCon, decodeImagenLru } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
 import { logger } from "../../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
-// R2 — PUBLIC_BASE único (src/shared/env.ts; el inline de locateFile era la
-// copia #8 del §B2 #10).
-import { PUBLIC_BASE } from "@/shared/env";
+// R7b (M10) — RE-EXPORT TEMPORAL: moduloZxingDe/estadoZxingQr/qrCorto viven
+// AHORA en ../qr-zxing (fin de la dependencia invertida núcleo→masiva:
+// orientacion-qr.ts ya no importa de este archivo). Este módulo los consume
+// y los re-exporta SIN CAMBIOS para que runner.ts y el QA sigan importando
+// de aquí — R8 re-apuntará sus imports y retirará esta línea.
+import { moduloZxingDe, qrCorto } from "../qr-zxing";
+export { estadoZxingQr, moduloZxingDe, qrCorto } from "../qr-zxing";
 // KIT e75-qr-zoom-zbar-v1 — zbar-wasm (tier de rescate del ZOOM TL, main):
 // carga diferida LOCAL /wasm/ + filtro QR — MISMA doctrina del tier zxing.
 import { estadoZbarQr, zbarDePixeles } from "./zbar-qr";
@@ -221,57 +225,9 @@ export function ladderQrDePixeles(pix: PixelesQr): string | null {
 
 
 // ─── e63n (T-PRE) — tier ZXING (zxing-wasm 3.1.6, wasm LOCAL) ──────────────
-/** Módulo zxing-wasm/reader cacheado — undefined = aún no intentado ·
- *  null = la carga falló (degrada a solo-jsQR) · módulo = listo. */
-type ModZxing = typeof import("zxing-wasm/reader");
-let modZxing: ModZxing | null | undefined;
-
-/**
- * Carga DIFERIDA del módulo zxing (doc hermano §1: `import("zxing-wasm/
- * reader")` + wasm servido LOCAL desde public/wasm/ vía
- * setZXingModuleOverrides({ locateFile }) con base
- * `${NEXT_PUBLIC_BASE_PATH ?? ""}/wasm/`). Una sola tentativa por sesión
- * (caché); falla → null CON traza de indisponibilidad (T-0.1 del e64 —
- * doc hermano F-0.2) y el pipeline degrada a solo-jsQR. Jamás throw.
- *
- * KIT e14-orientacion-qr-v1 — EXPORTADO ADITIVO: la brújula QR de
- * orientación REUTILIZA este loader (mismo módulo, MISMA instancia de wasm
- * en caché — cero costo extra de memoria/bundle). El contrato no cambia:
- * caché de una tentativa, jamás throw.
- */
-export async function moduloZxingDe(): Promise<ModZxing | null> {
-  if (modZxing !== undefined) return modZxing;
-  try {
-    const mod = await import("zxing-wasm/reader");
-    mod.setZXingModuleOverrides({
-      locateFile: (archivo: string) =>
-        `${PUBLIC_BASE}/wasm/${archivo}`,
-    });
-    modZxing = mod;
-  } catch {
-    // e64-qr T-0.1 — el fallo del wasm/glue era SILENCIOSO (doc hermano
-    // H-3): sin esta traza era imposible distinguir «QR ilegible» de
-    // «wasm no cargó» (deploy sin BUILD_STATIC=1, basePath equivocado,
-    // red bloqueada). El pipeline NO se rompe: degrada a solo-jsQR.
-    logger.warn(
-      `[e14] qr-capa0 zxing INDISPONIBLE (wasm/glue no cargó) — rescate degrada a solo-jsQR`,
-    );
-    modZxing = null;
-  }
-  return modZxing;
-}
-
-/** e64-qr T-0.1 — Estado del módulo zxing para diagnóstico (doc hermano
- *  F-0.2): "no-intentado" = aún sin intentar · "indisponible" = la carga
- *  falló (rescate degrada a solo-jsQR) · "listo" = wasm cargado. SOLO-
- *  LECTURA: jamás muta el estado, jamás dispara la carga. */
-export function estadoZxingQr(): "no-intentado" | "indisponible" | "listo" {
-  return modZxing === undefined
-    ? "no-intentado"
-    : modZxing === null
-      ? "indisponible"
-      : "listo";
-}
+// R7b (M10): el loader (moduloZxingDe + su caché + estadoZxingQr + el tipo
+// ModZxing) vive en ../qr-zxing (re-exportado arriba — misma instancia
+// única de wasm).
 
 /** Opciones del barrido por ventana (micro-decisión declarada: el barrido
  *  lanza ~700-2300 ventanas — cada una debe ser BARATA; la rotación y la
@@ -818,8 +774,5 @@ export async function esperarDesenlaceQr(
   return "techo";
 }
 
-/** Prefijo corto del payload para trazas/informe (8 chars + «…») — SOLO
- *  cosmética: la decisión vive SIEMPRE en la igualdad EXACTA (red line 10). */
-export function qrCorto(payload: string): string {
-  return `${payload.slice(0, 8)}…`;
-}
+// R7b (M10): qrCorto vive en ../qr-zxing (re-exportado arriba — mismo
+// formateador de trazas, SOLO cosmético: red line 10 intacta).

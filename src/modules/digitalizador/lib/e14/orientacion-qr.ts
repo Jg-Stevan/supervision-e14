@@ -26,9 +26,10 @@
  * nuevas):
  *   · zxing-wasm 3.1.6 YA está en el repo (e63n/e64) con wasm LOCAL en
  *     public/wasm/ — este módulo usa el MISMO loader perezoso
- *     (moduloZxingDe de identidad-qr.ts, exportado ADITIVO).
- *   · jsQR 1.4.0 VENDIDO (masiva/vendor — red line 9) para el intento sobre
- *     el warp (barato) y como intento extra del rescate.
+ *     (moduloZxingDe, hoy en qr-zxing.ts — exportado ADITIVO).
+ *   · jsQR 1.4.0 VENDIDO (vendor/ del núcleo — red line 9: el .js sigue
+ *     byte-idéntico, solo MOVIDO de masiva/vendor en R7b) para el intento
+ *     sobre el warp (barato) y como intento extra del rescate.
  *   · loadImageMemo/canvasCon (SPRINT-A) — el re-decode de fotoOriginal pega
  *     al LRU compartido del pipeline (HIT, sin decode doble).
  *   · anillo D62 (ganadorPersistente) ORDENA las esquinas: la rotación
@@ -66,9 +67,16 @@ import type { Quad } from "@jg-stevan/scanner-core/types";
 import type { Binarizer } from "zxing-wasm/reader";
 import { canvasCon, loadImageMemo } from "./image-utils";
 import { logger } from "../logger";
-import { moduloZxingDe, qrCorto } from "./masiva/identidad-qr";
+// R7b (M10) — fin de la dependencia invertida núcleo→masiva: el loader zxing
+// vive ahora en el núcleo (../qr-zxing, MOVIDO de masiva/identidad-qr.ts —
+// misma caché/instancia de wasm; masiva lo re-exporta temporalmente).
+import { moduloZxingDe, qrCorto } from "./qr-zxing";
 import { anilloGanadorRegistrar, ganadorPersistente } from "./orientacion";
-import jsQR from "./masiva/vendor/jsQR.js";
+// R7b (M10-fin) — jsQR vendido MOVIDO de masiva/vendor a vendor/ del núcleo
+// (git mv byte-idéntico, red line 9 intacta): último import ESTÁTICO
+// núcleo→masiva eliminado. masiva/qr-pixeles.ts lo consume vía ../vendor
+// (dirección correcta masiva→núcleo).
+import jsQR from "./vendor/jsQR.js";
 
 /** Rotación a aplicar (misma unión que el Rotacion local de orientacion.ts —
  *  estructuralmente compatible con rotarDataUrl). */

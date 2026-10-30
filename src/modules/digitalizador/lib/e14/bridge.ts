@@ -12,7 +12,7 @@
  * Fuente: (diseño propio e14, D35 — el mock de la fase gráfica se retiró;
  * SIMULACIÓN = pipeline real sobre el acta incluida).
  */
-import type { Acta, ProgresoAnalisis, FuenteCaptura, TipoPagina } from "./types";
+import type { Acta, ProgresoAnalisis, FuenteCaptura, TipoPagina, OrigenActa } from "./types";
 import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
 // KIT e14-esquinas-suaves-v1 (Q2): origen del quad en el contrato del
 // recorte (ver comentario del contrato — el flag manual viaja con él).
@@ -20,7 +20,8 @@ import type { OrigenQuad } from "@jg-stevan/scanner-core/image-processor";
 // D63-A/D63-C — KIT e63a-origen-escaneo-v1: el origen del archivo (detector
 // heurístico del runner MASIVA) viaja en opciones SOLO para MASIVA — SIM y
 // el flujo individual JAMÁS lo traen (el gate de escaneos no les aplica).
-import type { OrigenActa } from "./masiva/origen";
+// R7b (M10): el TIPO vive en types.ts (fin de la dependencia invertida
+// núcleo→masiva); el DETECTOR sigue en masiva/origen.ts.
 
 /** Página de mesa a la que apunta el próximo escaneo (D7: vive en el store). */
 export interface PaginaObjetivo {

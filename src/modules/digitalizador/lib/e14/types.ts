@@ -6,7 +6,14 @@
 import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
 import type { ClasificacionE14 } from "./clasificador";
 import type { NivelLectura } from "./senal-lectura";
-import type { OrigenActa } from "./masiva/origen"; // D63-A — tipo del origen (kit: tipos viven en origen.ts)
+
+// D63-A (kit e63a-origen-escaneo-v1) — R7b (M10): el TIPO OrigenActa vive
+// ahora en el núcleo (types.ts) — fin de la dependencia invertida
+// núcleo→masiva (masiva/origen.ts lo re-exporta temporalmente; R8 retira).
+// El DETECTOR (senalExifCamara/clasificarOrigen/…) sigue en masiva/origen.ts:
+// es instrumentación del runner MASIVA, jamás decide score/gate.
+/** Origen del archivo. null = sin veredicto (duda honesta — jamás inventar). */
+export type OrigenActa = "escaneo" | "foto" | null;
 
 // ---------- Captura y análisis (SPEC fase lógica §3.1) ----------
 export type FuenteCaptura = "SIMULACION" | "CAMARA" | "ARCHIVO";
