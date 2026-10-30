@@ -484,7 +484,15 @@ type CtxPipeline = CtxProcesarUno & { registro: RegistroMasiva; archivo: File };
 
 /** Resultado de UN stage: resuelto = desenlace ya resuelto (procesarUno
  *  return — el finally del orquestador limpia igual); si no, ctx enriquecido. */
-type DesenlaceStage = { resuelto: boolean; ctx: CtxProcesarUno };
+type DesenlaceStage = { resuelto: boolean; ctx: CtxProcesarUno; error?: unknown };
+
+/** Salida del STAGE 2: sin error el ctx garantiza actaBruta (el fallback
+ *  actaTimeoutWatchdog corrió — el orquestador consume Acta no-null, igual
+ *  que hoy tras el `if (!actaBruta)`); con error el ctx viaja base y el
+ *  orquestador espeja SOLO las trazas del post-mortem antes de re-lanzar. */
+type SalidaPipelineIntentos =
+  | { fallo: false; ctx: CtxProcesarUno & { actaBruta: Acta } }
+  | { fallo: true; ctx: CtxProcesarUno; error: unknown };
 
 // ─── R8 · STAGE 1/5 — faseCapa0Qr (e63m/D30/D40/e65b) ──────────────────────
 /** CAPA 0 IDENTIDAD QR PRE-OCR (punto ÚNICO del kit — ANTES de despachar OCR:
@@ -738,6 +746,290 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
     return { resuelto: false, ctx: { ...ctx, qrPayload, qrHeredado, qrEstadoCapa0, preOcrQrMs } };
 }
 
+// ─── R8 · STAGE 2/5 — fasePipelineIntentos (D63-A/B · D66 · D65 · WAVE3 §B) ──
+/** El BUCLE DE INTENTOS del pipeline real: origen del archivo (D63-A,
+ *  re-apuntado a escaneo si viaPdf — D63-A2) → pre-proceso deskew (D63-B,
+ *  descarta el master precalentado si el corregido manda) → master del
+ *  intento (D66 — intento 1 consume el precalentado; reintentos hornean
+ *  fresco) → escanearActa del bridge con el presupuesto restante del
+ *  watchdog (D65) → rescate RECHAZADA-BAJO (WAVE3 §B, UNA 2ª pasada con
+ *  workers frescos). El error REAL rompe y sale por `error` (ver abajo).
+ *  Función PURA salvo efectos (bridge/store/logger/worker-kill): recibe
+ *  ctx y devuelve ctx nuevo — jamás muta el que recibe. */
+async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipelineIntentos> {
+  const fila = ctxEntrada.fila;
+  // Sombras locales del stage (viajan en el ctx de salida — inmutable).
+  let veredictoOrigen: OrigenVeredicto | null = ctxEntrada.veredictoOrigen;
+  let preProceso: PreProcesoEscaneo | null = ctxEntrada.preProceso;
+  let actaBruta: Acta | null = ctxEntrada.actaBruta;
+  let senal: { etapa: EtapaAnalisis; fraccion: number } | null = null;
+  let errorIntento: { error: unknown } | null = null;
+  let maestroDesenlace: MaestroImagen | null = ctxEntrada.maestroDesenlace;
+  let decodeMasterMs: number | null = ctxEntrada.decodeMasterMs;
+  let intentoDesenlace = ctxEntrada.intentoDesenlace;
+  // Archivo del intento: el 1.º usa el archivo re-leído de IDB (el prefetch
+  // del original ya no existe — D66 re-apuntó ese trabajo al precalor:
+  // dispararPrefetch→asegurarMaestro). Los REINTENTOS re-leen el registro:
+  // instancia FRESCA del File — la decodeMemo del bridge es POR INSTANCIA y
+  // el intento muerto pudo envenenar la suya con un decode colgado (el
+  // fallback honesto de v1 se conserva si IDB falla).
+  let archivoIntento: File = ctxEntrada.archivo;
+  let preOcrMs: number | null = ctxEntrada.preOcrMs;
+  let tPreOcrIntento = ctxEntrada.tPreOcrIntento;
+  let preOcrOrigenMs = ctxEntrada.preOcrOrigenMs;
+  let preOcrDeskewMs = ctxEntrada.preOcrDeskewMs;
+  let preOcrMasterMs = ctxEntrada.preOcrMasterMs;
+  let preOcrPasadas = ctxEntrada.preOcrPasadas;
+  let watchdogUsados = ctxEntrada.watchdogUsados;
+  let etapaAlMorir: string | null = ctxEntrada.etapaAlMorir;
+  let elapsedMuerteMs: number | null = ctxEntrada.elapsedMuerteMs;
+  let rescateLanzado = ctxEntrada.rescateLanzado;
+  let entradaPrecalor = ctxEntrada.entradaPrecalor;
+  let registro = ctxEntrada.registro;
+  try {
+  // (bucle movido VERBATIM de procesarUno — mismo orden, mismos literales)
+    for (let intento = 1; intento <= WATCHDOG_INTENTOS; intento += 1) {
+      const tIntento = Date.now();
+      // KIT e14-etapas-preocr-v1 (D43): intentos ≥ 2 re-pagan origen/deskew/
+      // master (D65 — bloques del reintento byte-idénticos) → re-armar el
+      // cronómetro pre-OCR. La matanza/re-creación de workers ENTRE intentos
+      // NO es pre-OCR (costo del watchdog) — queda fuera por construcción.
+      if (intento > 1) tPreOcrIntento = performance.now();
+      senal = null; // la etapa al morir es la del INTENTO que muere
+      // Reintento del watchdog: MISMA acta → el % global CONSERVA el máximo
+      // alcanzado (monotónico — no vuelve a 0; la etiqueta de fase sí vuelve
+      // a PREPARANDO para contar la historia del reintento).
+      storeMasiva()
+        .getState()
+        .marcarProgreso(fila.id, { etapa: "preparando", fracGlobal: vidaDe(fila.id).frac });
+      try {
+        // ── D63-A — KIT e63a-origen-escaneo-v1 (punto ÚNICO del kit, T1/T2):
+        // origen del archivo — detector heurístico conservador (origen.ts),
+        // calculado UNA vez por fila AL INICIO del pipeline. SOLO visibilidad:
+        // no alimenta score/gate (calibra D63-B/D63-C). Falla → null (el
+        // detector jamás tumba el pipeline). Traza aditiva propia (contrato
+        // D51: solo-AÑADIR) + campos en el diagnóstico (parche D57 de abajo).
+        // D65: bloque AJENO byte-idéntico — el REINTENTO lo re-ejecuta (los
+        // workers del intento anterior ya fueron muertos y re-creados).
+        const tOrigenSeg = performance.now(); // D44-R1
+        veredictoOrigen = await clasificarOrigenDeArchivo(archivoIntento);
+        preOcrOrigenMs += Math.round(performance.now() - tOrigenSeg);
+        logger.info(
+          `[e14] origen=${veredictoOrigen.origen ?? "null"} senales=${veredictoOrigen.senales ?? "null"}`,
+        );
+        // ── D63-A2 — KIT e14-d63a2-deskew-pipeline-v1 (T1): calibración por
+        // CONSTRUCCIÓN — una fila nacida de un PDF (viaPdf, rama PDF del
+        // store) ES un escaneo aunque el detector D63-A por señales no lo
+        // diga (un E-14 impreso a sangre NO tiene borde blanco de escáner:
+        // evidencia F1, informe 200613 — 10 null con borde-no-blanco). Las
+        // señales de píxel del detector QUEDAN (honestidad D57) como prefijo
+        // `pdf-render+…`. SIM y captura individual JAMÁS traen viaPdf (campo
+        // de MASIVA — nace SOLO en la rama PDF de agregarFiles).
+        if (fila.viaPdf && veredictoOrigen.origen !== "escaneo") {
+          veredictoOrigen = {
+            origen: "escaneo",
+            senales: `pdf-render+${veredictoOrigen.senales}`,
+          };
+          logger.info(
+            `[e14] origen pdf-render → escaneo (señales píxel preservadas: ${veredictoOrigen.senales})`,
+          );
+        }
+
+        // ── D63-B — KIT e63b-deskew-escaneo-v1 (bloque de PRE-PROCESO, T2/T3):
+        // SOLO escaneos (origen del detector D63-A) — detección de ángulo sobre
+        // la banda del encabezado + deskew selectivo (|θ| ≥ 0.3° y ≤ 10°) con
+        // resample de alta calidad + limpieza suave del punto blanco. Fotos y
+        // escaneos rectos+limpios pasan el archivo ORIGINAL byte-idéntico (memo
+        // de decode del bridge intacta — cero cambios). El pipeline consume el
+        // master corregido (T2.2); el original duerme en IDB sin cambios.
+        // D65: bloque AJENO byte-idéntico (ídem D63-A — se re-ejecuta).
+        const tDeskewSeg = performance.now(); // D44-R1
+        preProceso = await preProcesoEscaneo(archivoIntento, veredictoOrigen.origen);
+        preOcrDeskewMs += Math.round(performance.now() - tDeskewSeg);
+        if (veredictoOrigen.origen === "escaneo") {
+          logger.info(
+            `[e14] preproceso skewGrados=${preProceso.skewGrados ?? "null"} deskewMs=${preProceso.deskewMs ?? "null"} limpiezaMs=${preProceso.limpiezaMs ?? "null"} limpieza=${preProceso.limpieza} aplicado=${preProceso.aplicado} decodeMs=${preProceso.decodeMs ?? "null"}`,
+          );
+        }
+        // ── D63-A2 (T0) — DISCIPLINA DE MEMORIA: si el CORREGIDO manda, el
+        // master precalentado de esta fila muere AQUÍ (descartado por la vía
+        // del precalor + referencia local soltada — NUNCA huérfano). El
+        // precalor sigue decodificando el ORIGINAL en la espera (sin cambios
+        // — simplicidad del kit): las filas PDF aplicadas pierden el
+        // beneficio del precalor (doble decode por fila escaneada — coste
+        // CONOCIDO y documentado: el OCR domina con ~13 s).
+        if (preProceso?.aplicado && entradaPrecalor) {
+          logger.info(
+            `[e14] precalor fila=${fila.id} descartado fuente=corregido precalorMs=${entradaPrecalor.precalorMs}`,
+          );
+          descartarMaestro(fila.id); // vía del precalor (idempotente — defensa)
+          entradaPrecalor = null; // soltar el blob YA (no al fin del scope)
+        }
+
+        // ── D66 — KIT e14-decode-unico-precalor-v1 (T1.2/T1.5): MASTER del
+        // intento. Intento 1 consume el master PRECALENTADO (T3.3 — el decode
+        // ya vivió en la espera; entradaPrecalor se consumió ANTES de marcar
+        // PROCESANDO). Reintentos (intento ≥ 2): horneado FRESCO del
+        // archivoIntento — el File fue re-leído de IDB (D65) y el intento
+        // muerto pudo envenenar la decodeMemo por-instancia del master
+        // anterior. Sin master (decode imposible) → fallback HONESTO: el
+        // bridge recibe archivoIntento tal cual (AC-P3).
+        const tMaestro = Date.now();
+        // ── D63-A2 (T0): FUENTE del master — el CORREGIDO del pre-proceso
+        // (D63-B) cuando aplicó; el original en los demás casos. El bloque
+        // D63-B calcula preProceso.archivo PERO la fusión D65/D66 lo dejó
+        // desconectado (solo sus métricas llegaban — hallazgo del worklog
+        // D65, orden del dueño: despertarlo AQUÍ y NADA más). El master
+        // único D66 queda VERDADERO: el pipeline sigue consumiendo UN master
+        // (`maestro?.archivo ?? archivoIntento` del bridge, sin tocar).
+        const fuenteMaestro: File = preProceso?.aplicado
+          ? preProceso.archivo
+          : archivoIntento;
+        const tMasterSeg = performance.now(); // D44-R1
+        const maestro: MaestroImagen | null =
+          intento === 1 && !preProceso?.aplicado
+            ? (entradaPrecalor?.maestro ??
+              (await maestroDeImagen(fuenteMaestro, { nombre: fila.nombre })))
+            : await maestroDeImagen(fuenteMaestro, { nombre: fila.nombre });
+        preOcrMasterMs += Math.round(performance.now() - tMasterSeg);
+        const decodeMsIntento = maestro
+          ? intento === 1 && entradaPrecalor
+            ? 0 // T3.3/T4: precalentada → el decode ya pasó en la espera
+            : Math.max(1, Math.round(Date.now() - tMaestro))
+          : null;
+        if (maestro) {
+          logger.info(
+            `[e14] decode-maestro fila=${fila.id} intento=${intento} ms=${decodeMsIntento} origen=${maestro.origenDecode} precalentada=${intento === 1 && !!entradaPrecalor} ${maestro.ancho}x${maestro.alto}${preProceso?.aplicado ? " fuente=corregido" : ""}`,
+          );
+        }
+
+        // T4: variable tipada con la intersección (sin excess-check de literal —
+        // el parámetro de la interfaz E14Bridge sigue siendo OpcionesEscaneo).
+        // D65 (T1): presupuesto del INTENTO — lo RESTANTE de WATCHDOG_MS (el
+        // pre-proceso ya gastó lo suyo; el timeout del bridge dispara SU acta
+        // de timeout exactamente en la frontera del intento).
+        const opcionesMasiva: OpcionesEscaneoConTimeout = {
+          objetivo: null, // A4 — la clasificación REAL manda (viene del OCR)
+          intento: 1, // A6 — semántica de PRIMERA captura (el watchdog NO es re-captura)
+          maxIntentos: 4, // fallos → RECHAZADA repetible / rescate por recorte manual
+          fuente: "ARCHIVO", // A5 — MASIVA SIEMPRE archivo
+          archivo: maestro?.archivo ?? archivoIntento, // D66 — el master (fallback: original)
+          // D63-C — KIT e63c-quad-gate-escaneo-v1: origen del detector D63-A
+          // alimenta T1 (quad página-completa) y T2 (gate del marco impreso).
+          // SIM y el flujo individual JAMÁS lo traen (nada de escaneos les aplica).
+          origenActa: veredictoOrigen.origen,
+          // e66 (P4): la señal auditable viaja al bridge — "exif-camara"
+          // omite el probe de rotaciones (orientación ya horneada por el
+          // EXIF del core; aplicado=0 SIEMPRE — evidencia del dueño).
+          origenSenales: veredictoOrigen.senales,
+          // P2 (plan masiva — brief Agente A): el caller es el runner MASIVA
+          // — el bridge OMITE la brújula QR (su payload no se consume aquí;
+          // la rotación la cubren deskew D63-B + probe e66/e70 + rescate §B).
+          // Intersección LOCAL OpcionesEscaneoConTimeout — bridge.ts intacto.
+          desdeMasiva: true,
+          onProgreso: (p) => {
+            senal = { etapa: p.etapa, fraccion: p.progreso }; // etapa al morir (T1.4)
+            marcarVida(fila.id, p); // señal de vida (T3 — throttle 250 ms)
+          },
+          timeoutMs: Math.max(5_000, watchdogMsEfectivo() - (Date.now() - tIntento)),
+        };
+        // KIT e14-etapas-preocr-v1 (D43): cierre del tramo pre-OCR del intento
+        // (capa-0 + origen + deskew + master) — justo ANTES de despachar el
+        // bridge. Acumula reintentos (intento ≥ 2 re-armó arriba).
+        preOcrMs = (preOcrMs ?? 0) + Math.round(performance.now() - tPreOcrIntento);
+        preOcrPasadas += 1; // D44-R4 — pasada completa del muro (reintento = re-armó)
+        const resultado = await correrIntento(
+          getBridge().escanearActa(opcionesMasiva),
+          watchdogMsEfectivo() + WATCHDOG_GRACIA_MS,
+        );
+        if (resultado.tipo === "acta") {
+          actaBruta = resultado.acta;
+          // D66: el desenlace nació de ESTE master — fija sus trazas.
+          maestroDesenlace = maestro;
+          decodeMasterMs = decodeMsIntento;
+          intentoDesenlace = intento;
+          if (!esVeredictoTimeout(resultado.acta)) {
+            // WAVE3 §B — ORDEN-WAVE3-remoto-rescate-obs-v1 (feat/rescate-
+            // rechazo-v1): RECHAZADA-BAJO en el intento 1 es INTERMITENTE
+            // (OCR bajo presión — evidencia lotes 7/8/9: las MISMAS actas
+            // dieron score 10 FUERTE después; el probe jamás rotó) → UNA
+            // 2ª pasada del paso desenlace con workers frescos (la
+            // maquinaria EXISTENTE del bucle — nada nuevo de OCR). Cupos:
+            // 1 por fila (el predicado exige intento===1) +
+            // MAX_RESCATES_CORRIDA por corrida. Si el reintento también
+            // RECHAZA → se acepta el rechazo (honesto, sin inventar).
+            // forzarDedupOff manda SIEMPRE (RL-e65b-6 — escape del dueño).
+            if (
+              procedeRescateRechazo(resultado.acta, {
+                intento,
+                rescatesCorrida,
+                forzarDedupOff: fila.forzarDedupOff,
+              })
+            ) {
+              rescatesCorrida += 1;
+              rescateLanzado = true;
+              logger.info(`[e14] rescate-rechazo fila=${fila.id} intento=2`);
+              await matarYRecrearWorkers(); // workers frescos (misma infra T1.2)
+              continue; // 2ª pasada del MISMO paso desenlace — el bucle re-ejecuta
+            }
+            break; // desenlace REAL (comportamiento de siempre)
+          }
+          // veredicto-timeout del bridge → el intento MURIÓ (cae al final del
+          // loop: traza + kill de workers + reintento si queda cupo).
+        } else if (resultado.tipo === "error") {
+          errorIntento = resultado; // error REAL → catch de siempre (fila ERROR)
+          break;
+        }
+        // resultado.tipo === "tope" → el bridge nunca respondió: intento muerto.
+      } catch (err) {
+        errorIntento = { error: err }; // NUNCA es muerte de watchdog
+        break;
+      }
+      watchdogUsados = intento;
+      etapaAlMorir = etapaDeSenal(senal);
+      elapsedMuerteMs = Date.now() - tIntento;
+      logger.info(
+        `[e14] watchdog fila=${fila.id} intento=${intento}/${WATCHDOG_INTENTOS} etapa=${etapaAlMorir ?? "null"} elapsed=${elapsedMuerteMs}ms`,
+      );
+      if (intento >= WATCHDOG_INTENTOS) break; // kit T1.3: veredicto de siempre
+      // D65 (T1.2): matar y re-crear los workers del intento (detección + OCR)
+      // y relanzar UNA vez. El reintento es del MISMO procesado ya iniciado por
+      // el dueño (no re-encola nada nuevo — D45 intacto; criterios/score intactos).
+      await matarYRecrearWorkers();
+      try {
+        // D41 — lectura RAW: solo se consumen `archivo` (File) para el
+        // reintento del watchdog — sin dataURLs que materializar.
+        const fresco = await leerRegistroRaw(fila.id);
+        if (fresco.archivo instanceof File) {
+          registro = fresco;
+          archivoIntento = fresco.archivo;
+        }
+      } catch {
+        /* IDB caído — el reintento usa la instancia actual (honesto) */
+      }
+    }
+    if (errorIntento) throw errorIntento.error;
+    if (!actaBruta) {
+      // Colgaje FUERA del bridge (origen/pre-proceso) en TODOS los intentos:
+      // el veredicto de SIEMPRE con la MISMA forma del acta de timeout del
+      // bridge (score 0 — nada inventado).
+      actaBruta = actaTimeoutWatchdog(fila.id);
+    }
+    // WAVE3 §B — traza del rescate SALVADOR: el reintento produjo un
+    // desenlace ≠ RECHAZADA (honesto — solo cuando el rescate corrió).
+    if (
+      rescateLanzado &&
+      actaBruta.status !== "RECHAZADA" &&
+      !esVeredictoTimeout(actaBruta)
+    ) {
+      logger.info(`[e14] rescate-rechazo OK fila=${fila.id}`);
+    }
+    return { fallo: false, ctx: { ...ctxEntrada, registro, entradaPrecalor, veredictoOrigen, preProceso, actaBruta, maestroDesenlace, decodeMasterMs, intentoDesenlace, preOcrMs, tPreOcrIntento, preOcrOrigenMs, preOcrDeskewMs, preOcrMasterMs, preOcrPasadas, watchdogUsados, etapaAlMorir, elapsedMuerteMs, rescateLanzado } };
+  } catch (err) {
+    return { fallo: true, ctx: { ...ctxEntrada, registro, entradaPrecalor, veredictoOrigen, preProceso, actaBruta, maestroDesenlace, decodeMasterMs, intentoDesenlace, preOcrMs, tPreOcrIntento, preOcrOrigenMs, preOcrDeskewMs, preOcrMasterMs, preOcrPasadas, watchdogUsados, etapaAlMorir, elapsedMuerteMs, rescateLanzado }, error: err };
+  }
+}
+
 /** Desenlace de UNA foto — byte a byte el pipeline real (kit §6-C: el
  *  desenlace DEBE ser idéntico al del IMPORTAR normal).
  *  D66 — KIT e14-decode-unico-precalor-v1: el pipeline recibe el MASTER
@@ -988,28 +1280,25 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // Cronómetro OBSERVADOR PASIVO (solo medir — jamás cambia decisiones):
     // intento 1 arranca YA (incluye la capa-0 QR completa); los reintentos
     // (watchdog/rescate) re-pagan origen/deskew/master → se ACUMULAN (T1).
+    // KIT e14-etapas-preocr-v1 (D43) — preOcrMs: el MURO entre el fin de la
+    // espera de cola y el arranque del pipeline del bridge. Cronómetro
+    // OBSERVADOR PASIVO (solo medir — jamás cambia decisiones): intento 1
+    // arranca YA (incluye la capa-0 QR completa — el cronómetro vive en ctx);
+    // los reintentos re-pagan origen/deskew/master → se ACUMULAN (T1).
     let preOcrMs: number | null = null; // null = jamás llegó al bridge (YA-ENVIADA/copias tempranas)
-    let tPreOcrIntento = performance.now(); // intento 1: incluye la capa-0 (T1)
-
-    // D65 (T1) — estado del intento del WATCHDOG (kit T1.1/T1.2/T1.3).
+    // D65 (T1) — el estado del intento del watchdog viaja en ctx (los stages
+    // devuelven ctx nuevo; los espejos de abajo conservan las lets mientras
+    // los stages 3-5 se extraen).
     let veredictoOrigen: OrigenVeredicto | null = null;
     let preProceso: PreProcesoEscaneo | null = null;
     let actaBruta: Acta | null = null;
-    let senal: { etapa: EtapaAnalisis; fraccion: number } | null = null;
-    let errorIntento: { error: unknown } | null = null;
     // D66 — trazas del master del DESENLACE (el del intento que produjo
     // actaBruta; los reintentos re-hornean — la traza describe el master que
     // SÍ sirvió; jamás inventar).
     let maestroDesenlace: MaestroImagen | null = null;
     let decodeMasterMs: number | null = null;
     let intentoDesenlace = 0;
-    // Archivo del intento: el 1.º usa el archivo re-leído de IDB (el prefetch
-    // del original ya no existe — D66 re-apuntó ese trabajo al precalor:
-    // dispararPrefetch→asegurarMaestro). Los REINTENTOS re-leen el registro:
-    // instancia FRESCA del File — la decodeMemo del bridge es POR INSTANCIA y
-    // el intento muerto pudo envenenar la suya con un decode colgado (el
-    // fallback honesto de v1 se conserva si IDB falla).
-    let archivoIntento: File = archivo;
+    ctx = { ...ctx, preOcrMs: null, tPreOcrIntento: performance.now() }; // intento 1: incluye la capa-0 (T1)
 
     // ─── R8 · STAGE 1/5 (split de procesarUno — misión punto 3): CAPA 0 QR ───
     // El bloque entero (decode + dedup por payload + APLAZADA + ya-enviada)
@@ -1028,242 +1317,48 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     qrHeredado = ctx.qrHeredado;
     preOcrQrMs = ctx.preOcrQrMs;
 
-    for (let intento = 1; intento <= WATCHDOG_INTENTOS; intento += 1) {
-      const tIntento = Date.now();
-      // KIT e14-etapas-preocr-v1 (D43): intentos ≥ 2 re-pagan origen/deskew/
-      // master (D65 — bloques del reintento byte-idénticos) → re-armar el
-      // cronómetro pre-OCR. La matanza/re-creación de workers ENTRE intentos
-      // NO es pre-OCR (costo del watchdog) — queda fuera por construcción.
-      if (intento > 1) tPreOcrIntento = performance.now();
-      senal = null; // la etapa al morir es la del INTENTO que muere
-      // Reintento del watchdog: MISMA acta → el % global CONSERVA el máximo
-      // alcanzado (monotónico — no vuelve a 0; la etiqueta de fase sí vuelve
-      // a PREPARANDO para contar la historia del reintento).
-      storeMasiva()
-        .getState()
-        .marcarProgreso(fila.id, { etapa: "preparando", fracGlobal: vidaDe(fila.id).frac });
-      try {
-        // ── D63-A — KIT e63a-origen-escaneo-v1 (punto ÚNICO del kit, T1/T2):
-        // origen del archivo — detector heurístico conservador (origen.ts),
-        // calculado UNA vez por fila AL INICIO del pipeline. SOLO visibilidad:
-        // no alimenta score/gate (calibra D63-B/D63-C). Falla → null (el
-        // detector jamás tumba el pipeline). Traza aditiva propia (contrato
-        // D51: solo-AÑADIR) + campos en el diagnóstico (parche D57 de abajo).
-        // D65: bloque AJENO byte-idéntico — el REINTENTO lo re-ejecuta (los
-        // workers del intento anterior ya fueron muertos y re-creados).
-        const tOrigenSeg = performance.now(); // D44-R1
-        veredictoOrigen = await clasificarOrigenDeArchivo(archivoIntento);
-        preOcrOrigenMs += Math.round(performance.now() - tOrigenSeg);
-        logger.info(
-          `[e14] origen=${veredictoOrigen.origen ?? "null"} senales=${veredictoOrigen.senales ?? "null"}`,
-        );
-        // ── D63-A2 — KIT e14-d63a2-deskew-pipeline-v1 (T1): calibración por
-        // CONSTRUCCIÓN — una fila nacida de un PDF (viaPdf, rama PDF del
-        // store) ES un escaneo aunque el detector D63-A por señales no lo
-        // diga (un E-14 impreso a sangre NO tiene borde blanco de escáner:
-        // evidencia F1, informe 200613 — 10 null con borde-no-blanco). Las
-        // señales de píxel del detector QUEDAN (honestidad D57) como prefijo
-        // `pdf-render+…`. SIM y captura individual JAMÁS traen viaPdf (campo
-        // de MASIVA — nace SOLO en la rama PDF de agregarFiles).
-        if (fila.viaPdf && veredictoOrigen.origen !== "escaneo") {
-          veredictoOrigen = {
-            origen: "escaneo",
-            senales: `pdf-render+${veredictoOrigen.senales}`,
-          };
-          logger.info(
-            `[e14] origen pdf-render → escaneo (señales píxel preservadas: ${veredictoOrigen.senales})`,
-          );
-        }
-
-        // ── D63-B — KIT e63b-deskew-escaneo-v1 (bloque de PRE-PROCESO, T2/T3):
-        // SOLO escaneos (origen del detector D63-A) — detección de ángulo sobre
-        // la banda del encabezado + deskew selectivo (|θ| ≥ 0.3° y ≤ 10°) con
-        // resample de alta calidad + limpieza suave del punto blanco. Fotos y
-        // escaneos rectos+limpios pasan el archivo ORIGINAL byte-idéntico (memo
-        // de decode del bridge intacta — cero cambios). El pipeline consume el
-        // master corregido (T2.2); el original duerme en IDB sin cambios.
-        // D65: bloque AJENO byte-idéntico (ídem D63-A — se re-ejecuta).
-        const tDeskewSeg = performance.now(); // D44-R1
-        preProceso = await preProcesoEscaneo(archivoIntento, veredictoOrigen.origen);
-        preOcrDeskewMs += Math.round(performance.now() - tDeskewSeg);
-        if (veredictoOrigen.origen === "escaneo") {
-          logger.info(
-            `[e14] preproceso skewGrados=${preProceso.skewGrados ?? "null"} deskewMs=${preProceso.deskewMs ?? "null"} limpiezaMs=${preProceso.limpiezaMs ?? "null"} limpieza=${preProceso.limpieza} aplicado=${preProceso.aplicado} decodeMs=${preProceso.decodeMs ?? "null"}`,
-          );
-        }
-        // ── D63-A2 (T0) — DISCIPLINA DE MEMORIA: si el CORREGIDO manda, el
-        // master precalentado de esta fila muere AQUÍ (descartado por la vía
-        // del precalor + referencia local soltada — NUNCA huérfano). El
-        // precalor sigue decodificando el ORIGINAL en la espera (sin cambios
-        // — simplicidad del kit): las filas PDF aplicadas pierden el
-        // beneficio del precalor (doble decode por fila escaneada — coste
-        // CONOCIDO y documentado: el OCR domina con ~13 s).
-        if (preProceso?.aplicado && entradaPrecalor) {
-          logger.info(
-            `[e14] precalor fila=${fila.id} descartado fuente=corregido precalorMs=${entradaPrecalor.precalorMs}`,
-          );
-          descartarMaestro(fila.id); // vía del precalor (idempotente — defensa)
-          entradaPrecalor = null; // soltar el blob YA (no al fin del scope)
-        }
-
-        // ── D66 — KIT e14-decode-unico-precalor-v1 (T1.2/T1.5): MASTER del
-        // intento. Intento 1 consume el master PRECALENTADO (T3.3 — el decode
-        // ya vivió en la espera; entradaPrecalor se consumió ANTES de marcar
-        // PROCESANDO). Reintentos (intento ≥ 2): horneado FRESCO del
-        // archivoIntento — el File fue re-leído de IDB (D65) y el intento
-        // muerto pudo envenenar la decodeMemo por-instancia del master
-        // anterior. Sin master (decode imposible) → fallback HONESTO: el
-        // bridge recibe archivoIntento tal cual (AC-P3).
-        const tMaestro = Date.now();
-        // ── D63-A2 (T0): FUENTE del master — el CORREGIDO del pre-proceso
-        // (D63-B) cuando aplicó; el original en los demás casos. El bloque
-        // D63-B calcula preProceso.archivo PERO la fusión D65/D66 lo dejó
-        // desconectado (solo sus métricas llegaban — hallazgo del worklog
-        // D65, orden del dueño: despertarlo AQUÍ y NADA más). El master
-        // único D66 queda VERDADERO: el pipeline sigue consumiendo UN master
-        // (`maestro?.archivo ?? archivoIntento` del bridge, sin tocar).
-        const fuenteMaestro: File = preProceso?.aplicado
-          ? preProceso.archivo
-          : archivoIntento;
-        const tMasterSeg = performance.now(); // D44-R1
-        const maestro: MaestroImagen | null =
-          intento === 1 && !preProceso?.aplicado
-            ? (entradaPrecalor?.maestro ??
-              (await maestroDeImagen(fuenteMaestro, { nombre: fila.nombre })))
-            : await maestroDeImagen(fuenteMaestro, { nombre: fila.nombre });
-        preOcrMasterMs += Math.round(performance.now() - tMasterSeg);
-        const decodeMsIntento = maestro
-          ? intento === 1 && entradaPrecalor
-            ? 0 // T3.3/T4: precalentada → el decode ya pasó en la espera
-            : Math.max(1, Math.round(Date.now() - tMaestro))
-          : null;
-        if (maestro) {
-          logger.info(
-            `[e14] decode-maestro fila=${fila.id} intento=${intento} ms=${decodeMsIntento} origen=${maestro.origenDecode} precalentada=${intento === 1 && !!entradaPrecalor} ${maestro.ancho}x${maestro.alto}${preProceso?.aplicado ? " fuente=corregido" : ""}`,
-          );
-        }
-
-        // T4: variable tipada con la intersección (sin excess-check de literal —
-        // el parámetro de la interfaz E14Bridge sigue siendo OpcionesEscaneo).
-        // D65 (T1): presupuesto del INTENTO — lo RESTANTE de WATCHDOG_MS (el
-        // pre-proceso ya gastó lo suyo; el timeout del bridge dispara SU acta
-        // de timeout exactamente en la frontera del intento).
-        const opcionesMasiva: OpcionesEscaneoConTimeout = {
-          objetivo: null, // A4 — la clasificación REAL manda (viene del OCR)
-          intento: 1, // A6 — semántica de PRIMERA captura (el watchdog NO es re-captura)
-          maxIntentos: 4, // fallos → RECHAZADA repetible / rescate por recorte manual
-          fuente: "ARCHIVO", // A5 — MASIVA SIEMPRE archivo
-          archivo: maestro?.archivo ?? archivoIntento, // D66 — el master (fallback: original)
-          // D63-C — KIT e63c-quad-gate-escaneo-v1: origen del detector D63-A
-          // alimenta T1 (quad página-completa) y T2 (gate del marco impreso).
-          // SIM y el flujo individual JAMÁS lo traen (nada de escaneos les aplica).
-          origenActa: veredictoOrigen.origen,
-          // e66 (P4): la señal auditable viaja al bridge — "exif-camara"
-          // omite el probe de rotaciones (orientación ya horneada por el
-          // EXIF del core; aplicado=0 SIEMPRE — evidencia del dueño).
-          origenSenales: veredictoOrigen.senales,
-          // P2 (plan masiva — brief Agente A): el caller es el runner MASIVA
-          // — el bridge OMITE la brújula QR (su payload no se consume aquí;
-          // la rotación la cubren deskew D63-B + probe e66/e70 + rescate §B).
-          // Intersección LOCAL OpcionesEscaneoConTimeout — bridge.ts intacto.
-          desdeMasiva: true,
-          onProgreso: (p) => {
-            senal = { etapa: p.etapa, fraccion: p.progreso }; // etapa al morir (T1.4)
-            marcarVida(fila.id, p); // señal de vida (T3 — throttle 250 ms)
-          },
-          timeoutMs: Math.max(5_000, watchdogMsEfectivo() - (Date.now() - tIntento)),
-        };
-        // KIT e14-etapas-preocr-v1 (D43): cierre del tramo pre-OCR del intento
-        // (capa-0 + origen + deskew + master) — justo ANTES de despachar el
-        // bridge. Acumula reintentos (intento ≥ 2 re-armó arriba).
-        preOcrMs = (preOcrMs ?? 0) + Math.round(performance.now() - tPreOcrIntento);
-        preOcrPasadas += 1; // D44-R4 — pasada completa del muro (reintento = re-armó)
-        const resultado = await correrIntento(
-          getBridge().escanearActa(opcionesMasiva),
-          watchdogMsEfectivo() + WATCHDOG_GRACIA_MS,
-        );
-        if (resultado.tipo === "acta") {
-          actaBruta = resultado.acta;
-          // D66: el desenlace nació de ESTE master — fija sus trazas.
-          maestroDesenlace = maestro;
-          decodeMasterMs = decodeMsIntento;
-          intentoDesenlace = intento;
-          if (!esVeredictoTimeout(resultado.acta)) {
-            // WAVE3 §B — ORDEN-WAVE3-remoto-rescate-obs-v1 (feat/rescate-
-            // rechazo-v1): RECHAZADA-BAJO en el intento 1 es INTERMITENTE
-            // (OCR bajo presión — evidencia lotes 7/8/9: las MISMAS actas
-            // dieron score 10 FUERTE después; el probe jamás rotó) → UNA
-            // 2ª pasada del paso desenlace con workers frescos (la
-            // maquinaria EXISTENTE del bucle — nada nuevo de OCR). Cupos:
-            // 1 por fila (el predicado exige intento===1) +
-            // MAX_RESCATES_CORRIDA por corrida. Si el reintento también
-            // RECHAZA → se acepta el rechazo (honesto, sin inventar).
-            // forzarDedupOff manda SIEMPRE (RL-e65b-6 — escape del dueño).
-            if (
-              procedeRescateRechazo(resultado.acta, {
-                intento,
-                rescatesCorrida,
-                forzarDedupOff: fila.forzarDedupOff,
-              })
-            ) {
-              rescatesCorrida += 1;
-              rescateLanzado = true;
-              logger.info(`[e14] rescate-rechazo fila=${fila.id} intento=2`);
-              await matarYRecrearWorkers(); // workers frescos (misma infra T1.2)
-              continue; // 2ª pasada del MISMO paso desenlace — el bucle re-ejecuta
-            }
-            break; // desenlace REAL (comportamiento de siempre)
-          }
-          // veredicto-timeout del bridge → el intento MURIÓ (cae al final del
-          // loop: traza + kill de workers + reintento si queda cupo).
-        } else if (resultado.tipo === "error") {
-          errorIntento = resultado; // error REAL → catch de siempre (fila ERROR)
-          break;
-        }
-        // resultado.tipo === "tope" → el bridge nunca respondió: intento muerto.
-      } catch (err) {
-        errorIntento = { error: err }; // NUNCA es muerte de watchdog
-        break;
-      }
-      watchdogUsados = intento;
-      etapaAlMorir = etapaDeSenal(senal);
-      elapsedMuerteMs = Date.now() - tIntento;
-      logger.info(
-        `[e14] watchdog fila=${fila.id} intento=${intento}/${WATCHDOG_INTENTOS} etapa=${etapaAlMorir ?? "null"} elapsed=${elapsedMuerteMs}ms`,
-      );
-      if (intento >= WATCHDOG_INTENTOS) break; // kit T1.3: veredicto de siempre
-      // D65 (T1.2): matar y re-crear los workers del intento (detección + OCR)
-      // y relanzar UNA vez. El reintento es del MISMO procesado ya iniciado por
-      // el dueño (no re-encola nada nuevo — D45 intacto; criterios/score intactos).
-      await matarYRecrearWorkers();
-      try {
-        // D41 — lectura RAW: solo se consumen `archivo` (File) para el
-        // reintento del watchdog — sin dataURLs que materializar.
-        const fresco = await leerRegistroRaw(fila.id);
-        if (fresco.archivo instanceof File) {
-          registro = fresco;
-          archivoIntento = fresco.archivo;
-        }
-      } catch {
-        /* IDB caído — el reintento usa la instancia actual (honesto) */
-      }
+    // ─── R8 · STAGE 2/5 (split de procesarUno): PIPELINE DE INTENTOS ───
+    // Origen (D63-A) + deskew (D63-B) + master (D66) + puente + watchdog (D65)
+    // + rescate (WAVE3 §B) — el bucle de intentos vive en fasePipelineIntentos.
+    // El error REAL (y cualquier throw del bucle) sale por r2.error: el stage
+    // envuelve su cuerpo en try/catch para VOLCAR el ctx fresco (trazas del
+    // intento que murió — watchdog/etapaAlMorir/registro re-leído) antes de
+    // que el orquestador re-lanze al MISMO catch de siempre (jamás se traga).
+    const r2 = await fasePipelineIntentos({ ...ctx, registro, archivo });
+    if (r2.fallo) {
+      // Camino del ERROR REAL: espejar SOLO las trazas que el catch del
+      // post-mortem estampa (mismos valores que hoy tendrían los lets) y
+      // re-lanzar al MISMO catch de siempre.
+      ctx = r2.ctx;
+      if (r2.ctx.registro) registro = r2.ctx.registro; // el reintento re-leyó de IDB
+      watchdogUsados = ctx.watchdogUsados;
+      etapaAlMorir = ctx.etapaAlMorir;
+      elapsedMuerteMs = ctx.elapsedMuerteMs;
+      rescateLanzado = ctx.rescateLanzado;
+      preOcrPasadas = ctx.preOcrPasadas;
+      throw r2.error;
     }
-    if (errorIntento) throw errorIntento.error;
-    if (!actaBruta) {
-      // Colgaje FUERA del bridge (origen/pre-proceso) en TODOS los intentos:
-      // el veredicto de SIEMPRE con la MISMA forma del acta de timeout del
-      // bridge (score 0 — nada inventado).
-      actaBruta = actaTimeoutWatchdog(fila.id);
-    }
-    // WAVE3 §B — traza del rescate SALVADOR: el reintento produjo un
-    // desenlace ≠ RECHAZADA (honesto — solo cuando el rescate corrió).
-    if (
-      rescateLanzado &&
-      actaBruta.status !== "RECHAZADA" &&
-      !esVeredictoTimeout(actaBruta)
-    ) {
-      logger.info(`[e14] rescate-rechazo OK fila=${fila.id}`);
-    }
+    ctx = r2.ctx;
+    if (r2.ctx.registro) registro = r2.ctx.registro; // el reintento re-leyó de IDB
+    // Espejos transitorios (estrangulamiento incremental): mueren cuando los
+    // stages 3-5 se extraigan. actaBruta se lee de r2.ctx (sin error el stage
+    // la garantiza Acta — el fallback actaTimeoutWatchdog corrió).
+    veredictoOrigen = ctx.veredictoOrigen;
+    preProceso = ctx.preProceso;
+    actaBruta = r2.ctx.actaBruta;
+    maestroDesenlace = ctx.maestroDesenlace;
+    decodeMasterMs = ctx.decodeMasterMs;
+    intentoDesenlace = ctx.intentoDesenlace;
+    preOcrMs = ctx.preOcrMs;
+    preOcrOrigenMs = ctx.preOcrOrigenMs;
+    preOcrDeskewMs = ctx.preOcrDeskewMs;
+    preOcrMasterMs = ctx.preOcrMasterMs;
+    preOcrPasadas = ctx.preOcrPasadas;
+    watchdogUsados = ctx.watchdogUsados;
+    etapaAlMorir = ctx.etapaAlMorir;
+    elapsedMuerteMs = ctx.elapsedMuerteMs;
+    rescateLanzado = ctx.rescateLanzado;
+    entradaPrecalor = ctx.entradaPrecalor;
     // D57 (T1): parche INMUTABLE del diagnóstico (kit §4-T1). ADITIVO — no
     // toca score/status/gate; si el diagnóstico no existe (no debería: el
     // bridge lo monta en todo desenlace fuera de SIM), se omite el campo.
