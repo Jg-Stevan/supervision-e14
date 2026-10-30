@@ -758,6 +758,14 @@ function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   if (f.zona && puesto.zonaId !== f.zona) return false;
   if (f.puesto && puesto.puesto !== f.puesto) return false;
   if (f.estado && puesto.estadoGlobal !== f.estado) return false;
+  // M3 — contrato de filtros COMPLETO (reporte 02a 🔴-1): cierreCol y
+  // tiempo estaban declarados en FiltrosPuestos (types.ts:140-145) pero
+  // no implementados aquí (código muerto; el filtrado real vivía
+  // duplicado en monitor-global.tsx:68-72). Misma semántica que allí:
+  if (f.cierreCol && puesto.horaCierreColombia !== f.cierreCol) return false;
+  if (f.tiempo && tramoDeMinutos(puesto.minutosDesdeCierre).id !== f.tiempo) {
+    return false;
+  }
   const q = f.busqueda?.trim().toLowerCase();
   if (q) {
     const texto = [
