@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FiltrosBar } from "./filtros-bar";
 import { KpiCard, type TonoKpi } from "./kpi-card";
 import { PuestosTable } from "./puestos-table";
 import { ResumenChips } from "./resumen-chips";
 import { EsqueletoMonitor } from "./esqueleto";
-import { useDatos, useDatosTicker, resumenDePuestos } from "./datos-provider";
+import { useDatos, useDatosAcciones, useDatosTicker, resumenDePuestos } from "./datos-provider";
+// R4-M7 — espejo de los filtros en location.hash (D11: espejo, NO router).
+import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import { tramoDeMinutos } from "../domain/tiempo-cierre";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
@@ -29,8 +31,11 @@ export function VistaMonitor() {
     puestos,
     mesasPorPuesto,
     mesaEnAccionId,
-    reinspeccionar,
   } = useDatos();
+  // R4-C6 — las acciones viven en SU contexto (el visor/acciones ya no
+  // viaja en el valor grande). abrirVisor/abrirVisorDePuesto se pasan como
+  // props estables a la matriz: las filas no se suscriben a contexto.
+  const { reinspeccionar, abrirVisor, abrirVisorDePuesto } = useDatosAcciones();
   // D42 — KIT e14-monitor-memo-v1: los segundos del ticker viven en su
   // contexto hoja — este componente (y las 949 filas) ya NO re-renderiza
   // cada 5 s; solo el chip del ticker lo hace.
@@ -40,6 +45,25 @@ export function VistaMonitor() {
   // («no cargue todos los puestos de todos los días»). «Todos los días»
   // sigue disponible a mano desde el select FECHA.
   const [filtros, setFiltros] = useState<FiltrosPuestos>({ fecha: "LUNES" });
+
+  // R4-M7 — restauración de los filtros desde el espejo hash, UNA vez al
+  // montar (ref anti-doble-invoke). setState diferido a microtask (misma
+  // regla de lint que C8). El merge conserva el default del dueño para las
+  // claves que el hash no trae.
+  const filtrosRestauradosRef = useRef(false);
+  useEffect(() => {
+    if (filtrosRestauradosRef.current) return;
+    filtrosRestauradosRef.current = true;
+    const { filtros: delHash } = leerEstadoHash();
+    if (Object.keys(delHash).length === 0) return;
+    queueMicrotask(() => setFiltros((prev) => ({ ...prev, ...delHash })));
+  }, []);
+
+  // R4-M7 — espejo de escritura de los filtros (merge con las otras
+  // claves del hash; LUNES = default → la clave día se omite).
+  useEffect(() => {
+    escribirHashParcial({ filtros });
+  }, [filtros]);
 
   // Conjunto del DÍA (solo filtro de fecha): alimenta KPIs y resumen —
   // los otros filtros (país/zona/puesto/búsqueda/estado toggle) siguen
@@ -166,6 +190,8 @@ export function VistaMonitor() {
           expandidoInicialId={filtrados[0]?.id}
           mesaEnAccionId={mesaEnAccionId}
           onReinspeccionar={reinspeccionar}
+          onAbrirVisor={abrirVisor}
+          onAbrirVisorDePuesto={abrirVisorDePuesto}
         />
       </section>
     </div>

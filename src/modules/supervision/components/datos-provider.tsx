@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -17,6 +18,8 @@ import {
 } from "../data/mock-repository";
 import { tieneActa } from "../data/actas-mock";
 import { suscribirseActasRuntime } from "../data/actas-runtime";
+// R4-M7 — espejo del visor en location.hash (D11: espejo, NO router).
+import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import type {
   ActaMesa,
   FormularioTipo,
@@ -64,26 +67,42 @@ interface EstadoDatos {
   mesaEnAccionId: string | null;
 }
 
-interface AccionesDatos {
-  reinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
-  marcarNotificacionLeida: (id: string) => void;
-  marcarTodasLeidas: () => void;
-  marcarAnomaliaRevisada: (id: string) => void;
-}
-
-interface DatosContexto extends EstadoDatos, AccionesDatos {
+/**
+ * R4-C6 (reporte 02-b C2) — el contexto GRANDE se parte en DOS con valores
+ * memoizados separados:
+ *
+ * · ContextoDatos — catálogo y filas (EstadoDatos + derivados). Su valor
+ *   solo cambia con eventos REALES de datos (transición de vida, carga
+ *   masiva, reinspección, publicación).
+ * · ContextoAcciones — el VISOR (estado + acciones) y el resto de las
+ *   acciones. Abrir/cerrar el visor, navegar MESA n/N, cargar un acta o
+ *   pulsar Aprobar re-crea ESTE valor y SOLO re-renderiza a sus
+ *   consumidores directos (visor, shell, vistas) — jamás a las 949 filas:
+ *   PuestoRow/MesasSubtable ya no se suscriben a contexto alguno (llegan
+ *   las acciones por props estables — puestos-table.tsx).
+ */
+interface DatosContexto extends EstadoDatos {
   resumen: ResumenGlobal;
   notificacionesNoLeidas: number;
   anomaliasAbiertas: number;
-  // ── KIT SUP-4 — visor de actas (T3) ─────────────────────────────────
+  /** Mesas CON acta de un puesto (en orden — alimenta MESA n/N). */
+  mesasConActaDelPuesto: (puestoId: string) => Mesa[];
+}
+
+interface AccionesContexto {
+  // ── KIT SUP-4 — estado del visor de actas (T3.2) ─────────────────────
   visorActa: EstadoVisorActa | null;
   /** El acta de la mesa abierta; null mientras carga o si no hay acta. */
   actaActual: ActaMesa | null;
   actaCargando: boolean;
   /** Acción del visor en curso (spinner 2.5 s en el botón — kit T5). */
   accionActaEnCurso: "aprobar" | "rescanear" | null;
-  /** Mesas CON acta de un puesto (en orden — alimenta MESA n/N). */
-  mesasConActaDelPuesto: (puestoId: string) => Mesa[];
+  // ── Acciones de datos (T4/T5/T6) ─────────────────────────────────────
+  reinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  marcarNotificacionLeida: (id: string) => void;
+  marcarTodasLeidas: () => void;
+  marcarAnomaliaRevisada: (id: string) => void;
+  // ── Acciones del visor (T3/T5) ───────────────────────────────────────
   abrirVisor: (
     puestoId: string,
     mesaId: string,
@@ -104,7 +123,8 @@ interface DatosContexto extends EstadoDatos, AccionesDatos {
   confirmarRescanVisor: (observacion: string) => Promise<void>;
 }
 
-const Contexto = createContext<DatosContexto | null>(null);
+const ContextoDatos = createContext<DatosContexto | null>(null);
+const ContextoAcciones = createContext<AccionesContexto | null>(null);
 
 /** D42 — KIT e14-monitor-memo-v1: contexto HOJA del ticker de vida. Único
  *  consumidor: el chip «Sincronizado hace Xs» de la cabecera (ResumenChips
@@ -196,14 +216,22 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Ticker de vida (T3): +5s cada 5s; a los 45s UNA transición ─────────
-  const aplicarTransicion = useCallback(async () => {
+  // R4-C8 (reporte 02-b C3): la transición ya NO se dispara DENTRO del
+  // updater de setSegundosTicker — StrictMode invoca los updaters 2 veces
+  // (prueba de pureza) y la transición de vida se aplicaba DOS veces por
+  // cada cruce del umbral. El cruce se detecta en el callback del
+  // intervalo (sistema externo → setState en callback: el patrón que
+  // React recomienda), con ref anti-doble-invoke y bandera de limpieza
+  // (nada escribe estado tras el desmontaje).
+  const aplicarTransicion = useCallback(async (vida?: { abortado: boolean }) => {
     const repo = mockSupervisionRepository;
     const transicion = await repo.aplicarTransicionVida();
-    if (!transicion) return;
+    if (!transicion || vida?.abortado) return;
     const [puestos, mesas] = await Promise.all([
       repo.getPuestos(),
       repo.getMesasDePuesto(transicion.puestoId),
     ]);
+    if (vida?.abortado) return;
     setEstado((prev) => ({
       ...prev,
       puestos,
@@ -211,8 +239,15 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  /** Espejo del contador del ticker (fuente de la detección del cruce;
+   * el state solo alimenta el chip «Sincronizado hace Xs»). */
+  const segundosRef = useRef(0);
+  /** R4-C8 — UNA transición en vuelo (anti-doble-invoke). */
+  const transicionEnVueloRef = useRef(false);
+
   useEffect(() => {
     if (estado.cargando) return;
+    const vida = { abortado: false };
     const intervalo = setInterval(() => {
       // D39 — pausa de la simulación con la pestaña oculta: cada tick sin
       // espectador era un re-render completo de 949 filas (CPU/batería en
@@ -220,15 +255,25 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       // sigue desde donde quedó — el navegador ya estrangula timers en
       // background; esto elimina el trabajo residual que quedaba.
       if (typeof document !== "undefined" && document.hidden) return;
-      setSegundosTicker((segundos) => {
-        if (segundos + TICKER_SEGUNDOS >= TRANSICION_CADA_SEGUNDOS) {
-          void aplicarTransicion();
-          return 0;
+      const siguientes = segundosRef.current + TICKER_SEGUNDOS;
+      if (siguientes >= TRANSICION_CADA_SEGUNDOS) {
+        segundosRef.current = 0;
+        setSegundosTicker(0);
+        if (!transicionEnVueloRef.current) {
+          transicionEnVueloRef.current = true;
+          void aplicarTransicion(vida).finally(() => {
+            transicionEnVueloRef.current = false;
+          });
         }
-        return segundos + TICKER_SEGUNDOS;
-      });
+      } else {
+        segundosRef.current = siguientes;
+        setSegundosTicker(siguientes);
+      }
     }, TICKER_SEGUNDOS * 1000);
-    return () => clearInterval(intervalo);
+    return () => {
+      clearInterval(intervalo);
+      vida.abortado = true;
+    };
   }, [estado.cargando, aplicarTransicion]);
 
   // ── T4 — REINSPECCIONAR (spinner ~2.5s en el botón) ────────────────────
@@ -337,6 +382,48 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       vivo = false;
     };
   }, [puestoIdVisor, mesaIdVisor]);
+
+  // R4-M7 — espejo del visor en location.hash: escritura en cada cambio y
+  // restauración UNA vez, recién terminada la carga (ref anti-doble-invoke
+  // + setState diferido a microtask — misma regla de lint que C8). El hash
+  // JAMÁS inventa estado: puesto y mesa se validan contra el catálogo ya
+  // cargado; un enlace viejo/foráneo se ignora en silencio.
+  const visorRestauradoRef = useRef(false);
+  useEffect(() => {
+    if (estado.cargando || visorRestauradoRef.current) return;
+    visorRestauradoRef.current = true;
+    const { visor } = leerEstadoHash();
+    if (!visor) return;
+    queueMicrotask(() => {
+      const existePuesto = estado.puestos.some((p) => p.id === visor.puestoId);
+      const existeMesa =
+        visor.mesaId !== null &&
+        (estado.mesasPorPuesto[visor.puestoId] ?? []).some(
+          (m) => m.id === visor.mesaId
+        );
+      if (!existePuesto || (visor.mesaId !== null && !existeMesa)) return;
+      setVisorActa({
+        puestoId: visor.puestoId,
+        mesaId: visor.mesaId,
+        tipo: visor.tipo ?? "TRANSMISION",
+        pagina: visor.pagina ?? 1,
+      });
+    });
+  }, [estado.cargando, estado.puestos, estado.mesasPorPuesto]);
+
+  // R4-M7 — espejo de escritura del visor (merge con las otras claves).
+  useEffect(() => {
+    escribirHashParcial({
+      visor: visorActa
+        ? {
+            puestoId: visorActa.puestoId,
+            mesaId: visorActa.mesaId,
+            tipo: visorActa.tipo,
+            pagina: visorActa.pagina,
+          }
+        : null,
+    });
+  }, [visorActa]);
 
   // Derivaciones: ¿la respuesta en memoria corresponde a la mesa abierta?
   const actaAlDia =
@@ -510,26 +597,34 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     [estado.anomalias]
   );
 
-  // D42 — KIT e14-monitor-memo-v1: el valor del contexto va MEMOIZADO — con
-  // el ticker fuera del estado grande y TODAS las acciones en useCallback
-  // estable, la identidad solo cambia con eventos REALES de datos (no cada
-  // tick de 5 s). Los consumidores (949 PuestoRow incluidos) re-renderizan
-  // solo cuando algo realmente cambió.
-  const valor: DatosContexto = useMemo(
+  // D42 — KIT e14-monitor-memo-v1: los DOS valores van MEMOIZADOS — con el
+  // ticker fuera del estado grande y TODAS las acciones en useCallback
+  // estable, la identidad de cada contexto solo cambia con sus propios
+  // eventos (R4-C6): el de DATOS con eventos reales de catálogo, el de
+  // ACCIONES con el flujo del visor/acciones — que ya no alcanza a las
+  // filas (los callbacks que éstas reciben son estables durante el flujo
+  // del visor y viajan por props).
+  const valorDatos: DatosContexto = useMemo(
     () => ({
       ...estado,
       resumen,
       notificacionesNoLeidas,
       anomaliasAbiertas,
-      reinspeccionar,
-      marcarNotificacionLeida,
-      marcarTodasLeidas,
-      marcarAnomaliaRevisada,
+      mesasConActaDelPuesto,
+    }),
+    [estado, resumen, notificacionesNoLeidas, anomaliasAbiertas, mesasConActaDelPuesto]
+  );
+
+  const valorAcciones: AccionesContexto = useMemo(
+    () => ({
       visorActa,
       actaActual,
       actaCargando,
       accionActaEnCurso,
-      mesasConActaDelPuesto,
+      reinspeccionar,
+      marcarNotificacionLeida,
+      marcarTodasLeidas,
+      marcarAnomaliaRevisada,
       abrirVisor,
       abrirVisorDePuesto,
       abrirVisorDeAnomalia,
@@ -541,19 +636,14 @@ export function DatosProvider({ children }: { children: ReactNode }) {
       confirmarRescanVisor,
     }),
     [
-      estado,
-      resumen,
-      notificacionesNoLeidas,
-      anomaliasAbiertas,
-      reinspeccionar,
-      marcarNotificacionLeida,
-      marcarTodasLeidas,
-      marcarAnomaliaRevisada,
       visorActa,
       actaActual,
       actaCargando,
       accionActaEnCurso,
-      mesasConActaDelPuesto,
+      reinspeccionar,
+      marcarNotificacionLeida,
+      marcarTodasLeidas,
+      marcarAnomaliaRevisada,
       abrirVisor,
       abrirVisorDePuesto,
       abrirVisorDeAnomalia,
@@ -569,21 +659,38 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   const valorTicker = useMemo(() => ({ segundos: segundosTicker }), [segundosTicker]);
 
   return (
-    <Contexto.Provider value={valor}>
-      <ContextoTicker.Provider value={valorTicker}>
-        {children}
-        {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
-            monta desde el store del módulo (estado visorActa). */}
-        <ActaViewerModal />
-      </ContextoTicker.Provider>
-    </Contexto.Provider>
+    <ContextoDatos.Provider value={valorDatos}>
+      <ContextoAcciones.Provider value={valorAcciones}>
+        <ContextoTicker.Provider value={valorTicker}>
+          {children}
+          {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
+              monta desde el store del módulo (estado visorActa). */}
+          <ActaViewerModal />
+        </ContextoTicker.Provider>
+      </ContextoAcciones.Provider>
+    </ContextoDatos.Provider>
   );
 }
 
+/**
+ * R4-C6 — catálogo y filas (EstadoDatos + derivados). Las filas de la
+ * matriz NO deben consumir ni siquiera este hook: sus datos ya llegan por
+ * props y sus acciones por props estables desde `useDatosAcciones()`.
+ */
 export function useDatos(): DatosContexto {
-  const ctx = useContext(Contexto);
+  const ctx = useContext(ContextoDatos);
   if (!ctx) {
     throw new Error("useDatos debe usarse dentro de <DatosProvider>");
+  }
+  return ctx;
+}
+
+/** R4-C6 — visor (estado + acciones) y acciones del módulo. Consumidores
+ *  legítimos: shell, vistas y el visor de actas — NUNCA una fila memoizada. */
+export function useDatosAcciones(): AccionesContexto {
+  const ctx = useContext(ContextoAcciones);
+  if (!ctx) {
+    throw new Error("useDatosAcciones debe usarse dentro de <DatosProvider>");
   }
   return ctx;
 }

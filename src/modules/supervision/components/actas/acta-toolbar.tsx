@@ -10,6 +10,8 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { cn } from "cn";
+// R4 — límites de zoom ÚNICOS (antes duplicados: LIMITE_ZOOM local ×2).
+import { LIMITES_ZOOM_VISOR } from "./visor-zoom";
 
 /**
  * Toolbar flotante del visor (kit SUP-4 §2.2 / T4): zoom (multiplicativo
@@ -20,8 +22,6 @@ import { cn } from "cn";
  * onZoomChange). Fondo #121919/90 + backdrop-blur, sin sombras:
  * jerarquía por borde 1px (D14/D17).
  */
-
-const LIMITE_ZOOM = { min: 0.3, max: 4.0 } as const;
 
 function BotonHerramienta({
   etiqueta,
@@ -86,7 +86,7 @@ export function ActaToolbar({
       <BotonHerramienta
         etiqueta="Acercar (también con la rueda del mouse o pellizco)"
         onClick={onZoomMas}
-        deshabilitado={zoom >= LIMITE_ZOOM.max}
+        deshabilitado={zoom >= LIMITES_ZOOM_VISOR.max}
       >
         <ZoomIn className="size-4" aria-hidden />
       </BotonHerramienta>
@@ -99,7 +99,7 @@ export function ActaToolbar({
       <BotonHerramienta
         etiqueta="Alejar (también con la rueda del mouse o pellizco)"
         onClick={onZoomMenos}
-        deshabilitado={zoom <= LIMITE_ZOOM.min}
+        deshabilitado={zoom <= LIMITES_ZOOM_VISOR.min}
       >
         <ZoomOut className="size-4" aria-hidden />
       </BotonHerramienta>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { cn } from "cn";
-import { useDatos } from "../datos-provider";
+import { useDatos, useDatosAcciones } from "../datos-provider";
 import { actaAprobada } from "../../domain/acta";
 import type { FotoActa } from "../../domain/acta";
 import { cargarActasReales } from "../../data/actas-reales/actas-reales";
@@ -59,26 +59,28 @@ function filtroDeContraste(modo: ContrasteModo): string | undefined {
 
 /** Compuerta: nada del visor existe mientras no hay mesa abierta. */
 export function ActaViewerModal() {
-  const { visorActa } = useDatos();
+  // R4-C6 — el estado del visor vive en el contexto de ACCIONES.
+  const { visorActa } = useDatosAcciones();
   if (!visorActa) return null;
   return <VisorAbierto />;
 }
 
 function VisorAbierto() {
+  // R4-C6 — el visor consume AMBOS contextos: datos (puestos, mesas) y
+  // acciones (estado del visor + acciones). Ninguna fila lo hace.
+  const { puestos, mesasPorPuesto } = useDatos();
   const {
     visorActa,
     actaActual,
     actaCargando,
     accionActaEnCurso,
-    puestos,
-    mesasPorPuesto,
     aprobarActaVisor,
     confirmarRescanVisor,
     cerrarVisor,
     navegarMesa,
     cambiarTipo,
     cambiarPagina,
-  } = useDatos();
+  } = useDatosAcciones();
 
   // Estado local de UI del canvas (vive SOLO con el modal abierto).
   // KIT visor-gestos-v1: la escala REAL vive dentro de VisorZoom — aquí solo

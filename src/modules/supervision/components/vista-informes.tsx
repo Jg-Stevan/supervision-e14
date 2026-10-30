@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { useDatos } from "./datos-provider";
 import { StatusBadge } from "./status-badge";
+import { Esqueleto } from "./esqueleto";
 import type { Mesa, Puesto } from "../domain/types";
 
 /**
@@ -181,8 +182,8 @@ export function VistaInformes() {
   if (cargando) {
     return (
       <div className="space-y-3 p-4 md:p-6">
-        <div className="h-11 w-full max-w-md animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
-        <div className="h-96 w-full animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
+        <Esqueleto className="h-11 w-full max-w-md" />
+        <Esqueleto className="h-96 w-full" />
       </div>
     );
   }
@@ -247,7 +248,7 @@ export function VistaInformes() {
           </Select>
         </div>
         <Button
-          className="label-caps h-11 bg-(--primary) px-4 text-[--primary-foreground] hover:bg-(--primary)/90"
+          className="label-caps h-11 bg-(--primary) px-4 text-(--primary-foreground) hover:bg-(--primary)/90"
           onClick={generar}
         >
           Generar informe

@@ -4,7 +4,10 @@ import { useState } from "react";
 import { AlertTriangle, CheckCheck, Clock, Info, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
-import { useDatos } from "./datos-provider";
+// R4 — CLASE_CHIP único (reporte 02-b §5.1: duplicado ×3).
+import { CLASE_CHIP } from "@/shared/ui/tono";
+import { useDatos, useDatosAcciones } from "./datos-provider";
+import { Esqueleto } from "./esqueleto";
 import { tiempoRelativo } from "./tiempo";
 import type { TipoNotificacion } from "../domain/types";
 
@@ -27,24 +30,18 @@ const ICONOS_TIPO: Record<
 
 type Filtro = "todas" | "no-leidas";
 
-const CLASE_CHIP =
-  "label-caps inline-flex h-11 items-center gap-1.5 rounded-[4px] border px-3 text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)";
-
 export function VistaNotificaciones() {
-  const {
-    cargando,
-    notificaciones,
-    notificacionesNoLeidas,
-    marcarNotificacionLeida,
-    marcarTodasLeidas,
-  } = useDatos();
+  const { cargando, notificaciones, notificacionesNoLeidas } = useDatos();
+  // R4-C6 — las acciones viven en SU contexto (ya no viajan en el valor
+  // grande de datos).
+  const { marcarNotificacionLeida, marcarTodasLeidas } = useDatosAcciones();
   const [filtro, setFiltro] = useState<Filtro>("todas");
 
   if (cargando) {
     return (
       <div className="space-y-3 p-4 md:p-6">
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="h-14 w-full animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
+          <Esqueleto key={i} className="h-14 w-full" />
         ))}
       </div>
     );

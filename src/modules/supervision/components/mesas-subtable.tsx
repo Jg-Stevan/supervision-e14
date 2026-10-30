@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 import type { EstadoDelegado, Mesa } from "../domain/types";
 import { StatusBadge } from "./status-badge";
-import { useDatos } from "./datos-provider";
 
 function ChipParte({
   etiqueta,
@@ -83,14 +82,17 @@ export function MesasSubtable({
   puestoId,
   mesaEnAccionId,
   onReinspeccionar,
+  onAbrirVisor,
 }: {
   mesas: Mesa[];
   puestoId: string;
   /** Mesa con acción en curso (spinner en SU botón). */
   mesaEnAccionId: string | null;
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
+  /** R4-C6 — VER ACTA por props (callback estable): la sub-tabla no se
+   * suscribe al contexto y el flujo del visor no la re-renderiza. */
+  onAbrirVisor: (puestoId: string, mesaId: string) => void;
 }) {
-  const { abrirVisor } = useDatos();
   if (mesas.length === 0) {
     return (
       <div className="bg-(--surface-lowest) px-4 py-4">
@@ -198,7 +200,7 @@ export function MesasSubtable({
                           : "Ver acta"
                       }
                       aria-label={`Ver acta de la mesa ${mesa.id}`}
-                      onClick={() => abrirVisor(puestoId, mesa.id)}
+                      onClick={() => onAbrirVisor(puestoId, mesa.id)}
                     >
                       <FileText className="size-4" aria-hidden />
                     </Button>

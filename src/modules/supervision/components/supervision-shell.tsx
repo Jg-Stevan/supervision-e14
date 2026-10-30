@@ -32,7 +32,10 @@ import { SUPERVISOR } from "../data/mock-repository";
 // EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
 import { suscribirseRecepcion } from "../data/recepcion-log";
 import { StatusDot } from "./status-dot";
-import { DatosProvider, useDatos } from "./datos-provider";
+import { Esqueleto } from "./esqueleto";
+import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
+// R4-M7 — espejo de la sesión en location.hash (D11: espejo, NO router).
+import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
 import { VistaRecepcion } from "./vista-recepcion";
@@ -61,7 +64,7 @@ import { colorDeTono } from "@/shared/ui/tono";
  * KIT SUP-5 (D20): "notificaciones" e "informes" quedan DORMIDAS — sus
  * componentes y su lógica en el store permanecen intactos e inalcanzables
  * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista. */
-type VistaId =
+export type VistaId =
   | "monitor"
   | "recepcion"
   | "carga-masiva"
@@ -350,8 +353,10 @@ export function SupervisionShell() {
 }
 
 function ShellInterno() {
-  const { notificacionesNoLeidas, anomaliasAbiertas, cargando, abrirVisor } =
-    useDatos();
+  const { notificacionesNoLeidas, anomaliasAbiertas, cargando } = useDatos();
+  // R4-C6 — abrirVisor vive en el contexto de ACCIONES (el visor ya no
+  // viaja en el valor de datos).
+  const { abrirVisor } = useDatosAcciones();
   const [vista, setVista] = useState<VistaId>("monitor");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -387,6 +392,26 @@ function ShellInterno() {
       document.body.style.overflow = overflowPrevio;
     };
   }, [menuAbierto]);
+
+  // R4-M7 — restauración de la VISTA desde el espejo hash, UNA vez al
+  // montar (ref anti-doble-invoke). D11 intacto: no hay router ni escucha
+  // de hashchange — el hash se LEE aquí y se ESPEJA en cada cambio.
+  // setState diferido a microtask (misma regla de lint que C8: nada de
+  // setState sincrónico en el cuerpo del effect); el primer frame pinta
+  // monitor y el cambio cae pre-útil si el hash traía otra vista.
+  const vistaRestauradaRef = useRef(false);
+  useEffect(() => {
+    if (vistaRestauradaRef.current) return;
+    vistaRestauradaRef.current = true;
+    const { vista: vistaDelHash } = leerEstadoHash();
+    if (!vistaDelHash) return;
+    queueMicrotask(() => setVista(vistaDelHash));
+  }, []);
+
+  // R4-M7 — espejo de escritura de la vista (merge con las otras claves).
+  useEffect(() => {
+    escribirHashParcial({ vista });
+  }, [vista]);
 
   const elegirVista = (v: VistaId) => {
     setVista(v);
@@ -468,8 +493,8 @@ function ShellInterno() {
         <main className="flex-1">
           {cargando && vista !== "monitor" ? (
             <div className="space-y-4 p-4 md:p-6">
-              <div className="h-11 w-full max-w-md animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
-              <div className="h-96 w-full animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
+              <Esqueleto className="h-11 w-full max-w-md" />
+              <Esqueleto className="h-96 w-full" />
             </div>
           ) : (
             <VistaActual
