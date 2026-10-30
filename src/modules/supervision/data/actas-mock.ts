@@ -284,6 +284,17 @@ function clonarActa(acta: ActaMesa): ActaMesa {
       DELEGADOS: acta.formularios.DELEGADOS.map((p) => ({ ...p })),
     },
     historial: acta.historial.map((e) => ({ ...e })),
+    // M11 — clonado PROFUNDO mínimo (reporte 02a 🟡-1): `fotos` (y el
+    // encabezado `impresion`) quedaban ALIASADOS al acta en caché / al
+    // registro real del loader; un mutador externo corrompía el documento
+    // histórico (y las fotos reales compartidas) sin rastro.
+    fotos: acta.fotos
+      ? {
+          TRANSMISION: acta.fotos.TRANSMISION?.map((f) => (f ? { ...f } : null)),
+          DELEGADOS: acta.fotos.DELEGADOS?.map((f) => (f ? { ...f } : null)),
+        }
+      : undefined,
+    impresion: acta.impresion ? { ...acta.impresion } : undefined,
   };
 }
 

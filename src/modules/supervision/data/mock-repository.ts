@@ -782,6 +782,23 @@ function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   return true;
 }
 
+/**
+ * M11 — clonado PROFUNDO mínimo en la frontera del repo (reporte 02a
+ * 🟡-1): `{...mesa}` dejaba `delegados` y `transmision` (con `p1/p2` y
+ * `alerta`) ALIASADOS al singleton; un mutador externo corrompía el
+ * estado global del demo sin rastro.
+ */
+function clonarMesa(mesa: Mesa): Mesa {
+  return {
+    ...mesa,
+    delegados: { ...mesa.delegados },
+    transmision: {
+      p1: { ...mesa.transmision.p1 },
+      p2: { ...mesa.transmision.p2 },
+    },
+  };
+}
+
 export const mockSupervisionRepository: SupervisionRepository = {
   async getResumen(): Promise<ResumenGlobal> {
     asegurarDatos();
@@ -808,7 +825,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
 
   async getMesasDePuesto(puestoId: string): Promise<Mesa[]> {
     asegurarDatos();
-    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map((m) => ({ ...m })));
+    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map(clonarMesa));
   },
 
   async getNotificaciones(): Promise<Notificacion[]> {
@@ -840,7 +857,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
       `Rescaneo completado en Mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
     );
     NOTIFICACIONES.unshift(notificacion);
-    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
+    return { mesa: clonarMesa(mesa), notificacion: { ...notificacion } };
   },
 
   async aplicarTransicionVida() {
@@ -932,7 +949,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
       `CARGA MASIVA — MESA ${mesa.id} (${etiquetaDePuesto(puesto)})`
     );
     NOTIFICACIONES.unshift(notificacion);
-    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
+    return { mesa: clonarMesa(mesa), notificacion: { ...notificacion } };
   },
 
   async aprobarActa(actaId: string, observacion: string) {
