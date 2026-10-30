@@ -2006,11 +2006,11 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   // consumir). decode = 0 s — el coste ya vivió en precalorMs durante la
   // espera en cola. Un master se consume UNA vez; el chip PREPARADA muere
   // con la fila al pasar a PROCESANDO.
-  // D63-A2 (T0): `let` — si el pre-proceso aplicó (deskew), el master
-  // precalentado NO alimenta el pipeline y la referencia se SUELTA
-  // (disciplina de memoria más abajo — el blob muere YA, no al fin del
-  // scope: el OCR domina con ~13 s por fila).
-  let entradaPrecalor = consumirMaestro(fila.id);
+  // D63-A2 (T0): si el pre-proceso aplicó (deskew), el master precalentado
+  // NO alimenta el pipeline y la referencia se SUELTA DENTRO de
+  // fasePipelineIntentos (disciplina de memoria — el blob muere YA, no al
+  // fin del scope: el OCR domina con ~13 s por fila).
+  const entradaPrecalor = consumirMaestro(fila.id);
   if (entradaPrecalor) {
     logger.info(
       `[e14] precalor fila=${fila.id} consumido precalorMs=${entradaPrecalor.precalorMs} origen=${entradaPrecalor.maestro.origenDecode}`,

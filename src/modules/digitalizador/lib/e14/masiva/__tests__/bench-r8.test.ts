@@ -129,7 +129,7 @@ test(`bench r8: lote sintético N=${N} × ${RONDAS} rondas por procesarUno (happ
     await useMasivaStore.getState().vaciar();
   }
   const menor = Math.min(...tiempos);
-  // eslint-disable-next-line no-console -- salida del benchmark (se pega en pr.md/informe)
+  // salida del benchmark (se pega en pr.md/informe — marcador BENCH-R8)
   console.log(
     `BENCH-R8 N=${N} rondas=${RONDAS} ms_por_ronda=[${tiempos.join(", ")}] min_ms=${menor} us_por_fila=${Math.round((menor / N) * 1000)}`,
   );
