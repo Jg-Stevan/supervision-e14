@@ -357,7 +357,20 @@ export function VistaPerfil() {
     }
   }, [perfil]);
   useEffect(() => {
-    resolverAuto();
+    // Orch-lint (panel-perfil.tsx:360) — resolverAuto() hace setState
+    // sincrónico en el cuerpo del effect (react-hooks/set-state-in-effect,
+    // último error del CI tras el fix de R4 en vista-recepcion). Mismo
+    // patrón conservador de R4: diferido a microtarea con guard de vida —
+    // mismo resultado observable (el panel aterriza una microtask después)
+    // y re-corre igual cuando cambia `perfil` (sin ref anti-doble: aquí el
+    // re-run es el comportamiento querido). Nada de setState tras desmontar.
+    let vivo = true;
+    queueMicrotask(() => {
+      if (vivo) resolverAuto();
+    });
+    return () => {
+      vivo = false;
+    };
   }, [resolverAuto]);
 
   const copiar = () => {
