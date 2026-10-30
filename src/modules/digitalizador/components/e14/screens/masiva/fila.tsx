@@ -5,22 +5,24 @@
  *
  * SPLIT move-only de MasivaView.tsx (reporte 03b M-2): el cuerpo del
  * `visiblesOrdenadas.map(...)` de la bandeja se extrae a este componente
- * SIN cambiar lógica ni JSX. Los props conservan LOS NOMBRES de las
- * variables locales originales (f, progreso, recienListas y las acciones
- * del store) para que el bloque movido quede verbatim — solo cambia la
- * indentación (dedent ×12). R6-fix O(n²): colaVida/filas entran como Maps
- * precalculados (posicionesCola/totalCola/nombrePorId).
+ * SIN cambiar lógica ni JSX — solo cambia la indentación (dedent ×12).
+ *
+ * R6-perf (re-renders, reporte 03b §M-2): componente MEMOIZADO. Los valores
+ * derivados POR RENDER llegan como props primitivos (esActiva, pildora*,
+ * pctProceso, ocrPct, vidaTexto, posCola, totalCola, recienLista,
+ * nombreOriginal) — precalculados en BandejaFilas; una señal de vida
+ * (throttle 250 ms) solo cambia los primitivos de la fila ACTIVA, así que
+ * las demás filas comparan iguales y SALTAN el re-render. `f` se pasa por
+ * IDENTIDAD (el store parchea con `filas.map(f => f.id === id ?
+ * { ...f, ...patch } : f)`: el objeto de una fila solo se reemplaza cuando
+ * ESA fila cambia — misma granularidad que explotarlo en 16 primitivos,
+ * sin duplicar su forma). Las acciones del store (zustand) son estables.
  */
+import { memo } from "react";
+
 import type { EtapaVidaKit } from "@/modules/digitalizador/lib/e14/masiva/store";
 import type { FilaMasiva } from "@/modules/digitalizador/lib/e14/masiva/tipos";
 import { CheckIcon, StitchStackIcon } from "../../icons";
-import {
-  esDuplicada,
-  etiquetaDupDe,
-  etiquetaVida,
-  pildoraDe,
-  porcentajeProcesoActa,
-} from "./helpers";
 
 /** Espejo estructural del estado `progreso` del store masiva (ProgresoFila
  * no se exporta — el store es de R8): mismos campos, misma forma. */
@@ -33,47 +35,56 @@ export interface ProgresoFilaVista {
   fracGlobal?: number;
 }
 
-export function FilaMasivaVista({
-  f,
-  progreso,
-  posicionesCola,
-  totalCola,
-  nombrePorId,
-  recienListas,
-  procesarIgual,
-  abrirActa,
-  reintentar,
-  quitar,
-}: {
+export interface PropsFilaMasiva {
+  /** La fila del store — por IDENTIDAD (ver doc del archivo). */
   f: FilaMasiva;
-  progreso: ProgresoFilaVista | null;
-  /** Posición 1-based en la cola de vida (Map precalculado — R6: reemplaza
-   *  el `colaVida.indexOf(f.id)` O(n²) por fila del render). */
-  posicionesCola: Map<string, number>;
+  esActiva: boolean;
+  pildoraLabel: string;
+  pildoraClases: string;
+  /** KIT e64v — gemela CONFIRMADA (desenlace heredado) → fila azul. */
+  esDup: boolean;
+  /** Etiqueta del chip azul (solo si esDup; null = no aplica). */
+  etiquetaDup: string | null;
+  /** % ÚNICO del proceso completo (precalculado). */
+  pctProceso: number;
+  /** % de OCR SOLO si es dato REAL (kit T3 honestidad); null = sin número. */
+  ocrPct: number | null;
+  /** Texto de etapa de la fila ACTIVA ("" fuera de ella). */
+  vidaTexto: string;
+  /** Posición 1-based en la cola de vida (0 = fuera de cola). */
+  posCola: number;
   totalCola: number;
-  /** Map id→nombre (precalculado — R6: reemplaza el `filas.find` O(n²)
-   *  por fila DUPLICADA del render). */
-  nombrePorId: Map<string, string>;
-  recienListas: Set<string>;
+  /** Destello 100% verde al LISTAR (D65 T3.3 — transitorio). */
+  recienLista: boolean;
+  /** Nombre de la fila original de una DUPLICADA (null → «OTRA FILA»). */
+  nombreOriginal: string | null;
   procesarIgual: (id: string) => void;
   abrirActa: (id: string) => void;
   reintentar: (id: string) => void;
   quitar: (id: string) => void;
-}) {
-  const pildora = pildoraDe(f);
-  const esActiva = progreso?.id === f.id && f.estado === "PROCESANDO";
-  // KIT e64v — Cambio A: gemela CONFIRMADA (desenlace heredado)
-  // → fila azul. La dup aplazada aún no confirma → sin azul.
-  const esDup = esDuplicada(f);
+}
+
+export const FilaMasivaVista = memo(function FilaMasivaVista({
+  f,
+  esActiva,
+  pildoraLabel,
+  pildoraClases,
+  esDup,
+  etiquetaDup,
+  pctProceso,
+  ocrPct,
+  vidaTexto,
+  posCola,
+  totalCola,
+  recienLista,
+  nombreOriginal,
+  procesarIgual,
+  abrirActa,
+  reintentar,
+  quitar,
+}: PropsFilaMasiva) {
   // D65 (T3.3) — señal de vida de la fila (barra h-1 discreta):
   const enColaVida = f.estado === "PENDIENTE" || f.estado === "DUPLICADA";
-  const posCola = enColaVida ? (posicionesCola.get(f.id) ?? 0) : 0;
-  const pctProceso = porcentajeProcesoActa(f, Boolean(esActiva), progreso);
-  // % SOLO si es dato REAL (OCR del reconocedor) — kit T3 honestidad.
-  const ocrPct =
-    esActiva && progreso?.etapa === "ocr" && progreso.ocrFraccion != null
-      ? Math.min(100, Math.max(0, Math.round(progreso.ocrFraccion * 100)))
-      : null;
   return (
     <li
       key={f.id}
@@ -130,9 +141,9 @@ export function FilaMasivaVista({
         </p>
         <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
           <span
-            className={`px-2 py-0.5 rounded-full border font-mono text-[9px] font-bold uppercase tracking-wider ${pildora.clases}`}
+            className={`px-2 py-0.5 rounded-full border font-mono text-[9px] font-bold uppercase tracking-wider ${pildoraClases}`}
           >
-            {pildora.label}
+            {pildoraLabel}
           </span>
           {/* KIT e64v — Cambio A: chip azul de la gemela CONFIRMADA.
               Etiqueta SIEMPRE visible (el color jamás es el único
@@ -145,10 +156,10 @@ export function FilaMasivaVista({
           {esDup && (
             <span
               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-900 text-blue-300 font-mono text-[9px] font-bold tracking-wider"
-              aria-label={`Gemela confirmada — ${etiquetaDupDe(f)}`}
+              aria-label={`Gemela confirmada — ${etiquetaDup}`}
             >
               <CheckIcon className="w-3 h-3" strokeWidth={2.5} />
-              {etiquetaDupDe(f)}
+              {etiquetaDup}
             </span>
           )}
           {/* D66 — KIT e14-decode-unico-precalor-v1 (T3.5): mini-señal
@@ -189,7 +200,7 @@ export function FilaMasivaVista({
               a su original — transparencia total del dedup. */}
           {f.estado === "DUPLICADA" && f.dupOf && (
             <span className="font-mono text-[9px] uppercase tracking-wider text-gray-400 truncate">
-              ≡ {nombrePorId.get(f.dupOf) ?? "OTRA FILA"}
+              ≡ {nombreOriginal ?? "OTRA FILA"}
             </span>
           )}
           {/* e65-dedup-enviadas-v1 (T-7): chip YA ENVIADA — la
@@ -319,7 +330,7 @@ export function FilaMasivaVista({
           (perdido en el zip 4f9c871 — AUDITORIA-REGRESION
           #1/#2). Plomería intacta: recienListas/enColaVida/
           posCola/colaVida + ocrPct (honesto, solo dato real). */}
-      {(enColaVida || esActiva || f.estado === "ERROR" || (f.estado === "LISTA" && recienListas.has(f.id))) && (
+      {(enColaVida || esActiva || f.estado === "ERROR" || (f.estado === "LISTA" && recienLista)) && (
         <div className="mt-2">
           {esActiva && ocrPct != null ? (
             <div
@@ -341,14 +352,12 @@ export function FilaMasivaVista({
           ) : (
             <div className="h-1 rounded-full bg-white/5" aria-hidden />
           )}
-          {(enColaVida || (esActiva && progreso)) && (
+          {(enColaVida || esActiva) && (
             <p className="mt-1 font-mono text-[11px] tabular-nums tracking-wider text-gray-400 uppercase truncate">
               <span aria-live="polite">
                 {enColaVida
                   ? `EN COLA #${posCola} DE ${totalCola}`
-                  : progreso
-                    ? etiquetaVida({ etapa: progreso.etapa })
-                    : ""}
+                  : vidaTexto}
               </span>
               {ocrPct != null && <span> {ocrPct}%</span>}
             </p>
@@ -357,4 +366,4 @@ export function FilaMasivaVista({
       )}
     </li>
   );
-}
+});

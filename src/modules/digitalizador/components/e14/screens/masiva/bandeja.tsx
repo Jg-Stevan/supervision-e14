@@ -10,7 +10,14 @@
  */
 import type { FiltroMasiva } from "@/modules/digitalizador/lib/e14/masiva/store";
 import type { FilaMasiva } from "@/modules/digitalizador/lib/e14/masiva/tipos";
-import { FILTROS } from "./helpers";
+import {
+  esDuplicada,
+  etiquetaDupDe,
+  etiquetaVida,
+  FILTROS,
+  pildoraDe,
+  porcentajeProcesoActa,
+} from "./helpers";
 import { FilaMasivaVista, type ProgresoFilaVista } from "./fila";
 
 /** Filtros + línea de conteos + botón ENVIAR ADVERTENCIAS. */
@@ -113,21 +120,45 @@ export function BandejaFilas({
 }) {
   return (
   <ul className="flex flex-col gap-2 pr-1" aria-label="Bandeja de resultados">
-    {visiblesOrdenadas.map((f) => (
-      <FilaMasivaVista
-        key={f.id}
-        f={f}
-        progreso={progreso}
-        posicionesCola={posicionesCola}
-        totalCola={totalCola}
-        nombrePorId={nombrePorId}
-        recienListas={recienListas}
-        procesarIgual={procesarIgual}
-        abrirActa={abrirActa}
-        reintentar={reintentar}
-        quitar={quitar}
-      />
-    ))}
+    {visiblesOrdenadas.map((f) => {
+      // R6-perf: derivados por fila en O(1) → props PRIMITIVOS para la fila
+      // memoizada. Una señal de vida (throttle 250 ms) solo cambia los
+      // primitivos de la fila ACTIVA — las demás filas comparan iguales y
+      // saltan el re-render (antes re-renderizaban TODAS en cada tick).
+      const esActiva = progreso?.id === f.id && f.estado === "PROCESANDO";
+      const pildora = pildoraDe(f);
+      const esDup = esDuplicada(f);
+      const enColaVida = f.estado === "PENDIENTE" || f.estado === "DUPLICADA";
+      // KIT e64v — Cambio A: gemela CONFIRMADA (desenlace heredado) → fila
+      // azul. La dup aplazada aún no confirma → sin azul.
+      return (
+        <FilaMasivaVista
+          key={f.id}
+          f={f}
+          esActiva={esActiva}
+          pildoraLabel={pildora.label}
+          pildoraClases={pildora.clases}
+          esDup={esDup}
+          etiquetaDup={esDup ? etiquetaDupDe(f) : null}
+          pctProceso={porcentajeProcesoActa(f, esActiva, esActiva ? progreso : null)}
+          // % SOLO si es dato REAL (OCR del reconocedor) — kit T3 honestidad.
+          ocrPct={
+            esActiva && progreso?.etapa === "ocr" && progreso.ocrFraccion != null
+              ? Math.min(100, Math.max(0, Math.round(progreso.ocrFraccion * 100)))
+              : null
+          }
+          vidaTexto={esActiva && progreso ? etiquetaVida({ etapa: progreso.etapa }) : ""}
+          posCola={enColaVida ? (posicionesCola.get(f.id) ?? 0) : 0}
+          totalCola={totalCola}
+          recienLista={recienListas.has(f.id)}
+          nombreOriginal={f.dupOf != null ? (nombrePorId.get(f.dupOf) ?? null) : null}
+          procesarIgual={procesarIgual}
+          abrirActa={abrirActa}
+          reintentar={reintentar}
+          quitar={quitar}
+        />
+      );
+    })}
     {visibles.length === 0 && (
       <li className="rounded-xl border border-brand-borderdim bg-brand-surface/40 px-3 py-4 text-center font-mono text-[10px] uppercase tracking-wider text-gray-400">
         SIN FILAS CON ESE FILTRO
