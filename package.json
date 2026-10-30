@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "prebuild": "bun scripts/build-capa0-worker.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:push": "prisma db push --accept-data-loss",
+    "db:generate": "prisma generate"
   },
   "dependencies": {
     "@jg-stevan/scanner-core": "^0.4.0",
