@@ -14,7 +14,7 @@
  */
 import { leerRegistro } from "./cola";
 import { logger } from "../../logger";
-import { useMasivaStore } from "./store";
+import { storeMasiva } from "./store-api";
 
 // ─── e72 — ESPERA ACOTADA por el desenlace de la original (guard de
 // ingesta × pool) ─── La rama DUPLICADA de procesarUno caía al REPROCESO
@@ -46,10 +46,10 @@ async function esperarDesenlaceOriginal(
   );
   while (Date.now() - tEspera < ESPERA_ORIGINAL_TECHO_MS) {
     await new Promise((r) => setTimeout(r, ESPERA_ORIGINAL_INTERVALO_MS));
-    if (!useMasivaStore.getState().filas.some((f) => f.id === estaFilaId)) {
+    if (!storeMasiva().getState().filas.some((f) => f.id === estaFilaId)) {
       return false; // esta fila QUITADA/VACIADA en la espera — nada que copiar
     }
-    const original = useMasivaStore
+    const original = storeMasiva()
       .getState()
       .filas.find((f) => f.id === originalId);
     // Whitelist COPIABLE (T-5 e65: la literal YA-ENVIADA jamás se escribe en

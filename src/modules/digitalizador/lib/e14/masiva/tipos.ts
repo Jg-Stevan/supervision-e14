@@ -404,3 +404,117 @@ export function tituloDeActa(acta: Acta): string | null {
   return t.length > 0 ? t : null;
 }
 
+
+// ─── R8 — SPLIT del store (etapa 2): TIPOS del mini-store movidos de
+// store.ts a tipos.ts ─── El núcleo inyectado (store-api.ts / runner /
+// precalor / dedup-*) tipa su dependencia SIN importar store.ts (fin del
+// ciclo store↔runner↔precalor). El store Zustand conserva su API EXACTA:
+// store.ts re-exporta los tipos públicos (FiltroMasiva · EtapaVidaKit) que
+// sus consumidores (components/e14/screens/masiva — zona R6) ya importaban.
+
+export type FiltroMasiva =
+  | "TODAS"
+  | "OPTIMA"
+  | "ADVERTENCIA"
+  | "RECHAZADA"
+  | "EN_REVISION_HUMANA"
+  | "ERROR";
+
+/** D65 — KIT e14-progreso-watchdog-dedup-v1 (T3): vocabulario del kit para
+ *  la señal de vida de la fila ACTIVA. La fracción SOLO existe en OCR y es
+ *  REAL (reconocedor por lotes de rec — §2-C4 del kit ocr-escalonado); las
+ *  demás etapas van SIN número (barra animada — jamás inventar %). */
+export type EtapaVidaKit = "preparando" | "deteccion" | "ocr" | "verificacion";
+
+/** Progreso de la fila ACTIVA (throttled por el runner 250 ms — D65 T3.1).
+ *  Estado TRANSITORIO: NO se persiste en IndexedDB (kit T3.4 — cada tick a
+ *  IDB sería caro); al recargar la página las filas vuelven a PENDIENTE como
+ *  hoy y no queda % fantasma.
+ *
+ *  CAMBIO (pedido del dueño): UN % para TODO el proceso del acta — antes el
+ *  chip de la fila saltaba por tramos fijos por fase y el OCR escalonado
+ *  (2 pasadas) hacía que el número RETROCEDIERA (95→50→95). Ahora el runner
+ *  computa `fracGlobal` (0..1): cada fase del pipeline mapea a un tramo del
+ *  TOTAL, las 2 pasadas del OCR reparten sub-tramos y el valor es MONOTÓNICO
+ *  (jamás baja dentro de la misma acta — Math.max por señal). */
+// knip C3: de-export — uso SOLO interno (estado del mini-store).
+interface ProgresoFila {
+  id: string;
+  etapa: EtapaVidaKit;
+  /** 0..1 SOLO cuando etapa === "ocr" — dato REAL del reconocedor. */
+  ocrFraccion?: number;
+  /** 0..1 del PROCESO COMPLETO del acta (todas las fases sumadas) —
+   *  monotónico: nunca baja dentro de la misma acta. 1 = LISTA. */
+  fracGlobal?: number;
+}
+
+export interface MasivaStore {
+  filas: FilaMasiva[];
+  corriendo: boolean;
+  progreso: ProgresoFila | null;
+  filtro: FiltroMasiva;
+  /** Acta abierta en REVISIÓN desde la bandeja (T3.4) — la identidad para
+   *  sincronizar al volver. null = ninguna abierta. */
+  origenAbierto: string | null;
+  /** «GUARDANDO N…» — copia async de files → IDB (zona de carga). */
+  guardando: number;
+  /** false → píldora de fallback (IndexedDB no disponible — kit §3/§6). */
+  colaDisponible: boolean;
+  /** FIX (auditoría 2-c C5): true mientras corre «ENVIAR ADVERTENCIAS» —
+   *  guard de re-entrancia del lote (doble tap = doble envío). */
+  enviandoLote: boolean;
+
+  /** FIX M9 (auditoría 2-c): aviso específico de QUOTA — antes cualquier
+   *  fallo de escritura (casi siempre almacenamiento lleno con actas de
+   *  ~15 MB/registro) degradaba a «TU NAVEGADOR NO SOPORTA LA COLA» (falso)
+   *  y mataba el botón PROCESAR para TODA la bandeja. null = sin aviso. */
+  avisoCola: string | null;
+
+  /** Al montar: lista IDB → filas livianas + recuperarCola() (zombis fuera). */
+  cargarFilas: () => Promise<void>;
+  /** Suelta/selección de fotos: filas PENDIENTES al instante (ids temp) +
+   *  copia async a IDB — al resolver, los ids reales reemplazan a los temp. */
+  agregarFiles: (files: File[]) => Promise<void>;
+  iniciar: () => void;
+  pausar: () => void;
+  /** ABRIR: auto-pausa del runner + REVISIÓN del acta (vía T3.4). */
+  abrirActa: (id: string) => Promise<void>;
+  /** Al volver de REVISIÓN: si la identidad coincide, re-persiste el acta
+   *  ACTUALIZADA (recorte/filtro/envío — F5) y refresca la fila. Si no,
+   *  SOLO limpia origenAbierto (no escribe nada). */
+  sincronizarAlVolver: () => Promise<void>;
+  quitar: (id: string) => Promise<void>;
+  vaciar: () => Promise<void>;
+  /** D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO de envíos (cola +
+   *  ledger del histórico + índices de sesión). El corte explícito que pide
+   *  el dueño para re-probar el MISMO lote — botón de 2 toques (MasivaView);
+   *  vaciar() queda byte a byte (RL-e65b-5 intacto). */
+  reiniciarEnvios: () => Promise<void>;
+  /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
+   *  DUPLICADA (→ PENDIENTE, dupOf fuera) para que el runner la reprocese
+   *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
+  procesarIgual: (id: string) => Promise<void>;
+  /** D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» de una fila ERROR —
+   *  la re-encola (PENDIENTE, error fuera, persistente) para que el dueño
+   *  pulse PROCESAR. NO auto-procesa (misma doctrina D45: extraer/re-encolar
+   *  NO procesa). Sin archivo original en IDB → la fila SIGUE en ERROR con
+   *  SIN_ARCHIVO_ORIGINAL (honesto — registros viejos o filas de formato). */
+  reintentar: (id: string) => Promise<void>;
+  /** Envío en lote SECUENCIAL de ADVERTENCIAS (cada una vía registrarEnvio
+   *  real). NO toca RECHAZADAS ni EN_RH (kit §6). */
+  enviarLote: (estado: "ADVERTENCIA") => Promise<void>;
+  /** D65 (T3.1): señal de vida de la fila en curso — action NUEVO del kit;
+   *  el runner emite con throttle 250 ms vía bucketDeVida. Transitorio
+   *  (NUNCA a IDB — kit T3.4). `fracGlobal` = % ÚNICO del proceso completo
+   *  del acta (monotónico — ver ProgresoFila). */
+  marcarProgreso: (
+    id: string,
+    progreso: { etapa: EtapaVidaKit; ocrFraccion?: number; fracGlobal?: number },
+  ) => void;
+  setFiltro: (filtro: FiltroMasiva) => void;
+  /** e64-qr-v1 (T-0.2): estampar campos SOLO-VISUALES sobre UNA fila viva
+   *  (el chip qrEstado de la CAPA 0 QR se pinta a mitad de proceso, cuando
+   *  el runner acaba de decodificar). Patch INMUTABLE — el MISMO patrón del
+   *  patchFila interno (el kit llama a este mutador desde el runner). */
+  actualizarFila: (id: string, patch: Partial<FilaMasiva>) => void;
+}

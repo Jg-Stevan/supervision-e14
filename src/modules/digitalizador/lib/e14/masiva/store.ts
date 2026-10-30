@@ -34,6 +34,7 @@ import {
   type EntradaHistorica,
 } from "./historico";
 // SPLIT C1 (refactor/runner-logger-v1): hacerThumb vive en runner-thumbs.ts
+import { hacerThumb } from "./runner-thumbs";
 import { logger } from "../../logger";
 // WAVE3 §A.3 — ORDEN-WAVE3-remoto-rescate-obs-v1: cliente del ledger remoto
 // (el registro nace TAMBIÉN al drenar las filas «EN COLA» — único hook de
@@ -45,14 +46,19 @@ import { leerFlags } from "../flags";
 // (worker e73: lee la identidad QR ANTES del pool — gemelas jamás pagan
 // slot/probe/OCR; null honesto = la vía de HOY — doctrina del conservador).
 import { sondearQrPrecoz } from "./sondeo-qr.client";
-// (responsabilidad de render — movimiento puro del runner).
-import { hacerThumb } from "./runner-thumbs";
+// R8 — inyección del store al núcleo (ver cabecera de este archivo).
+import { cablearStoreMasiva } from "./store-api";
+// R8 — SPLIT del store (etapa 2): el núcleo (runner/precalor/runner-dedup/
+// runner-vida) ya NO importa este módulo — recibe la API del store por
+// INYECCIÓN (store-api.ts, cableada abajo tras create). Sentido único:
+// store → núcleo. Este import (iniciar/pausar/rearrancar para las actions
+// de UI) es la ÚNICA arista store→runner y NO tiene retorno.
 import { iniciarRunner, pausarRunner, rearrancarTrasEncolar } from "./runner";
 // D66 — KIT e14-decode-unico-precalor-v1: cableado del PRECALOR (T3) — la
 // suscripción al mini-store vive aquí (zona del kit: «flag transitorio
-// precalentada + cola de precalor») DESPUÉS de crear el store: precalor.ts
-// también importa useMasivaStore (solo DENTRO de funciones — un call en su
-// evaluación de módulo sería TDZ por el ciclo runner↔precalor↔store).
+// precalentada + cola de precalor») DESPUÉS de crear el store. R8: precalor
+// consume el store vía storeMasiva() (inyección — sin import de ./store, sin
+// TDZ por el viejo ciclo runner↔precalor↔store).
 import { cablearPrecalor } from "./precalor";
 // KIT e14-masiva-ux-v1 (T2): clasificación/extracción de archivos — las
 // deps pesadas (fflate/node-unrar-js) viven DETRÁS de extraerArchivo con
@@ -89,112 +95,12 @@ import {
 } from "./tipos";
 import type { Acta } from "../types";
 
-export type FiltroMasiva =
-  | "TODAS"
-  | "OPTIMA"
-  | "ADVERTENCIA"
-  | "RECHAZADA"
-  | "EN_REVISION_HUMANA"
-  | "ERROR";
-
-/** D65 — KIT e14-progreso-watchdog-dedup-v1 (T3): vocabulario del kit para
- *  la señal de vida de la fila ACTIVA. La fracción SOLO existe en OCR y es
- *  REAL (reconocedor por lotes de rec — §2-C4 del kit ocr-escalonado); las
- *  demás etapas van SIN número (barra animada — jamás inventar %). */
-export type EtapaVidaKit = "preparando" | "deteccion" | "ocr" | "verificacion";
-
-/** Progreso de la fila ACTIVA (throttled por el runner 250 ms — D65 T3.1).
- *  Estado TRANSITORIO: NO se persiste en IndexedDB (kit T3.4 — cada tick a
- *  IDB sería caro); al recargar la página las filas vuelven a PENDIENTE como
- *  hoy y no queda % fantasma.
- *
- *  CAMBIO (pedido del dueño): UN % para TODO el proceso del acta — antes el
- *  chip de la fila saltaba por tramos fijos por fase y el OCR escalonado
- *  (2 pasadas) hacía que el número RETROCEDIERA (95→50→95). Ahora el runner
- *  computa `fracGlobal` (0..1): cada fase del pipeline mapea a un tramo del
- *  TOTAL, las 2 pasadas del OCR reparten sub-tramos y el valor es MONOTÓNICO
- *  (jamás baja dentro de la misma acta — Math.max por señal). */
-// knip C3: de-export — uso SOLO interno (estado del mini-store).
-interface ProgresoFila {
-  id: string;
-  etapa: EtapaVidaKit;
-  /** 0..1 SOLO cuando etapa === "ocr" — dato REAL del reconocedor. */
-  ocrFraccion?: number;
-  /** 0..1 del PROCESO COMPLETO del acta (todas las fases sumadas) —
-   *  monotónico: nunca baja dentro de la misma acta. 1 = LISTA. */
-  fracGlobal?: number;
-}
-
-interface MasivaStore {
-  filas: FilaMasiva[];
-  corriendo: boolean;
-  progreso: ProgresoFila | null;
-  filtro: FiltroMasiva;
-  /** Acta abierta en REVISIÓN desde la bandeja (T3.4) — la identidad para
-   *  sincronizar al volver. null = ninguna abierta. */
-  origenAbierto: string | null;
-  /** «GUARDANDO N…» — copia async de files → IDB (zona de carga). */
-  guardando: number;
-  /** false → píldora de fallback (IndexedDB no disponible — kit §3/§6). */
-  colaDisponible: boolean;
-  /** FIX (auditoría 2-c C5): true mientras corre «ENVIAR ADVERTENCIAS» —
-   *  guard de re-entrancia del lote (doble tap = doble envío). */
-  enviandoLote: boolean;
-
-  /** FIX M9 (auditoría 2-c): aviso específico de QUOTA — antes cualquier
-   *  fallo de escritura (casi siempre almacenamiento lleno con actas de
-   *  ~15 MB/registro) degradaba a «TU NAVEGADOR NO SOPORTA LA COLA» (falso)
-   *  y mataba el botón PROCESAR para TODA la bandeja. null = sin aviso. */
-  avisoCola: string | null;
-
-  /** Al montar: lista IDB → filas livianas + recuperarCola() (zombis fuera). */
-  cargarFilas: () => Promise<void>;
-  /** Suelta/selección de fotos: filas PENDIENTES al instante (ids temp) +
-   *  copia async a IDB — al resolver, los ids reales reemplazan a los temp. */
-  agregarFiles: (files: File[]) => Promise<void>;
-  iniciar: () => void;
-  pausar: () => void;
-  /** ABRIR: auto-pausa del runner + REVISIÓN del acta (vía T3.4). */
-  abrirActa: (id: string) => Promise<void>;
-  /** Al volver de REVISIÓN: si la identidad coincide, re-persiste el acta
-   *  ACTUALIZADA (recorte/filtro/envío — F5) y refresca la fila. Si no,
-   *  SOLO limpia origenAbierto (no escribe nada). */
-  sincronizarAlVolver: () => Promise<void>;
-  quitar: (id: string) => Promise<void>;
-  vaciar: () => Promise<void>;
-  /** D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO de envíos (cola +
-   *  ledger del histórico + índices de sesión). El corte explícito que pide
-   *  el dueño para re-probar el MISMO lote — botón de 2 toques (MasivaView);
-   *  vaciar() queda byte a byte (RL-e65b-5 intacto). */
-  reiniciarEnvios: () => Promise<void>;
-  /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
-   *  DUPLICADA (→ PENDIENTE, dupOf fuera) para que el runner la reprocese
-   *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
-  procesarIgual: (id: string) => Promise<void>;
-  /** D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» de una fila ERROR —
-   *  la re-encola (PENDIENTE, error fuera, persistente) para que el dueño
-   *  pulse PROCESAR. NO auto-procesa (misma doctrina D45: extraer/re-encolar
-   *  NO procesa). Sin archivo original en IDB → la fila SIGUE en ERROR con
-   *  SIN_ARCHIVO_ORIGINAL (honesto — registros viejos o filas de formato). */
-  reintentar: (id: string) => Promise<void>;
-  /** Envío en lote SECUENCIAL de ADVERTENCIAS (cada una vía registrarEnvio
-   *  real). NO toca RECHAZADAS ni EN_RH (kit §6). */
-  enviarLote: (estado: "ADVERTENCIA") => Promise<void>;
-  /** D65 (T3.1): señal de vida de la fila en curso — action NUEVO del kit;
-   *  el runner emite con throttle 250 ms vía bucketDeVida. Transitorio
-   *  (NUNCA a IDB — kit T3.4). `fracGlobal` = % ÚNICO del proceso completo
-   *  del acta (monotónico — ver ProgresoFila). */
-  marcarProgreso: (
-    id: string,
-    progreso: { etapa: EtapaVidaKit; ocrFraccion?: number; fracGlobal?: number },
-  ) => void;
-  setFiltro: (filtro: FiltroMasiva) => void;
-  /** e64-qr-v1 (T-0.2): estampar campos SOLO-VISUALES sobre UNA fila viva
-   *  (el chip qrEstado de la CAPA 0 QR se pinta a mitad de proceso, cuando
-   *  el runner acaba de decodificar). Patch INMUTABLE — el MISMO patrón del
-   *  patchFila interno (el kit llama a este mutador desde el runner). */
-  actualizarFila: (id: string, patch: Partial<FilaMasiva>) => void;
-}
+// R8 — SPLIT del store (etapa 2): los tipos del mini-store viven en
+// tipos.ts (el núcleo inyectado los consume sin importar este módulo — fin
+// del ciclo store↔runner↔precalor). API PÚBLICA intacta: los tipos que los
+// consumidores ya importaban de aquí siguen exportados desde aquí.
+import type { EtapaVidaKit, FiltroMasiva, MasivaStore } from "./tipos";
+export type { EtapaVidaKit, FiltroMasiva } from "./tipos";
 
 /** Registro IDB → fila LIVIANA (sin Blob, sin acta — la foto duerme). */
 function filaDeRegistro(r: RegistroMasiva): FilaMasiva {
@@ -1603,6 +1509,11 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
   // del patchFila interno; expuesto como action para el runner (chip QR).
   actualizarFila: (id, patch) => patchFila(id, patch),
 }));
+
+// R8 — SPLIT del store (etapa 2): INYECCIÓN del store al núcleo — el punto
+// ÚNICO de cableado. Va ANTES de cablearPrecalor(): la suscripción del
+// precalor consume storeMasiva() desde su primer tick.
+cablearStoreMasiva(useMasivaStore);
 
 // D66 — KIT e14-decode-unico-precalor-v1 (T3): el precalor queda cableado
 // al mini-store DESDE AHORA (store ya creado) — respira con la cola aunque

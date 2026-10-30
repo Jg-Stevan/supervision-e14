@@ -31,8 +31,12 @@ import {
   originalQrDePayload,
   registrarEnviadaHistorico, // e65b — KIT e65b-historico-enviadas-v1 (T-3): hooks de envío
   registrarQrPayload,
-  useMasivaStore,
 } from "./store";
+// R8 — SPLIT del store (etapa 2): el runner ya NO importa useMasivaStore —
+// consume el mini-store por INYECCIÓN (store.ts → cablearStoreMasiva; fin
+// del ciclo store↔runner↔precalor). El resto de helpers del store sigue
+// importándose de ./store hasta su propio split (dedup-marcas/dedup-índice).
+import { storeMasiva } from "./store-api";
 import { clasificarOrigenDeArchivo, type OrigenVeredicto } from "./origen"; // D63-A — detector de origen (kit e63a-origen-escaneo-v1)
 // WAVE3 §B — ORDEN-WAVE3-remoto-rescate-obs-v1: predicado PURO del rescate
 // anti-falso-rechazo (RECHAZADA-BAJO intermitente — reintento, no rotaciones).
@@ -256,7 +260,7 @@ function motivoCorto(err: unknown): string {
  *  SOLO-VISUAL (sin acta propia, sin envío): el filtro de abajo solo toma
  *  PENDIENTE/DUPLICADA, verificación del kit (cero código de runner). */
 export function siguientePendiente(): FilaMasiva | null {
-  const pendientes = useMasivaStore
+  const pendientes = storeMasiva()
     .getState()
     .filas.filter(
       (f) =>
@@ -306,7 +310,7 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
     ]);
     const actaOrigen = original.acta;
     if (!actaOrigen) return false; // original sin desenlace (ERROR/en vuelo)
-    if (!useMasivaStore.getState().filas.some((f) => f.id === fila.id)) return false;
+    if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) return false;
     const actaCopia = { ...actaOrigen, id: fila.id };
     // e66 (P2) — la gemela ya NO hereda el desenlace de envío de la original:
     // · status DUPLICADA (valor NUEVO al FINAL de ActaStatus): su desenlace es
@@ -452,7 +456,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   // entre siguientePendiente() y aquí. El duplicado JAMÁS paga probe+OCR
   // (kit e71 literal; e72: totalMs de la copia ≈ 0). Re-lectura del estado REAL
   // del store — si ya está marcada, entra por la rama de reuso de abajo.
-  const filaFresca = useMasivaStore
+  const filaFresca = storeMasiva()
     .getState()
     .filas.find((f) => f.id === filaEntrante.id);
   if (
@@ -495,7 +499,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // detrás / cola congelada): antes slot bloqueado ×10 min; ahora slot
     // liberado al instante + re-visita al cierre de la ola.
     if (fila.dupOf) {
-      const original = useMasivaStore
+      const original = storeMasiva()
         .getState()
         .filas.find((f) => f.id === fila.dupOf);
       // Whitelist COPIABLE (T-5 e65 — la MISMA de esperarDesenlaceOriginal):
@@ -563,7 +567,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   // D65 (T3): señal de vida INICIAL — "preparando" (origen/pre-proceso van
   // primero; el bridge emite la suya apenas arranca). fracGlobal = 0: el
   // proceso del acta acaba de nacer (UN % para TODO el proceso).
-  useMasivaStore
+  storeMasiva()
     .getState()
     .marcarProgreso(fila.id, { etapa: "preparando", fracGlobal: vidaDe(fila.id).frac });
   let registro: RegistroMasiva | null = null;
@@ -765,7 +769,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // bandeja — kit literal vía actualizarFila; el mutador real del store,
     // mismo patrón de precalentada/dedup). SOLO presencia, JAMÁS payload.
     qrEstadoCapa0 = qrPayload ? "leido" : "sin-payload";
-    useMasivaStore
+    storeMasiva()
       .getState()
       .actualizarFila(fila.id, { qrEstado: qrEstadoCapa0 });
     if (!qrPayload) {
@@ -776,7 +780,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       const idOriginalQr = originalQrDePayload(qrPayload);
       const originalQr =
         idOriginalQr && idOriginalQr !== fila.id
-          ? (useMasivaStore.getState().filas.find((f) => f.id === idOriginalQr) ?? null)
+          ? (storeMasiva().getState().filas.find((f) => f.id === idOriginalQr) ?? null)
           : null;
       // Reutilización vía la maquinaria EXACTA de reutilizarResultado (la
       // fila viaja como DUPLICADA con dupOf del original). El token
@@ -871,7 +875,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           `[e14] capa0-qr aplazada ${payloadQrCorto} fila=${fila.id} original=${originalQr.id}`,
         );
         const desenlaceQr = await esperarDesenlaceQr(() =>
-          useMasivaStore.getState().filas.find((f) => f.id === originalQr.id)?.estado ?? "AUSENTE",
+          storeMasiva().getState().filas.find((f) => f.id === originalQr.id)?.estado ?? "AUSENTE",
         );
         if (desenlaceQr === "reutiliza") {
           if (await reutilizarViaQr(originalQr)) return;
@@ -907,7 +911,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // Reintento del watchdog: MISMA acta → el % global CONSERVA el máximo
       // alcanzado (monotónico — no vuelve a 0; la etiqueta de fase sí vuelve
       // a PREPARANDO para contar la historia del reintento).
-      useMasivaStore
+      storeMasiva()
         .getState()
         .marcarProgreso(fila.id, { etapa: "preparando", fracGlobal: vidaDe(fila.id).frac });
       try {
@@ -1172,7 +1176,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // ENVÍO — si quitó la fila mientras el OCR corría, el desenlace NO se
     // transmite (antes registrarEnvioMasiva corría ANTES del guard: fila de
     // historial + completadas + hueco archivado de un acta descartado).
-    if (!useMasivaStore.getState().filas.some((f) => f.id === fila.id)) return;
+    if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) return;
 
     // ─── e63f — KIT e63f-autoenvio-v1 (F2): RE-LECTURA INTERNA antes de
     // «repetir-primero» ─── SUGERIDA/MANUAL con captura PERFECTA (score ≥ 8 ∧
@@ -1256,7 +1260,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       const registroCritico = registro;
       const marcadaIdentidad = await conExclusionMutua(async () => {
         const original =
-          useMasivaStore
+          storeMasiva()
             .getState()
             .filas.filter(
               (f) =>
@@ -1362,7 +1366,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // Whitelist de estados (T-5 e65: la literal YA-ENVIADA jamás se escribe
       // en el runner — el QA la veta; AUSENTE/ERROR/ya-enviada quedan fuera
       // por construcción: sin acta copiable no hay resolución posible).
-      const gemelasHash = useMasivaStore
+      const gemelasHash = storeMasiva()
         .getState()
         .filas.filter(
           (f) =>
@@ -1414,7 +1418,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
         // contador; el OCR pagado fue el precio de la race y el informe lo
         // muestra honesto con sus tiempos reales). La voluntad del dueño
         // manda: una fila QUITADA en la espera no resucita registro.
-        if (!useMasivaStore.getState().filas.some((f) => f.id === fila.id)) {
+        if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) {
           return;
         }
         const thumbNet = await hacerThumb(
@@ -1599,7 +1603,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // re-saved a Hamming 0 de una enviada no era atrapada en ingesta.
       // Sin campos nuevos: completar la escritura de campos ya declarados
       // (EntradaHistorica.hashDedup/hashBytes — mismo contrato del índice).
-      const filaViva = useMasivaStore.getState().filas.find(
+      const filaViva = storeMasiva().getState().filas.find(
         (f) => f.id === fila.id,
       );
       void registrarEnviadaHistorico({
@@ -1828,7 +1832,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // re-soltar la foto vuelve a encolarla).
     // FIX M8-b (auditoría 2-c): el guard anti-zombi TAMBIÉN en el catch —
     // re-persistir el registro de una fila QUITADA lo revivía al recargar.
-    if (!useMasivaStore.getState().filas.some((f) => f.id === fila.id)) return;
+    if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) return;
     // D59 — KIT e14-info-acta-filas-v1 (T2): la fila ERROR NUNCA muestra
     // título viejo (infoTitulo: null — limpiar en el catch).
     marcarFila(fila.id, {
@@ -1885,8 +1889,8 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   } finally {
     // e71 (Opt-3): la vida de ESTA fila muere con ella (Map por-fila).
     vidas.delete(fila.id);
-    const progreso = useMasivaStore.getState().progreso;
-    if (progreso?.id === fila.id) useMasivaStore.setState({ progreso: null });
+    const progreso = storeMasiva().getState().progreso;
+    if (progreso?.id === fila.id) storeMasiva().setState({ progreso: null });
   }
 }
 
@@ -1898,7 +1902,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
  *  (terminación garantizada del bucle). QUITADA en el aparcado → nada (la
  *  voluntad del dueño manda — misma regla de esperarDesenlaceOriginal). */
 async function revisitarDuplicadaAparcada(fila: FilaMasiva): Promise<void> {
-  if (!useMasivaStore.getState().filas.some((f) => f.id === fila.id)) return;
+  if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) return;
   marcarFila(fila.id, { estado: "PROCESANDO", error: null });
   if (await reutilizarResultado(fila, Date.now())) return;
   marcarFila(fila.id, { estado: "PENDIENTE", dupOf: null });
@@ -1936,7 +1940,7 @@ async function bucle(): Promise<void> {
       if (dedupAparcadas.size > 0) {
         const idsAparcadas = [...dedupAparcadas];
         dedupAparcadas.clear();
-        const ordenadas = useMasivaStore
+        const ordenadas = storeMasiva()
           .getState()
           .filas.filter((f) => idsAparcadas.includes(f.id))
           .sort((a, b) => a.agregadaEn - b.agregadaEn);
@@ -1972,7 +1976,7 @@ async function bucle(): Promise<void> {
  *  fila procesa con build inline o fallback (AC-P2). */
 function dispararPrefetch(filaActualId: string): void {
   if (stopFlag) return;
-  const proxima = useMasivaStore
+  const proxima = storeMasiva()
     .getState()
     .filas.filter(
       (f) =>
@@ -1993,7 +1997,7 @@ export function iniciarRunner(): void {
   stopFlag = false;
   rescatesCorrida = 0; // WAVE3 §B — techo del rescate por CORRIDA
   colaSesionIniciada = true; // e63g FASE 1: sesión viva — el swap puede rearrancar
-  useMasivaStore.setState({ corriendo: true });
+  storeMasiva().setState({ corriendo: true });
   iniciarCorridaMetrica(); // D34 — abre corrida de métricas (fire-and-forget)
   void bucle().finally(() => {
     corriendoFlag = false;
@@ -2001,7 +2005,7 @@ export function iniciarRunner(): void {
     // manda: manual o auto-pausa de REVISIÓN; el informe ya no tiene fin=null
     // sin dueño).
     cerrarCorridaMetrica(stopFlag ? "pausa" : "drenada");
-    useMasivaStore.setState({ corriendo: false, progreso: null });
+    storeMasiva().setState({ corriendo: false, progreso: null });
   });
 }
 
