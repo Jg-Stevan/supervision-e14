@@ -63,13 +63,10 @@ import type { Binarizer, ReaderOptions } from "zxing-wasm/reader";
 import type { EstadoEntrada } from "./tipos";
 import { canvasCon, decodeImagenLru } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
 import { logger } from "../../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
-// R7b (M10) — RE-EXPORT TEMPORAL: moduloZxingDe/estadoZxingQr/qrCorto viven
-// AHORA en ../qr-zxing (fin de la dependencia invertida núcleo→masiva:
-// orientacion-qr.ts ya no importa de este archivo). Este módulo los consume
-// y los re-exporta SIN CAMBIOS para que runner.ts y el QA sigan importando
-// de aquí — R8 re-apuntará sus imports y retirará esta línea.
+// R7b (M10) movió el loader zxing a ../qr-zxing (fin de la dependencia
+// invertida núcleo→masiva). R8: este módulo solo lo CONSUME — el re-export
+// temporal se retiró (runner.ts importa qrCorto directo de ../qr-zxing).
 import { moduloZxingDe, qrCorto } from "../qr-zxing";
-export { estadoZxingQr, moduloZxingDe, qrCorto } from "../qr-zxing";
 // KIT e75-qr-zoom-zbar-v1 — zbar-wasm (tier de rescate del ZOOM TL, main):
 // carga diferida LOCAL /wasm/ + filtro QR — MISMA doctrina del tier zxing.
 import { estadoZbarQr, zbarDePixeles } from "./zbar-qr";
@@ -171,7 +168,6 @@ const ZXING_FORMATO = "QRCode" as const; // SPRINT-A A5: de-export (vivo solo aq
 
 // (QR_RECORTE_LADO vive en qr-pixeles.ts desde el FIX DICTAMEN-e73 §3.1 —
 // re-exportado arriba; decodificarQrDeRecorte lo consume vía ese import.)
-
 /** Estado del original para la espera acotada — EstadoEntrada + AUSENTE
  *  (la fila fue quitada/vaciada mientras se esperaba). */
 export type EstadoOriginalQr = EstadoEntrada | "AUSENTE";
@@ -226,8 +222,8 @@ export function ladderQrDePixeles(pix: PixelesQr): string | null {
 
 // ─── e63n (T-PRE) — tier ZXING (zxing-wasm 3.1.6, wasm LOCAL) ──────────────
 // R7b (M10): el loader (moduloZxingDe + su caché + estadoZxingQr + el tipo
-// ModZxing) vive en ../qr-zxing (re-exportado arriba — misma instancia
-// única de wasm).
+// ModZxing) vive en ../qr-zxing (importado arriba — misma instancia única
+// de wasm).
 
 /** Opciones del barrido por ventana (micro-decisión declarada: el barrido
  *  lanza ~700-2300 ventanas — cada una debe ser BARATA; la rotación y la
@@ -774,5 +770,5 @@ export async function esperarDesenlaceQr(
   return "techo";
 }
 
-// R7b (M10): qrCorto vive en ../qr-zxing (re-exportado arriba — mismo
+// R7b (M10): qrCorto vive en ../qr-zxing (importado arriba — mismo
 // formateador de trazas, SOLO cosmético: red line 10 intacta).

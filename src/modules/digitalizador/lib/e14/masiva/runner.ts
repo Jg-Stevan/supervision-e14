@@ -102,11 +102,10 @@ import { conTope } from "./tope";
 // de la vía del pipeline (fileToCaptureDataUrl — la MISMA que midió el
 // banco #72; jsQR 1.4.0 vendido byte-idéntico en vendor/jsQR.js).
 import { fileToCaptureDataUrl } from "@jg-stevan/scanner-core/image-processor";
-import {
-  decodificarQrDeCapture,
-  esperarDesenlaceQr,
-  qrCorto,
-} from "./identidad-qr";
+import { decodificarQrDeCapture, esperarDesenlaceQr } from "./identidad-qr";
+// R8 — re-apuntado directo al módulo canónico (fin del re-export temporal
+// de R7b: identidad-qr ya no re-exporta qrCorto).
+import { qrCorto } from "../qr-zxing";
 // KIT e14-gama-adaptativa-v1 (D74) — capa adaptativa de gama: el tier BAJO/
 // MEDIO detectado aplica SOLO presupuestos de recursos (pool/watchdog/QR);
 // el override manual del dueño manda y el flag masivaAdaptativoGama=false

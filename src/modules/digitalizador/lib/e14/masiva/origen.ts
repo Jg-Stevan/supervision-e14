@@ -26,13 +26,12 @@
  *  JAMÁS tumba el pipeline (misma filosofía del thumb cosmético). */
 
 // D63-A (kit e63a-origen-escaneo-v1) — R7b (M10): el TIPO OrigenActa vive
-// AHORA en ../types (fin de la dependencia invertida núcleo→masiva —
-// types.ts/bridge.ts ya no importan de este submódulo). RE-EXPORT temporal
-// SIN CAMBIOS para deskew.ts/runner.ts — R8 re-apuntará y retirará.
-// El resto de este módulo (detector EXIF/bordes — instrumentación SOLO del
-// runner MASIVA) NO se toca.
+// en ../types (fin de la dependencia invertida núcleo→masiva). R8: este
+// módulo solo lo CONSUME — el re-export temporal se retiró (deskew.ts y
+// runner.ts importan sus piezas directas del módulo canónico). El resto de
+// este módulo (detector EXIF/bordes — instrumentación SOLO del runner
+// MASIVA) NO se toca.
 import type { OrigenActa } from "../types";
-export type { OrigenActa };
 
 import { canvasCon, decodeImagenLruDeBlob } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
 

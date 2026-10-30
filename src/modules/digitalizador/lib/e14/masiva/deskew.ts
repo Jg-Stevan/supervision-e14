@@ -30,7 +30,9 @@
  *  cubre la matemática; el desenlace real lo valida el dueño con sus
  *  escaneos. */
 
-import type { OrigenActa } from "./origen";
+// R8 — re-apuntado directo al módulo canónico (fin del re-export temporal
+// de R7b: origen.ts ya no re-exporta OrigenActa; vive en ../types).
+import type { OrigenActa } from "../types";
 import { canvasCon, decodeImagenLruDeBlob } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
 
 // ---------- Constantes (nombradas y comentadas — kit §2) ----------
