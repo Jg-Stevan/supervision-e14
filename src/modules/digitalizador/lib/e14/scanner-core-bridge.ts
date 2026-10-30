@@ -50,12 +50,9 @@ import { ocrTextIsValid } from "@jg-stevan/scanner-core/ocr";
 // requestOcr del core SOLO vive en motores.ts (celda «actual» de la matriz —
 // instrumento congelado, pitfall §9.2).
 import { defaultQuad } from "@jg-stevan/scanner-core/types";
-import type {
-  PageFilter,
-  PageQuality,
-  Quad,
-} from "@jg-stevan/scanner-core/types";
-import { ACTA_MOCK } from "./seed";
+// (R7b M5b: PageQuality viaja con construirActa — acta-factory.ts.)
+import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
+// (R7b M5b: ACTA_MOCK viaja con construirActa — acta-factory.ts.)
 import { cargarDivipol } from "./divipol";
 import {
   clasificarCabecera,
@@ -117,7 +114,7 @@ import {
 // (partición §7 del reporte 03a): tabla ACTAS_SIM, ciclo rotativo §G-2,
 // caché por índice y fetch por chip §D3 viajan con su estado de módulo.
 import { fetchActaSimPorScore, fetchActaSimulada } from "./sim-assets";
-import type { Acta, ActaFirma, ActaStatus, DiagnosticoActa, ProgresoAnalisis } from "./types";
+import type { Acta, DiagnosticoActa, ProgresoAnalisis } from "./types";
 import type { E14Bridge, OpcionesEscaneo } from "./bridge";
 // R7b (M2) — runner del OCR ESCALONADO + banda dirigida MOVIDOS a
 // ocr-escalonado-runner.ts (partición §7 del reporte 03a): el bridge solo
@@ -127,6 +124,17 @@ import {
   reconocerRapidOcr,
   reconocerRapidOcrEscalonado,
 } from "./ocr-escalonado-runner";
+// R7b (M5b) — fábrica del ACTA MOVIDA a acta-factory.ts (partición §7 del
+// reporte 03a): construirActa/firmasPorStatus eran métodos privados (el
+// contador de id era this.contador) — ahora funciones libres con contador de
+// módulo (equivalencia documentada en la cabecera de acta-factory.ts);
+// ParcialPipeline (acumulador) y capturarFrame (grab §5) viajan con ella.
+import {
+  capturarFrame,
+  construirActa,
+  firmasPorStatus,
+  type ParcialPipeline,
+} from "./acta-factory";
 // KIT e14-orientacion-auto-v1 (T-A2/A3): probe de orientación por confianza
 // de rec + anclas (§2.1) — corre ANTES del OCR completo en AMBOS pipelines
 // (escaneo y pipelineRecorte). SIM OMITIDO (guard — chips 8.2/7.0/4.3
@@ -146,7 +154,8 @@ import type { ProbeOrientacion } from "./orientacion";
 // KIT e14-diagnostico-autoenvio-v1 (C1): registro del DESENLACE montado justo
 // donde hoy se escribe el log de auditoría (UNA sola fuente de verdad — §9.6).
 import { construirDiagnostico } from "./diagnostico";
-import { canvasCon } from "./image-utils"; // SPRINT-A A3 — factory de canvas
+// (R7b M5b: canvasCon viaja con capturarFrame/calidadDeActa — acta-factory.ts
+// y calidad.ts lo importan directamente; el bridge ya no crea canvas.)
 import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
 
 /** KIT e14-masiva-tiempos-v1 (PR-2, prefetch): memo de decode POR INSTANCIA
@@ -255,22 +264,6 @@ const QUAD_IDENTITY: Quad = [
   { x: 0, y: 1 },
 ];
 
-/**
- * Grab del <video> a RESOLUCIÓN DEL STREAM (§5 CAMARA): canvas de
- * videoWidth×videoHeight → JPEG 0.92. Síncrono (~10 ms) — se llama ANTES de
- * que el visor se desmonte, mientras el stream sigue vivo.
- */
-function capturarFrame(video: HTMLVideoElement): string | null {
-  try {
-    const canvas = canvasCon(video.videoWidth, video.videoHeight); // SPRINT-A A3 — factory
-    const ctx = canvas.getContext("2d");
-    if (!ctx || !canvas.width || !canvas.height) return null;
-    ctx.drawImage(video, 0, 0);
-    return canvas.toDataURL("image/jpeg", 0.92);
-  } catch {
-    return null;
-  }
-}
 
 /** Entrada del pipeline: File (ARCHIVO o foto CÁMARA) o dataUrl ya crudo.
  *  §D8.2 (SPEC-e14-score-ocr Rev. 3): el flag «sin recorte automático» viaja
@@ -424,20 +417,8 @@ export function marcoPerdonadoPorLectura(
   return veredicto === "cortado" && nivelLectura === "FUERTE" && !faltaSeccion;
 }
 
-/** e64-qr T-2.1 — acumulador del pipeline: lo conocido al vencer el timeout
- *  + la señal de la CAPA 0 QR de cámara (ADITIVA — el QR jamás afecta
- *  score/status/gate/OCR; llave OPACA, red line 10). qrCam:
- *  undefined = el decodificador no terminó (timeout — los campos viajan
- *  AUSENTES, jamás inventar) · null = corrió y terminó en null
- *  ("sin-payload") · {payload} = leído ("leido"). */
-interface ParcialPipeline {
-  fotoOriginal?: string;
-  qrCam?: { payload: string } | null;
-}
 
 export class RealCoreBridge implements E14Bridge {
-  private contador = 0;
-
   async escanearActa(opciones: OpcionesEscaneoConTimeout): Promise<Acta> {
     // Resolución de la entrada (L3 §5 CAMARA + F1 SIMULACIÓN):
     //  · CAMARA + archivo (ZSL/captureSmart/iOS) → MISMO pipeline que ARCHIVO.
@@ -490,7 +471,7 @@ export class RealCoreBridge implements E14Bridge {
         // §5: el timeout NO rechaza la Promise — resuelve un acta RECHAZADA
         // controlada (el toast crit sale del flujo normal del store).
         resolve(
-          this.construirActa(opciones, parcial, {
+          construirActa(opciones, parcial, {
             score: 0,
             status: "RECHAZADA",
             rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_TIMEOUT },
@@ -683,7 +664,7 @@ export class RealCoreBridge implements E14Bridge {
         // detectable → RECHAZADA ILEGIBLE inmediata (§5 paso 1, spec §7.5).
         // El piso escénico D16 de ANALIZANDO completa la animación solo.
         await aterrizarQrCam(); // e64-qr T-2.1: la señal QR viaja si terminó
-        return this.construirActa(opciones, parcial, {
+        return construirActa(opciones, parcial, {
           score: 0,
           status: "RECHAZADA",
           rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_ILEGIBLE },
@@ -1289,7 +1270,7 @@ export class RealCoreBridge implements E14Bridge {
     // KIT e14-diagnostico-autoenvio-v1 (C1): adjuntar el registro con el id
     // REAL del acta (el id nace en construirActa — parche post-hoc).
     await aterrizarQrCam(); // e64-qr T-2.1: la señal QR ya aterrizó (corrió en paralelo al OCR)
-    const acta = this.construirActa(opciones, parcial, {
+    const acta = construirActa(opciones, parcial, {
       fotoProcesada,
       procesadaVacia,
       // KIT actas-vivas-paginas-v1 (FASE C): el acta lleva la bandera del
@@ -1400,7 +1381,7 @@ export class RealCoreBridge implements E14Bridge {
           score: 0,
           status: "RECHAZADA",
           rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_TIMEOUT },
-          firmas: this.firmasPorStatus(acta.firmas, "RECHAZADA"),
+          firmas: firmasPorStatus(acta.firmas, "RECHAZADA"),
           // FIX (auditoría 2-a #8): el invariante del gate (RECHAZADA ⇒
           // clasificación descartada) también en el timeout del recorte —
           // el spread conservaba una clasificación AUTO previa (p. ej. de
@@ -1918,7 +1899,7 @@ export class RealCoreBridge implements E14Bridge {
       status: desenlace.status,
       rechazo: rechazoFinal,
       clasificacion: desenlace.clasificacion ?? undefined,
-      firmas: this.firmasPorStatus(acta.firmas, desenlace.status),
+      firmas: firmasPorStatus(acta.firmas, desenlace.status),
     };
     const titUbi = tituloYUbicacionDe(desenlace.clasificacion ?? null);
     if (titUbi) {
@@ -2033,132 +2014,6 @@ export class RealCoreBridge implements E14Bridge {
       }
     }
     return reconocerRapidOcr(fotoProcesada); // comportamiento de hoy (fallback)
-  }
-
-  /** Firmas coherentes con el estado (misma regla del mock/§7.5):
-   *  ADVERTENCIA → firma 2 TENUE · RECHAZADA → NO_DETECTADO · resto OK. */
-  private firmasPorStatus(firmas: ActaFirma[], status: ActaStatus): ActaFirma[] {
-    if (firmas.length < 2) return firmas;
-    const estadoFirma2: ActaFirma["estado"] =
-      status === "ADVERTENCIA" ? "TENUE" : status === "RECHAZADA" ? "NO_DETECTADO" : "OK";
-    return firmas.map((f, i) => (i === 1 ? { ...f, estado: estadoFirma2 } : { ...f }));
-  }
-
-  /** Acta final: seed SOLO cuando la clasificación no está resuelta (§1) + campos reales §3.1. */
-  private construirActa(
-    opciones: OpcionesEscaneo,
-    parcial: ParcialPipeline,
-    campos: {
-      fotoProcesada?: string;
-      /** §D4 (SPEC-e14-score-ocr): la procesada salió sin tinta. */
-      procesadaVacia?: boolean;
-      /** KIT actas-vivas-paginas-v1 (FASE C): OCR de secciones detectó el
-       *  recorte del papel (faltaSeccionInferior). */
-      recortada?: boolean;
-      /** KIT identificacion-codigo-v1 (FASE F): LADO de la esquina fiducial
-       *  faltante (píldora «ACTA RECORTADA · SUP-IZQ») — null cuando el
-       *  recorte vino SOLO del OCR de secciones o 4/4 presentes. */
-      recorteLado?: string | null;
-      quadDetectado?: Quad;
-      calidad?: PageQuality;
-      ocrTexto?: string;
-      motor?: "worker" | "canvas";
-      /** §D8.3 (SPEC-e14-score-ocr Rev. 3): filtro del acta al nacer —
-       *  "original" cuando el asset sim corrió as-is, "bw" (default del
-       *  producto) en el pipeline normal. */
-      filtro?: PageFilter;
-      score: number;
-      status: ActaStatus;
-      rechazo: Acta["rechazo"];
-      /** Clasificación de cabecera (SPEC-cabecera-clasificacion §4/§6). */
-      clasificacion?: ClasificacionE14 | null;
-    },
-  ): Acta {
-    const numeroMesa = opciones.objetivo
-      ? opciones.objetivo.mesaId.replace(/\D/g, "").padStart(3, "0")
-      : "001";
-    this.contador += 1;
-
-    // Firmas coherentes con el estado (misma regla del mock §7.5):
-    // ADVERTENCIA → firma 2 TENUE · RECHAZADA → NO_DETECTADO · resto OK.
-    const estadoFirma2: ActaFirma["estado"] =
-      campos.status === "ADVERTENCIA" ? "TENUE" : campos.status === "RECHAZADA" ? "NO_DETECTADO" : "OK";
-
-    // §1.2 (SPEC-titulo-ubicacion): clasificación AUTO → el acta nace con
-    // título/ubicación REALES; sin ella se conserva el seed (no se inventa).
-    const titUbi = tituloYUbicacionDe(campos.clasificacion ?? null);
-    return {
-      id: `acta-${Date.now()}-${this.contador}`,
-      titulo: titUbi?.titulo ?? ACTA_MOCK.titulo,
-      ubicacion: titUbi?.ubicacion ?? {
-        departamento: ACTA_MOCK.departamento,
-        municipio: ACTA_MOCK.municipio,
-        zona: ACTA_MOCK.zona,
-        puesto: ACTA_MOCK.puesto,
-        mesa: numeroMesa,
-      },
-      tipo: ACTA_MOCK.tipo,
-      // §6: página REAL del «Ver/Pag/de» cuando la clasificación la leyó.
-      // KIT actas-vivas-paginas-v1 (FASE B): la página viaja COMO VENGA de
-      // la clasificación (null incluido — DESCONOCIDA: el chip muestra
-      // «PÁG - DE -» y el hueco va al primer libre; el default P1 mintió
-      // con la pág 2 del Frankfurt, bug del dueño 16-oct). Sin
-      // clasificación → objetivo seed (hoy).
-      pagina: campos.clasificacion
-        ? campos.clasificacion.pagina
-        : {
-            index: opciones.objetivo?.pagina ?? 1,
-            total: 2,
-          },
-      candidatos: ACTA_MOCK.candidatos.map((c) => ({ ...c })),
-      firmas: [
-        { nombre: ACTA_MOCK.firmas[0].nombre, jurado: ACTA_MOCK.firmas[0].jurado, estado: "OK" },
-        { nombre: ACTA_MOCK.firmas[1].nombre, jurado: ACTA_MOCK.firmas[1].jurado, estado: estadoFirma2 },
-        { nombre: ACTA_MOCK.firmas[2].nombre, jurado: ACTA_MOCK.firmas[2].jurado, estado: "OK" },
-      ],
-      codigoBarras: ACTA_MOCK.codigoBarras,
-      score: campos.score,
-      status: campos.status,
-      rechazo: campos.rechazo,
-      intento: opciones.intento,
-      maxIntentos: opciones.maxIntentos,
-
-      // ----- Campos reales (§3.1) -----
-      fuente: opciones.fuente,
-      fotoOriginal: parcial.fotoOriginal,
-      fotoProcesada: campos.fotoProcesada,
-      procesadaVacia: campos.procesadaVacia,
-      recortada: campos.recortada ?? false,
-      recorteLado: campos.recorteLado ?? null,
-      ocrTexto: campos.ocrTexto,
-      metricas: campos.calidad
-        ? {
-            sharpness: campos.calidad.sharpness,
-            brightness: campos.calidad.brightness,
-            contrast: campos.calidad.contrast,
-          }
-        : undefined,
-      motor: campos.motor ?? "canvas",
-      quadDetectado: campos.quadDetectado,
-      rotation: 0,
-      // F2/D36: default del producto (types.ts L50 del core) — toda captura
-      // nace en B/N adaptativo (Fuente: CameraView.tsx L602-604 del lab).
-      // §D8.3 (Rev. 3): EXCEPTO los assets sim as-is, que nacen "original".
-      filtro: campos.filtro ?? ("bw" as PageFilter),
-      // SPEC-cabecera-clasificacion §6: clasificación de cabecera (AUTO →
-      // archivada al envío; SUGERIDA/MANUAL → panel de corrección §5).
-      clasificacion: campos.clasificacion ?? undefined,
-      // e64-qr T-2.1 — señal de la CAPA 0 QR de cámara (ADITIVA AL FINAL,
-      // contrato D57): qrCam definido = el decodificador corrió ("leido" con
-      // payload / "sin-payload" con null); undefined (timeout — el
-      // instrumento no terminó) = los campos viajan AUSENTES (jamás
-      // inventar). SOLO presencia — jamás contenido (red line 10).
-      ...(parcial.qrCam
-        ? { qrPayload: parcial.qrCam.payload, qrEstado: "leido" as const }
-        : parcial.qrCam !== undefined
-          ? { qrEstado: "sin-payload" as const }
-          : {}),
-    };
   }
 
   horaEnvio(): string {
