@@ -1138,3 +1138,45 @@ publicaciones quedan para decisión del dueño (el memo ya elimina el peaje por 
 negocio, sondeo/prescan/dhash, persistMs (contrato D61), `store.ts` de la masiva,
 workflows (D39: la retractación del hallazgo de CI quedó registrada — `branches: [main]`
 SIEMPRE fue válido).
+
+## D43 — KIT e14-etapas-preocr-v1: las etapas OCULTAS del pre-OCR suben al informe (proceso/calidad/probe/preOcr)
+
+**Fecha:** 2026-10-30 · **Origen:** informe del dueño `informe-masiva-2026-10-30-01-57-31.json`
+(6 actas, gama MEDIO, cuello=ocr en todas). La aritmética del propio informe lo delató:
+`totalMs − (decodeMs + detectMs + ocrMs)` dejaba **6,1–10,2 s por acta SIN dueño** — trabajo
+pre-OCR real que ningún campo del export explicaba.
+
+**Qué pasa hoy (veredicto del código, no conjetura).** El tiempo pre-OCR vive en TRES zonas:
+1. **Espera de cola** (`esperaMs` — medida, crece lineal con pool=1: no es trabajo, es turno).
+2. **Runner pre-bridge** (`runner.ts`, entre el cierre de esperaMs y el despacho del bridge):
+   capa-0 QR identidad (peor caso sin-QR ~15-17 s documentado), decisiones dedup, origen
+   (D63-A), deskew (D63-B) y master (D66) — **invisible**: ni esperaMs ni totalMs lo capturan.
+3. **Dentro del bridge, antes de ocrMs**: `ms.proceso` (warp INTER_CUBIC ×2 — bw para mostrar +
+   original para leer), `probeOrientacion` (mini-OCR 0°/90/180/270 si duda) y `ms.calidad`
+   (Laplaciano) — YA se medían (diagnostico.tiempos + D57) pero `registrarMetricaDesenlace`
+   NO los copiaba a `EtapasMetrica`.
+
+**Qué cambia (observador pasivo — cero decisiones nuevas, cero costo nuevo).**
+1. `EtapasMetrica` gana 4 campos opcionales: `procesoMs`, `calidadMs`, `orientacionProbeMs`
+   y `preOcrMs` (los 3 primeros ya existían en el diagnóstico — se COPIAN; guard > 0: fase
+   omitida se omite, jamás inventar).
+2. `runner.ts` cronometra `preOcrMs`: desde el cierre de `esperaMs` hasta justo antes de
+   despachar `escanearActa` (capa-0 + dedup + origen + deskew + master). Reintentos del
+   watchdog/rescate ACUMULAN (re-pagan origen/deskew/master — D65); la matanza/re-creación
+   de workers ENTRE intentos NO es pre-OCR (costo del watchdog) y queda fuera. La espera
+   APLAZADA por gemela SÍ entra (tiempo mural honesto — es lo que retrasó SU OCR).
+3. `cuelloDeEtapas`: las etapas nuevas SON trabajo del camino crítico → compiten por
+   «cuello» igual que el OCR (siguen excluidas: sondeo —paralelo— y thumb —cosmético).
+4. `InformeCorrida.tsx`: barras nuevas en orden de pipeline — PRE-OCR · DECODE · DETECCIÓN ·
+   WARP+REALCE · ORIENTACIÓN · CALIDAD · OCR · PERSISTENCIA · ENVÍO. El KPI «TRABAJO
+   PIPELINE» pasa a «TRABAJO ACTAS» (la suma ahora incluye preOcrMs del runner — llamarlo
+   pipeline sería mentir; el pre-OCR es ANTES del bridge y NO está dentro de totalMs).
+
+**Contrato del export:** solo-AÑADIR campos (patrón D57) — los informes previos no cambian
+de forma; quien lee el JSON viejo no se entera. Ausente = honesto (fase no corrió / fila
+jamás despachó el bridge).
+
+**Qué NO se tocó (conservador):** pipeline/bridge/watchdog/criterios/score/gate,
+sondeo/prescan/dhash, precalor, pool (procesamientoConcurrenteEfectivo), presupuesto de
+gama, rutas de copia (registrarMetricaCopia) y ERROR (registrarMetricaError) — sus contratos
+quedan intactos.

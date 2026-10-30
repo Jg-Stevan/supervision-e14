@@ -543,6 +543,16 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     const tInicio = Date.now();
     const esperaMs = Math.max(0, tInicio - fila.agregadaEn);
 
+    // ─── KIT e14-etapas-preocr-v1 (D43) — preOcrMs: el MURO entre el fin de
+    // la espera de cola y el arranque del pipeline del bridge ─── Hoy es
+    // INVISIBLE en el informe (esperaMs cierra AQUÍ; totalMs nace DENTRO del
+    // bridge) — evidencia del informe 2026-10-30: 6-10 s/acta sin dueño.
+    // Cronómetro OBSERVADOR PASIVO (solo medir — jamás cambia decisiones):
+    // intento 1 arranca YA (incluye la capa-0 QR completa); los reintentos
+    // (watchdog/rescate) re-pagan origen/deskew/master → se ACUMULAN (T1).
+    let preOcrMs: number | null = null; // null = jamás llegó al bridge (YA-ENVIADA/copias tempranas)
+    let tPreOcrIntento = performance.now(); // intento 1: incluye la capa-0 (T1)
+
     // D65 (T1) — estado del intento del WATCHDOG (kit T1.1/T1.2/T1.3).
     let veredictoOrigen: OrigenVeredicto | null = null;
     let preProceso: PreProcesoEscaneo | null = null;
@@ -791,6 +801,11 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
 
     for (let intento = 1; intento <= WATCHDOG_INTENTOS; intento += 1) {
       const tIntento = Date.now();
+      // KIT e14-etapas-preocr-v1 (D43): intentos ≥ 2 re-pagan origen/deskew/
+      // master (D65 — bloques del reintento byte-idénticos) → re-armar el
+      // cronómetro pre-OCR. La matanza/re-creación de workers ENTRE intentos
+      // NO es pre-OCR (costo del watchdog) — queda fuera por construcción.
+      if (intento > 1) tPreOcrIntento = performance.now();
       senal = null; // la etapa al morir es la del INTENTO que muere
       // Reintento del watchdog: MISMA acta → el % global CONSERVA el máximo
       // alcanzado (monotónico — no vuelve a 0; la etiqueta de fase sí vuelve
@@ -923,6 +938,10 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
           },
           timeoutMs: Math.max(5_000, watchdogMsEfectivo() - (Date.now() - tIntento)),
         };
+        // KIT e14-etapas-preocr-v1 (D43): cierre del tramo pre-OCR del intento
+        // (capa-0 + origen + deskew + master) — justo ANTES de despachar el
+        // bridge. Acumula reintentos (intento ≥ 2 re-armó arriba).
+        preOcrMs = (preOcrMs ?? 0) + Math.round(performance.now() - tPreOcrIntento);
         const resultado = await correrIntento(
           getBridge().escanearActa(opcionesMasiva),
           watchdogMsEfectivo() + WATCHDOG_GRACIA_MS,
@@ -1659,6 +1678,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       acta: actaFinal,
       sondeoQrMs: fila.sondeoQrMs,
       thumbMs,
+      // KIT e14-etapas-preocr-v1 (D43): el muro pre-OCR sube al informe
+      // (ausente si la fila jamás despachó el bridge — jamás inventar).
+      ...(preOcrMs != null ? { preOcrMs } : {}),
       dedup: registro?.dedup,
     });
   } catch (err) {

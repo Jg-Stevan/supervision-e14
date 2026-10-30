@@ -28,13 +28,30 @@ import {
   type MetricaActa,
 } from "@/modules/digitalizador/lib/e14/masiva/metricas";
 
-type EtapaKey = "decodeMs" | "detectMs" | "ocrMs" | "persistMs" | "envioMs";
+// KIT e14-etapas-preocr-v1 (D43) — las etapas OCULTAS suben a las barras:
+// preOcr (runner: capa-0 QR + origen + deskew + master), proceso (warp ×2 +
+// realce del bridge), orientacionProbe (mini-OCR de rotación) y calidad
+// (Laplaciano). Orden de pipeline — el pre-OCR era invisible hasta hoy.
+type EtapaKey =
+  | "preOcrMs"
+  | "decodeMs"
+  | "detectMs"
+  | "procesoMs"
+  | "orientacionProbeMs"
+  | "calidadMs"
+  | "ocrMs"
+  | "persistMs"
+  | "envioMs";
 
 /** Etapas de TRABAJO en orden de presentación (la espera de cola y el
  *  sondeo —ingesta, paralelo al pipeline— van aparte como info). */
 const ETAPAS_TRABAJO: { key: EtapaKey; label: string }[] = [
+  { key: "preOcrMs", label: "PRE-OCR" },
   { key: "decodeMs", label: "DECODE" },
   { key: "detectMs", label: "DETECCIÓN" },
+  { key: "procesoMs", label: "WARP+REALCE" },
+  { key: "orientacionProbeMs", label: "ORIENTACIÓN" },
+  { key: "calidadMs", label: "CALIDAD" },
   { key: "ocrMs", label: "OCR" },
   { key: "persistMs", label: "PERSISTENCIA" },
   { key: "envioMs", label: "ENVÍO" },
@@ -296,7 +313,9 @@ export default function InformeCorrida() {
           {/* ——— KPIs ——— */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <Kpi label="ACTAS" valor={String(actas.length)} />
-            <Kpi label="TRABAJO PIPELINE" valor={fmtMs(agg.trabajoTotal)} />
+            {/* D43 — «TRABAJO ACTAS»: la suma ahora incluye preOcrMs (runner) —
+             *  llamarlo «pipeline» sería mentir (el pre-OCR es ANTES del bridge). */}
+            <Kpi label="TRABAJO ACTAS" valor={fmtMs(agg.trabajoTotal)} />
             <Kpi label="OCR P50 / P95" valor={`${fmtMs(agg.p50Ocr)} / ${fmtMs(agg.p95Ocr)}`} />
             <Kpi
               label="DESENLACES"
@@ -308,7 +327,7 @@ export default function InformeCorrida() {
           {/* ——— etapas (barras del presupuesto del pipeline) ——— */}
           <div className="flex flex-col gap-1.5">
             <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
-              ¿EN QUÉ SE VA EL TIEMPO? — sumas de la corrida (trabajo pipeline {fmtMs(agg.trabajoTotal)})
+              ¿EN QUÉ SE VA EL TIEMPO? — sumas de la corrida (trabajo {fmtMs(agg.trabajoTotal)} — incluye PRE-OCR del runner, que NO está dentro de totalMs)
             </p>
             {ETAPAS_TRABAJO.filter(({ key }) => (agg.sumas.get(key) ?? 0) > 0).map(({ key, label }) => {
               const ms = agg.sumas.get(key) ?? 0;

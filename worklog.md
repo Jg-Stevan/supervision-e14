@@ -494,3 +494,24 @@ benchmark como motor ELEGIBLE
   94,4 %» + etiqueta honesta del base («RapidOCR v4 · producción»).
 - Verificación: tsc --noEmit → 9 TS2307 pre-existentes (baseline 9 = 9);
   eslint → 0/0.
+
+---
+
+Task ID: 19 — etapas-preocr-v1 (D43): las etapas ocultas del pre-OCR suben al informe
+Task: Medir el tiempo pre-OCR que el informe no desglosaba (hallazgo del informe
+informe-masiva-2026-10-30-01-57-31.json: 6-10 s/acta sin dueño entre decode+detect y ocr).
+
+Work Log:
+- metricas.ts: EtapasMetrica gana procesoMs/calidadMs/orientacionProbeMs/preOcrMs
+  (opcional — jamás inventar); registrarMetricaDesenlace copia las 3 del diagnóstico
+  (guard > 0) + nuevo arg preOcrMs; cuelloDeEtapas documenta que compiten (trabajo real
+  del camino crítico).
+- runner.ts: cronómetro preOcrMs — arranca al cerrar esperaMs (incluye capa-0 QR),
+  cierra justo antes de escanearActa; reintento watchdog/rescate re-arma y ACUMULA;
+  sube al hook solo si la fila despachó el bridge.
+- InformeCorrida.tsx: barras PRE-OCR · WARP+REALCE · ORIENTACIÓN · CALIDAD en orden de
+  pipeline (EtapaKey ampliado).
+- docs/DECISIONS.md: D43.
+- Verificación: tsc --noEmit → baseline 9 = 9; eslint → 0/0.
+- KPI «TRABAJO PIPELINE» → «TRABAJO ACTAS» + subtítulo de barras aclara que preOcrMs
+  NO está dentro de totalMs (honestidad de etiqueta — el pre-OCR es del runner).

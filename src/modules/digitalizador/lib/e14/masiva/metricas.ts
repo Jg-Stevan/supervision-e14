@@ -52,6 +52,30 @@ export interface EtapasMetrica {
   decodeMs?: number;
   /** D61 — detección de página del core. */
   detectMs?: number;
+  /** KIT e14-etapas-preocr-v1 (D43) — proceso del bridge: warp INTER_CUBIC ×2
+   *  (variante "bw" para mostrar + "original" para leer) + realce. YA se medía
+   *  (diagnostico.tiempos.procesoMs — bridge ms.proceso) — ahora VIAJA al
+   *  informe. 0 = fase omitida (sinRecorte, SIM-only) → se omite. */
+  procesoMs?: number;
+  /** KIT e14-etapas-preocr-v1 (D43) — calidad del recorte (Laplaciano +
+   *  contraste + brillo). ídem — bridge ms.calidad. */
+  calidadMs?: number;
+  /** KIT e14-etapas-preocr-v1 (D43) — probe de orientación (mini-OCR 0°,
+   *  challengers 90/180/270 si duda). Ya viajaba en
+   *  diagnostico.orientacionProbeMs (D57) — ahora TAMBIÉN como etapa del
+   *  informe. Ausente = el probe no corrió (SIM/error). */
+  orientacionProbeMs?: number;
+  /** KIT e14-etapas-preocr-v1 (D43) — PRE-OCR runner-side: el MURO entre el
+   *  fin de la espera de cola y el arranque del pipeline del bridge (capa-0
+   *  QR + decisiones dedup + origen + deskew + master del intento; los
+   *  reintentos del watchdog re-pagan origen/deskew/master → se ACUMULAN).
+   *  Hoy es invisible (ni esperaMs ni totalMs lo capturan) — evidencia del
+   *  informe 2026-10-30: 6-10 s/acta sin dueño entre decode+detect y ocr.
+   *  Incluye la espera APLAZADA por gemela si hubo (tiempo mural honesto).
+   *  La matanza/re-creación de workers ENTRE intentos no es pre-OCR (costo
+   *  del watchdog) y no se cuenta. Ausente = la fila jamás llegó al bridge
+   *  (YA-ENVIADA/copias tempranas — su métrica no pasa por este hook). */
+  preOcrMs?: number;
   /** OCR puro (2 pasadas sumadas — el total del reconocedor). */
   ocrMs?: number;
   /** D61 — persistencia del desenlace en IDB. */
@@ -166,7 +190,9 @@ function notificar(): void {
 
 // ─── Cuello (PURO — exportado para QA/UI) ────────────────────────────────────
 
-/** Etapa dominante de TRABAJO: máx de decode/detect/ocr/persist/envio.
+/** Etapa dominante de TRABAJO: máx de decode/detect/proceso/calidad/
+ *  orientacionProbe/preOcr/ocr/persist/envio (D43 — las etapas pre-OCR
+ *  nuevas SON trabajo del camino crítico: compiten igual que el OCR).
  *  La espera de cola, el sondeo y el thumb NO compiten por «cuello» (el
  *  sondeo es paralelo a la ingesta; el thumb es post-pipeline cosmético).
  *  null = sin etapas de trabajo medidas. */
@@ -224,6 +250,9 @@ export function registrarMetricaDesenlace(args: {
     score?: number;
     enviadoAutomaticamente?: string | null;
     diagnostico?: {
+      /** D57 — probe de orientación (top-level del diagnóstico, fuera de
+       *  tiempos). KIT e14-etapas-preocr-v1: sube al informe como etapa. */
+      orientacionProbeMs?: number;
       tiempos?: {
         totalMs?: number;
         procesoMs?: number;
@@ -241,6 +270,10 @@ export function registrarMetricaDesenlace(args: {
   /** D35 — ms de hacerThumb del desenlace LISTA (runner mide el await).
    *  Ausente = sin medición (rutas DUPLICADA/ERROR temprano). */
   thumbMs?: number;
+  /** KIT e14-etapas-preocr-v1 (D43) — muro pre-OCR del runner (capa-0 QR +
+   *  origen + deskew + master → ver EtapasMetrica.preOcrMs). Ausente = la
+   *  fila jamás despachó el bridge (jamás inventar). */
+  preOcrMs?: number;
   dedup?: string;
 }): void {
   void (async () => {
@@ -250,6 +283,19 @@ export function registrarMetricaDesenlace(args: {
       const etapas: EtapasMetrica = {};
       if (typeof t?.decodeMs === "number") etapas.decodeMs = t.decodeMs;
       if (typeof t?.detectMs === "number") etapas.detectMs = t.detectMs;
+      // KIT e14-etapas-preocr-v1 (D43) — las etapas OCULTAS suben al informe:
+      // proceso/calidad ya se medían en el bridge (ms.proceso/ms.calidad) y el
+      // probe viajaba solo en diagnostico.orientacionProbeMs (D57). Guard > 0:
+      // 0 = fase omitida (sinRecorte/SIM) — se omite, jamás inventar trabajo.
+      if (typeof t?.procesoMs === "number" && t.procesoMs > 0) etapas.procesoMs = t.procesoMs;
+      if (typeof t?.calidadMs === "number" && t.calidadMs > 0) etapas.calidadMs = t.calidadMs;
+      if (
+        typeof args.acta.diagnostico?.orientacionProbeMs === "number" &&
+        args.acta.diagnostico.orientacionProbeMs > 0
+      ) {
+        etapas.orientacionProbeMs = args.acta.diagnostico.orientacionProbeMs;
+      }
+      if (typeof args.preOcrMs === "number") etapas.preOcrMs = args.preOcrMs;
       if (typeof t?.ocrMs === "number") etapas.ocrMs = t.ocrMs;
       if (typeof t?.persistMs === "number") etapas.persistMs = t.persistMs;
       if (typeof t?.envioMs === "number") etapas.envioMs = t.envioMs;
