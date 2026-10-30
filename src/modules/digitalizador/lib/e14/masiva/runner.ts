@@ -1692,6 +1692,194 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
     return { resuelto: false, ctx: { ...ctx, actaFinal, enviadaAuto } };
 }
 
+// ─── R8 · STAGE 5/5 — fasePersistYMetrica (D35 · D59 · M14 · D61-T3 · D34) ──
+/** PERSISTENCIA + MÉTRICAS del desenlace: thumb de la bandeja (D35) →
+ *  registroListo (LISTA — con las trazas post-mortem del PUNTO ÚNICO
+ *  trazasPostMortemDe) → persistencia con fallback liviano (FIX M14 — la fila
+ *  JAMÁS pasa a ERROR tras un envío) + re-save del instrumento persistMs
+ *  (D61-T3) → marcarFila LISTA → métrica del desenlace (D34, observador
+ *  pasivo). Cualquier throw cae al MISMO catch de procesarUno (fila ERROR —
+ *  la cola jamás se tumba). Función PURA salvo los efectos de siempre
+ *  (store/IDB/métricas): recibe ctx y devuelve ctx nuevo — jamás muta el que
+ *  recibe. */
+async function fasePersistYMetrica(
+  ctx: CtxPostDesenlace & { actaFinal: Acta },
+): Promise<DesenlaceStage> {
+  const fila = ctx.fila;
+  const registro = ctx.registro;
+  const actaParcheada = ctx.actaParcheada;
+  const actaFinal = ctx.actaFinal;
+  const enviadaAuto = ctx.enviadaAuto;
+  const actaDesenlace = ctx.actaDesenlace;
+  const identidad = ctx.identidad;
+  const falsoPositivoEvitado = ctx.falsoPositivoEvitado;
+  const relecturaDesenlace = ctx.relecturaDesenlace;
+  const maestroDesenlace = ctx.maestroDesenlace;
+  const decodeMasterMs = ctx.decodeMasterMs;
+  const intentoDesenlace = ctx.intentoDesenlace;
+  const entradaPrecalor = ctx.entradaPrecalor;
+  const preOcrMs = ctx.preOcrMs;
+  const preOcrQrMs = ctx.preOcrQrMs;
+  const preOcrOrigenMs = ctx.preOcrOrigenMs;
+  const preOcrDeskewMs = ctx.preOcrDeskewMs;
+  const preOcrMasterMs = ctx.preOcrMasterMs;
+  const preOcrPasadas = ctx.preOcrPasadas;
+  const tsDespacho = ctx.tsDespacho;
+  const qrHeredado = ctx.qrHeredado;
+  // (bloque movido VERBATIM de procesarUno — mismo orden, mismos literales)
+    // D35 — thumbMs: la miniatura de la bandeja es TRABAJO REAL del main
+    // thread post-pipeline (decode completo + canvas + JPEG). Cronometrado
+    // para decidir su destino (quitar/degradar) con datos del INFORME.
+    const tThumb0 = performance.now();
+    const thumb = await hacerThumb(actaParcheada.fotoProcesada ?? actaParcheada.fotoOriginal);
+    const thumbMs = performance.now() - tThumb0;
+    const registroListo: RegistroMasiva = {
+      ...registro,
+      estado: "LISTA",
+      acta: actaFinal,
+      thumb,
+      // D59 — KIT e14-info-acta-filas-v1 (T2): título con la info reconocida
+      // del desenlace REAL (persiste — desviación aditiva de thumb).
+      infoTitulo: tituloDeActa(actaFinal),
+      // e63k (F1.4): resolución final del FP visual evitado — "sin-match"
+      // cierra la banda aplazada; dedupDistancia y dedupVisualDe quedan como
+      // estaban (spread de arriba — post-mortem del falso positivo).
+      ...(falsoPositivoEvitado ? { dedup: "sin-match" as const } : {}),
+      // e63k (F1.4): regla general de persistencia de la serie (aplica
+      // SIEMPRE que haya desenlace con identidad leída, también cuando NO
+      // es dup — sirve al mapa de la cola y al informe). Ausente = sin
+      // consenso (jamás inventar — RED LINE 2).
+      ...(identidad ? { serie: identidad.serie } : {}),
+      // D66 — KIT e14-decode-unico-precalor-v1 (T4): trazas de decodificación
+      // ADITIVAS del master del DESENLACE (solo con master — sin él los
+      // campos VIAJAN AUSENTES: registros previos/ERROR/fallback quedan como
+      // hoy — jamás inventar). decodeMs top-level ≠ tiempos.decodeMs (D61 —
+      // decode del archivo por el bridge; semánticas distintas, ambas honestas).
+      ...(maestroDesenlace
+        ? {
+            decodeMs: decodeMasterMs ?? 0,
+            origenDecode: maestroDesenlace.origenDecode,
+            precalentada: intentoDesenlace === 1 && !!entradaPrecalor,
+            precalorMs:
+              intentoDesenlace === 1 ? (entradaPrecalor?.precalorMs ?? null) : null,
+          }
+        : {}),
+      // e63m + D44-R2 + e64-qr T-0.2 + WAVE3 §B — trazas post-mortem del
+      // registroListo (rescate "auto": salvado|lanzado por el status del
+      // desenlace): PUNTO ÚNICO trazasPostMortemDe — byte-idéntico a ayer.
+      ...trazasPostMortemDe(ctx, {
+        heredado: true,
+        rescate: "auto",
+        statusDesenlace: actaDesenlace.status,
+      }),
+    };
+    // FIX M14 (auditoría 2-c): persistencia fallida TRAS el envío — la fila
+    // NO pasa a ERROR (el acta SÍ se transmitió; una fila ERROR invita a
+    // reprocesar → doble envío tras recarga) y el registro JAMÁS queda
+    // PENDIENTE con el archivo (el reproceso automático re-enviaría).
+    // Reintento MÍNIMO: estado LISTA + desenlace liviano, SIN el acta
+    // completa (la causa típica del fallo es quota — el registro con acta
+    // de ~15 MB no cabe; el liviano sí).
+    // D61 — KIT e14-tiempos-ocultos-v1 (T3): la MISMA ventana mide ahora la
+    // persistencia del desenlace (guardarRegistro principal + fallback
+    // liviano — kit §2-T3): persistMs = coste REAL del write que el usuario
+    // experimenta. Si ambos writes fallan, el campo se OMITE (sin dato —
+    // jamás inventar).
+    let persistMs: number | null = null;
+    const tPersist = performance.now();
+    try {
+      await guardarRegistro(registroListo);
+      persistMs = Math.round(performance.now() - tPersist);
+    } catch {
+      try {
+        await guardarRegistro({ ...registro, estado: "LISTA", thumb });
+        persistMs = Math.round(performance.now() - tPersist);
+      } catch {
+        /* IDB caída del todo — la fila vive honesta en memoria (LISTA);
+           persistMs se omite (sin dato — jamás inventar). */
+      }
+    }
+    // D61 (T3) — re-save de INSTRUMENTO (FUERA del desenlace): persistMs nace
+    // DEL write que lo mide (paradoja del instrumento — no puede viajar dentro
+    // de él). Con el valor ya medido, parchea el diagnóstico (patrón inmutable
+    // de esperaMs) y re-persiste para que sobreviva la recarga (kit T5 — IDB).
+    // Best-effort y SILENCIOSO: si falla, IDB se queda con el write 1 —
+    // desenlace INTACTO (sin este campo; honesto). El liviano del fallback no
+    // lleva acta → sin diagnóstico → no hay nada que parchear (omitido).
+    if (persistMs != null && registroListo.acta?.diagnostico != null) {
+      try {
+        await guardarRegistro({
+          ...registroListo,
+          acta: {
+            ...registroListo.acta,
+            diagnostico: {
+              ...registroListo.acta.diagnostico,
+              tiempos: {
+                ...registroListo.acta.diagnostico.tiempos,
+                persistMs,
+              },
+            },
+          },
+        });
+      } catch {
+        /* el write 1 manda — persistMs viaja solo si este re-save cabe */
+      }
+    }
+    marcarFila(fila.id, {
+      estado: "LISTA",
+      statusActa: actaFinal.status,
+      score: actaFinal.score,
+      nivel: actaFinal.clasificacion?.nivel ?? null,
+      pagina: paginaDeActa(actaFinal),
+      infoTitulo: tituloDeActa(actaFinal), // D59 — KIT e14-info-acta-filas-v1 (T2)
+      motivo: actaFinal.rechazo?.tipo ?? null,
+      thumb,
+      enviadaAuto,
+      envioEnCola: actaFinal.hashSha256 === "EN COLA", // KIT e14-masiva-ux-v1 (T3.2)
+      // e63f (F2): el desenlace pasó por la re-lectura interna (trazabilidad
+      // — el detalle auto|sin-cambio vive en la traza RelecturaInterna=).
+      relectura: relecturaDesenlace != null,
+      // e63k (F1.4): serie impresa al mapa de la cola (identidad capa 2).
+      serie: identidad?.serie ?? null,
+      error: null,
+    });
+    // D34 — métricas por acta (observador pasivo — fire-and-forget): el
+    // desglose de etapas YA existe en actaFinal.diagnostico.tiempos.
+    registrarMetricaDesenlace({
+      filaId: fila.id,
+      nombre: fila.nombre,
+      acta: actaFinal,
+      sondeoQrMs: fila.sondeoQrMs,
+      thumbMs,
+      // KIT e14-etapas-preocr-v1 (D43): el muro pre-OCR sube al informe
+      // (ausente si la fila jamás despachó el bridge — jamás inventar).
+      ...(preOcrMs != null ? { preOcrMs } : {}),
+      // KIT e14-tiempos-v2 (D44) — sub-desglose + trazas del despacho: los 4
+      // sub-segmentos viajan JUNTOS cuando el muro corrió (con sus 0 reales —
+      // master=0 = precalentada); qrHeredado true|false EXPLÍCITO (false =
+      // pagó ladder — el dato de la palanca ①).
+      ...(preOcrMs != null && preOcrQrMs != null
+        ? {
+            preOcrQrMs,
+            preOcrOrigenMs,
+            preOcrDeskewMs,
+            preOcrMasterMs,
+            qrHeredado,
+          }
+        : {}),
+      ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
+      ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
+      dedup: registro?.dedup,
+      // D45 — diagnóstico del dedup de ingesta (POR QUÉ sin-match): la traza
+      // fresca del registroListo manda (el spread de arriba la trae de
+      // cadenaDedup; el override "sin-match" de e63k solo toca `dedup`).
+      ...(registroListo.dedupDetalle
+        ? { dedupDetalle: registroListo.dedupDetalle }
+        : {}),
+    });
+  return { resuelto: false, ctx };
+}
+
 /** Desenlace de UNA foto — byte a byte el pipeline real (kit §6-C: el
  *  desenlace DEBE ser idéntico al del IMPORTAR normal).
  *  D66 — KIT e14-decode-unico-precalor-v1: el pipeline recibe el MASTER
@@ -1875,39 +2063,9 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     enviadaAuto: false,
   };
   let registro: RegistroMasiva | null = null;
-  // e63m — payload QR de la CAPA 0 (identidad-qr.ts): llave OPACA — solo se
-  // guarda en el registro y viaja al informe (export-only); JAMÁS se parsea,
-  // se invierte o se compara por prefijos (RED LINE 10). null = sin-payload
-  // (el QR no decodificó — pipeline normal intacto, sin campo en IDB).
-  let qrPayload: string | null = null;
-  // e64-qr T-0.2 — estado SOLO-VISUAL de la CAPA 0 (chip QR ✓/✗ de la
-  // bandeja): null = la capa 0 NO llegó a correr (throw previo — jamás
-  // inventar); "leido"/"sin-payload" = el intento de decode terminó.
-  let qrEstadoCapa0: "leido" | "sin-payload" | null = null;
-  // D65 (T1.4) — trazas del watchdog (visibles también en el catch).
-  let watchdogUsados = 0;
-  let etapaAlMorir: string | null = null;
-  let elapsedMuerteMs: number | null = null;
-  // WAVE3 §B — el rescate LANZADO para ESTA fila (máx 1 — el predicado
-  // exige intento 1): la traza rescateRechazo del registro nace aquí
-  // ("salvado" si el desenlace final ≠ RECHAZADA; "lanzado" si no).
-  // Fuera del try — el catch del post-mortem TAMBIÉN la estampa.
-  let rescateLanzado = false;
-  // ─── KIT e14-tiempos-v2 (D44) — los 4 ROJOS: sub-desglose del muro + trazas ───
-  // (R1) particiones del muro: cada segmento vive DENTRO de la pared que lo
-  // acumula (qr + origen + deskew + master ≤ preOcrMs SIEMPRE — el residuo
-  // son logs/marco de store). Los reintentos re-pagan y ACUMULAN igual que
-  // preOcrMs — (R4) cuenta cuántas pasadas hay en la suma. Fuera del try —
-  // el catch del post-mortem TAMBIÉN los estampa (mismo trato que watchdogUsados).
-  let preOcrQrMs: number | null = null; // bloque capa-0 QR + dedup (+ espera APLAZADA)
-  let preOcrOrigenMs = 0; // clasificarOrigenDeArchivo (D63-A) por intento
-  let preOcrDeskewMs = 0; // preProcesoEscaneo (D63-B) por intento
-  let preOcrMasterMs = 0; // master del intento (maestroDeImagen/precalor — D66)
-  let preOcrPasadas = 0; // (R4) veces que se cerró el muro (1 = sin reintento)
-  // (R2) la capa 0 HEREDÓ qrPrevio (sondeo/prescan) — sin decode ni ladder.
-  let qrHeredado = false;
-  // (R3) epoch del despacho (tInicio) — con tsFin reconstruye el solape D31.
-  let tsDespacho: number | null = null;
+  // (los espejos de trazas del post-mortem MURIERON con el stage 5/5: el
+  // catch estampa desde el CTX fresco de los stages — PUNTO ÚNICO
+  // trazasPostMortemDe; tsDespacho vive en ctx desde el despacho D44-R3.)
   try {
     // D41 — lectura RAW: el pipeline solo consume `archivo` y escribe el
     // desenlace NUEVO encima (el acta vieja, si existiera, se reemplaza
@@ -1931,7 +2089,6 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // esperaMs = tInicio − fila.agregadaEn (≥ 0 defensivo — jamás inventar).
     // SOLO masiva lo llena (el flujo individual no tiene espera de cola).
     const tInicio = Date.now();
-    tsDespacho = tInicio; // D44-R3 — el despacho ES el cierre de la espera de cola
     const esperaMs = Math.max(0, tInicio - fila.agregadaEn);
 
     // ─── KIT e14-etapas-preocr-v1 (D43) — preOcrMs: el MURO entre el fin de
@@ -1946,8 +2103,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // OBSERVADOR PASIVO (solo medir — jamás cambia decisiones): intento 1
     // arranca YA (incluye la capa-0 QR completa — el cronómetro vive en ctx);
     // los reintentos re-pagan origen/deskew/master → se ACUMULAN (T1).
-    let preOcrMs: number | null = null; // null = jamás llegó al bridge (YA-ENVIADA/copias tempranas)
-    ctx = { ...ctx, preOcrMs: null, tPreOcrIntento: performance.now() }; // intento 1: incluye la capa-0 (T1)
+    ctx = { ...ctx, preOcrMs: null, tPreOcrIntento: performance.now(), tsDespacho: tInicio }; // intento 1: incluye la capa-0 (T1) + despacho D44-R3
 
     // ─── R8 · STAGE 1/5 (split de procesarUno — misión punto 3): CAPA 0 QR ───
     // El bloque entero (decode + dedup por payload + APLAZADA + ya-enviada)
@@ -1959,13 +2115,6 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     const r1 = await faseCapa0Qr({ ...ctx, registro, archivo, esperaMs });
     if (r1.resuelto) return;
     ctx = r1.ctx;
-    // Espejo transitorio (estrangulamiento incremental): los stages 2-5 aún
-    // no extraídos leen las variables locales — mueren en sus commits.
-    qrPayload = ctx.qrPayload;
-    qrEstadoCapa0 = ctx.qrEstadoCapa0;
-    qrHeredado = ctx.qrHeredado;
-    preOcrQrMs = ctx.preOcrQrMs;
-
     // ─── R8 · STAGE 2/5 (split de procesarUno): PIPELINE DE INTENTOS ───
     // Origen (D63-A) + deskew (D63-B) + master (D66) + puente + watchdog (D65)
     // + rescate (WAVE3 §B) — el bucle de intentos vive en fasePipelineIntentos.
@@ -1975,33 +2124,15 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // que el orquestador re-lanze al MISMO catch de siempre (jamás se traga).
     const r2 = await fasePipelineIntentos({ ...ctx, registro, archivo });
     if (r2.fallo) {
-      // Camino del ERROR REAL: espejar SOLO las trazas que el catch del
-      // post-mortem estampa (mismos valores que hoy tendrían los lets) y
-      // re-lanzar al MISMO catch de siempre.
+      // Camino del ERROR REAL: adoptar el ctx fresco (trazas del intento que
+      // murió — watchdog/etapaAlMorir/registro re-leído) y re-lanzar al MISMO
+      // catch de siempre, que estampa desde el ctx (PUNTO ÚNICO).
       ctx = r2.ctx;
       if (r2.ctx.registro) registro = r2.ctx.registro; // el reintento re-leyó de IDB
-      watchdogUsados = ctx.watchdogUsados;
-      etapaAlMorir = ctx.etapaAlMorir;
-      elapsedMuerteMs = ctx.elapsedMuerteMs;
-      rescateLanzado = ctx.rescateLanzado;
-      preOcrPasadas = ctx.preOcrPasadas;
       throw r2.error;
     }
     ctx = r2.ctx;
     if (r2.ctx.registro) registro = r2.ctx.registro; // el reintento re-leyó de IDB
-    // Espejos transitorios (estrangulamiento incremental): mueren cuando los
-    // stages 3-5 se extraigan — SOLO sobreviven los que consume el catch del
-    // post-mortem y la métrica de desenlace (stages 4-5 aún no extraídos).
-    preOcrMs = ctx.preOcrMs;
-    preOcrOrigenMs = ctx.preOcrOrigenMs;
-    preOcrDeskewMs = ctx.preOcrDeskewMs;
-    preOcrMasterMs = ctx.preOcrMasterMs;
-    preOcrPasadas = ctx.preOcrPasadas;
-    watchdogUsados = ctx.watchdogUsados;
-    etapaAlMorir = ctx.etapaAlMorir;
-    elapsedMuerteMs = ctx.elapsedMuerteMs;
-    rescateLanzado = ctx.rescateLanzado;
-    entradaPrecalor = ctx.entradaPrecalor;
     // ─── R8 · STAGE 3/5 (split de procesarUno): DESENLACE ───
     // Parche D57 del desenlace + guard M8 + re-lectura interna (e63f) +
     // capa 2 identidad (e63k) + falso-positivo evitado + dedup por contenido
@@ -2012,17 +2143,6 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     const r3 = await faseDesenlace({ ...ctx, registro, archivo, actaBruta: r2.ctx.actaBruta });
     if (r3.resuelto) return;
     ctx = r3.ctx;
-    // Espejos transitorios (estrangulamiento incremental): los stages 4-5 aún
-    // no extraídos leen las variables locales — mueren en sus commits. Los
-    // acta los garantiza la SALIDA del stage (SalidaDesenlace, no-null).
-    const actaDesenlace = r3.ctx.actaDesenlace;
-    const actaParcheada = r3.ctx.actaParcheada;
-    const identidad = r3.ctx.identidad;
-    const falsoPositivoEvitado = r3.ctx.falsoPositivoEvitado;
-    const relecturaDesenlace = r3.ctx.relecturaDesenlace;
-    const maestroDesenlace = r3.ctx.maestroDesenlace;
-    const decodeMasterMs = r3.ctx.decodeMasterMs;
-    const intentoDesenlace = r3.ctx.intentoDesenlace;
 
     // ─── R8 · STAGE 4/5 (split de procesarUno): ENVÍO ───
     // Veto H1 + veto remoto + envío propio + ledger H2 + registro remoto +
@@ -2040,173 +2160,22 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     });
     if (r4.resuelto) return;
     ctx = r4.ctx;
-    // Espejo transitorio (estrangulamiento incremental): el stage 5 aún no
-    // extraído lee la variable local — muere en su commit. actaFinal la
-    // garantiza la SALIDA del stage (SalidaFaseEnvio, no-null).
-    const actaFinal = r4.ctx.actaFinal;
-    const enviadaAuto = r4.ctx.enviadaAuto;
 
-    // D35 — thumbMs: la miniatura de la bandeja es TRABAJO REAL del main
-    // thread post-pipeline (decode completo + canvas + JPEG). Cronometrado
-    // para decidir su destino (quitar/degradar) con datos del INFORME.
-    const tThumb0 = performance.now();
-    const thumb = await hacerThumb(actaParcheada.fotoProcesada ?? actaParcheada.fotoOriginal);
-    const thumbMs = performance.now() - tThumb0;
-    const registroListo: RegistroMasiva = {
-      ...registro,
-      estado: "LISTA",
-      acta: actaFinal,
-      thumb,
-      // D59 — KIT e14-info-acta-filas-v1 (T2): título con la info reconocida
-      // del desenlace REAL (persiste — desviación aditiva de thumb).
-      infoTitulo: tituloDeActa(actaFinal),
-      // e63k (F1.4): resolución final del FP visual evitado — "sin-match"
-      // cierra la banda aplazada; dedupDistancia y dedupVisualDe quedan como
-      // estaban (spread de arriba — post-mortem del falso positivo).
-      ...(falsoPositivoEvitado ? { dedup: "sin-match" as const } : {}),
-      // e63k (F1.4): regla general de persistencia de la serie (aplica
-      // SIEMPRE que haya desenlace con identidad leída, también cuando NO
-      // es dup — sirve al mapa de la cola y al informe). Ausente = sin
-      // consenso (jamás inventar — RED LINE 2).
-      ...(identidad ? { serie: identidad.serie } : {}),
-      // D66 — KIT e14-decode-unico-precalor-v1 (T4): trazas de decodificación
-      // ADITIVAS del master del DESENLACE (solo con master — sin él los
-      // campos VIAJAN AUSENTES: registros previos/ERROR/fallback quedan como
-      // hoy — jamás inventar). decodeMs top-level ≠ tiempos.decodeMs (D61 —
-      // decode del archivo por el bridge; semánticas distintas, ambas honestas).
-      ...(maestroDesenlace
-        ? {
-            decodeMs: decodeMasterMs ?? 0,
-            origenDecode: maestroDesenlace.origenDecode,
-            precalentada: intentoDesenlace === 1 && !!entradaPrecalor,
-            precalorMs:
-              intentoDesenlace === 1 ? (entradaPrecalor?.precalorMs ?? null) : null,
-          }
-        : {}),
-      // e63m — payload QR de la CAPA 0 (llave opaca): campo ADITIVO AL FINAL
-      // (contrato D57) — absent = sin-payload (jamás inventar). Export-only.
-      ...(qrPayload ? { qrPayload } : {}),
-      // KIT e14-tiempos-v2 (D44-R2) — la capa 0 HEREDÓ (sondeo/prescan):
-      // ausente = pagó decode/ladder completo (o sin payload). Aditivo D57.
-      ...(qrHeredado ? { qrHeredado: true } : {}),
-      // e64-qr T-0.2 — estado SOLO-VISUAL de la capa 0 (chip QR ✓/✗;
-      // sobrevive la recarga vía filaDeRegistro). Aditivo al final (D57).
-      ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
-      // WAVE3 §B — traza del rescate anti-falso-rechazo (ADITIVA AL FINAL,
-      // D57): "salvado" = el desenlace final ≠ RECHAZADA tras el reintento;
-      // "lanzado" = el reintento también rechazó (se acepta el rechazo —
-      // honesto). Ausente = sin rescate (jamás inventar).
-      ...(rescateLanzado
-        ? {
-            rescateRechazo: (
-              actaDesenlace.status !== "RECHAZADA" ? "salvado" : "lanzado"
-            ) as "salvado" | "lanzado",
-          }
-        : {}),
-    };
-    // FIX M14 (auditoría 2-c): persistencia fallida TRAS el envío — la fila
-    // NO pasa a ERROR (el acta SÍ se transmitió; una fila ERROR invita a
-    // reprocesar → doble envío tras recarga) y el registro JAMÁS queda
-    // PENDIENTE con el archivo (el reproceso automático re-enviaría).
-    // Reintento MÍNIMO: estado LISTA + desenlace liviano, SIN el acta
-    // completa (la causa típica del fallo es quota — el registro con acta
-    // de ~15 MB no cabe; el liviano sí).
-    // D61 — KIT e14-tiempos-ocultos-v1 (T3): la MISMA ventana mide ahora la
-    // persistencia del desenlace (guardarRegistro principal + fallback
-    // liviano — kit §2-T3): persistMs = coste REAL del write que el usuario
-    // experimenta. Si ambos writes fallan, el campo se OMITE (sin dato —
-    // jamás inventar).
-    let persistMs: number | null = null;
-    const tPersist = performance.now();
-    try {
-      await guardarRegistro(registroListo);
-      persistMs = Math.round(performance.now() - tPersist);
-    } catch {
-      try {
-        await guardarRegistro({ ...registro, estado: "LISTA", thumb });
-        persistMs = Math.round(performance.now() - tPersist);
-      } catch {
-        /* IDB caída del todo — la fila vive honesta en memoria (LISTA);
-           persistMs se omite (sin dato — jamás inventar). */
-      }
-    }
-    // D61 (T3) — re-save de INSTRUMENTO (FUERA del desenlace): persistMs nace
-    // DEL write que lo mide (paradoja del instrumento — no puede viajar dentro
-    // de él). Con el valor ya medido, parchea el diagnóstico (patrón inmutable
-    // de esperaMs) y re-persiste para que sobreviva la recarga (kit T5 — IDB).
-    // Best-effort y SILENCIOSO: si falla, IDB se queda con el write 1 —
-    // desenlace INTACTO (sin este campo; honesto). El liviano del fallback no
-    // lleva acta → sin diagnóstico → no hay nada que parchear (omitido).
-    if (persistMs != null && registroListo.acta?.diagnostico != null) {
-      try {
-        await guardarRegistro({
-          ...registroListo,
-          acta: {
-            ...registroListo.acta,
-            diagnostico: {
-              ...registroListo.acta.diagnostico,
-              tiempos: {
-                ...registroListo.acta.diagnostico.tiempos,
-                persistMs,
-              },
-            },
-          },
-        });
-      } catch {
-        /* el write 1 manda — persistMs viaja solo si este re-save cabe */
-      }
-    }
-    marcarFila(fila.id, {
-      estado: "LISTA",
-      statusActa: actaFinal.status,
-      score: actaFinal.score,
-      nivel: actaFinal.clasificacion?.nivel ?? null,
-      pagina: paginaDeActa(actaFinal),
-      infoTitulo: tituloDeActa(actaFinal), // D59 — KIT e14-info-acta-filas-v1 (T2)
-      motivo: actaFinal.rechazo?.tipo ?? null,
-      thumb,
-      enviadaAuto,
-      envioEnCola: actaFinal.hashSha256 === "EN COLA", // KIT e14-masiva-ux-v1 (T3.2)
-      // e63f (F2): el desenlace pasó por la re-lectura interna (trazabilidad
-      // — el detalle auto|sin-cambio vive en la traza RelecturaInterna=).
-      relectura: relecturaDesenlace != null,
-      // e63k (F1.4): serie impresa al mapa de la cola (identidad capa 2).
-      serie: identidad?.serie ?? null,
-      error: null,
-    });
-    // D34 — métricas por acta (observador pasivo — fire-and-forget): el
-    // desglose de etapas YA existe en actaFinal.diagnostico.tiempos.
-    registrarMetricaDesenlace({
-      filaId: fila.id,
-      nombre: fila.nombre,
-      acta: actaFinal,
-      sondeoQrMs: fila.sondeoQrMs,
-      thumbMs,
-      // KIT e14-etapas-preocr-v1 (D43): el muro pre-OCR sube al informe
-      // (ausente si la fila jamás despachó el bridge — jamás inventar).
-      ...(preOcrMs != null ? { preOcrMs } : {}),
-      // KIT e14-tiempos-v2 (D44) — sub-desglose + trazas del despacho: los 4
-      // sub-segmentos viajan JUNTOS cuando el muro corrió (con sus 0 reales —
-      // master=0 = precalentada); qrHeredado true|false EXPLÍCITO (false =
-      // pagó ladder — el dato de la palanca ①).
-      ...(preOcrMs != null && preOcrQrMs != null
-        ? {
-            preOcrQrMs,
-            preOcrOrigenMs,
-            preOcrDeskewMs,
-            preOcrMasterMs,
-            qrHeredado,
-          }
-        : {}),
-      ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
-      ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
-      dedup: registro?.dedup,
-      // D45 — diagnóstico del dedup de ingesta (POR QUÉ sin-match): la traza
-      // fresca del registroListo manda (el spread de arriba la trae de
-      // cadenaDedup; el override "sin-match" de e63k solo toca `dedup`).
-      ...(registroListo.dedupDetalle
-        ? { dedupDetalle: registroListo.dedupDetalle }
-        : {}),
+    // ─── R8 · STAGE 5/5 (split de procesarUno): PERSISTENCIA + MÉTRICAS ───
+    // Thumb (D35) + registroListo (LISTA, trazas del PUNTO ÚNICO) +
+    // persistencia con fallback liviano (FIX M14) + re-save del instrumento
+    // persistMs (D61-T3) + marcarFila LISTA + métrica del desenlace (D34) —
+    // el bloque vive en fasePersistYMetrica (arriba). ÚLTIMO stage: el
+    // orquestador no consume su salida; cualquier throw cae al MISMO catch de
+    // siempre (fila ERROR — la cola jamás se tumba).
+    await fasePersistYMetrica({
+      ...ctx,
+      registro,
+      archivo,
+      actaBruta: r2.ctx.actaBruta,
+      actaDesenlace: r3.ctx.actaDesenlace,
+      actaParcheada: r3.ctx.actaParcheada,
+      actaFinal: r4.ctx.actaFinal,
     });
   } catch (err) {
     // Errores de IDB/decode/pipeline NUNCA tumban la UI (kit §3): la
@@ -2232,37 +2201,22 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
       // KIT e14-tiempos-v2 (D44) — post-mortem honesto: qrHeredado SOLO true
       // (false prematuro mentiría — la capa 0 pudo no correr); el contador de
       // re-arms y el tsInicio viajan si alcanzaron a nacer.
-      ...(tsDespacho != null ? { tsInicio: tsDespacho } : {}),
-      ...(qrHeredado ? { qrHeredado: true } : {}),
-      ...(preOcrPasadas > 1 ? { reintentosPreOcr: preOcrPasadas - 1 } : {}),
+      ...(ctx.tsDespacho != null ? { tsInicio: ctx.tsDespacho } : {}),
+      ...(ctx.qrHeredado ? { qrHeredado: true } : {}),
+      ...(ctx.preOcrPasadas > 1
+        ? { reintentosPreOcr: ctx.preOcrPasadas - 1 }
+        : {}),
     });
     if (registro) {
       try {
         await guardarRegistro({
           ...registro,
           estado: "ERROR",
-          // e63m: si el QR decodificó antes de que el pipeline fallara, el
-          // payload viaja también en la fila ERROR (post-mortem honesto).
-          ...(qrPayload ? { qrPayload } : {}),
-          // KIT e14-tiempos-v2 (D44-R2): herencia — ídem (solo true; false
-          // prematuro mentiría si el throw fue antes de la capa 0).
-          ...(qrHeredado ? { qrHeredado: true } : {}),
-          // e64-qr T-0.2: el estado de la capa 0 ídem — si la capa 0 corrió
-          // antes del fallo, "leido"/"sin-payload" viajan; si el throw fue
-          // ANTES de la capa 0, el campo viaja AUSENTE (jamás inventar).
-          ...(qrEstadoCapa0 ? { qrEstado: qrEstadoCapa0 } : {}),
-          // D65 (T1.4): si un intento murió por watchdog antes del error real,
-          // la traza sobrevive también en la fila ERROR (honesto).
-          ...(watchdogUsados > 0
-            ? {
-                watchdog: watchdogUsados,
-                ...(etapaAlMorir != null ? { etapaAlMorir } : {}),
-                ...(elapsedMuerteMs != null ? { elapsedMs: elapsedMuerteMs } : {}),
-              }
-            : {}),
-          // WAVE3 §B — el rescate lanzado no se pierde en un ERROR tardío
-          // (traza honesta del post-mortem — el intento 2 pagó su costo).
-          ...(rescateLanzado ? { rescateRechazo: "lanzado" as const } : {}),
+          // e63m + D44-R2 + e64-qr T-0.2 + D65 (T1.4) + WAVE3 §B — trazas del
+          // post-mortem (heredado solo-true + watchdog>0 + rescate "lanzado"
+          // fijo en un ERROR tardío): PUNTO ÚNICO trazasPostMortemDe — el
+          // catch estampa desde el CTX fresco de los stages, byte-idéntico.
+          ...trazasPostMortemDe(ctx, { heredado: true, watchdog: true, rescate: "lanzado" }),
         });
       } catch {
         /* IDB otra vez — la fila ya quedó ERROR en memoria (honesto) */
