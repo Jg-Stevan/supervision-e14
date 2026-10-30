@@ -88,7 +88,11 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
   return (
     <li
       key={f.id}
-      className={`rounded-2xl border px-3.5 py-3 transition-all ${
+      // R6 — virtualización barata (reporte 03b §M-2, tope 500 filas): las
+      // filas fuera del viewport no pintan su contenido (el navegador las
+      // salta) y reservan ~88px estimados — sin librería de virtualización
+      // (eso exigiría ADR; ver pr.md).
+      className={`rounded-2xl border px-3.5 py-3 transition-all [content-visibility:auto] [contain-intrinsic-size:auto_88px] ${
         esDup
           ? // KIT e64v — Cambio A: specs dark del kit (bg/borde azul).
             // El repo es dark-only (paleta oscura hardcodeada — sin
