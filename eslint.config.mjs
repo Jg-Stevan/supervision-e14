@@ -8,7 +8,11 @@ const eslintConfig = defineConfig([
   // KIT carga-masiva-supervision-v1 (D27): el módulo digitalizador
   // trasplantado (src/modules/digitalizador/**) llega con las reglas de su
   // repo origen (digielect14) — se conservan para no reescribir el motor.
+  // R1: reglas con SCOPE — SOLO aplican al módulo digitalizador; el resto
+  // del repo (app, components, modules/supervision, modules/perfil-dispositivo)
+  // usa las reglas estándar de eslint-config-next sin relajar.
   {
+    files: ["src/modules/digitalizador/**"],
     rules: {
       // TypeScript
       "@typescript-eslint/no-explicit-any": "off",
