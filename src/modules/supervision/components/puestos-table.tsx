@@ -438,7 +438,15 @@ const PuestoRow = memo(function PuestoRow({
       onOpenChange={(v) => v !== abierto && onToggle(puesto.id)}
       asChild
     >
-      <tbody>
+      <tbody
+        className="[content-visibility:auto] [contain-intrinsic-size:auto_49px]"
+      >
+        {/* R4 — virtualización barata (sin deps): «Todos los días» monta
+            ~949 <tbody> (uno por puesto); content-visibility:auto deja que
+            el navegador NO pinte/skipee los que están fuera del scrollport
+            (contain-intrinsic-size estima 49px = fila h-12 + borde). La
+            virtualización completa (ventana de filas) queda como propuesta
+            en pr.md — decisión del dueño. */}
         {/** R4-C7 (reporte 02-b C1): el <tr> vuelve a ser fila semántica —
          * YA NO es el CollapsibleTrigger (un <tr> no es enfocable: sin foco
          * ni Enter/Space, todo el detalle quedaba inalcanzable por teclado,
