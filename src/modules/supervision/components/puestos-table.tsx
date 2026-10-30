@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, Eye, Funnel } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
@@ -237,6 +237,19 @@ function MiniProgreso({ pct, color }: { pct: number; color: string }) {
  *  identidad nueva por fila por render y rompía el memo de PuestoRow. */
 const MESAS_VACIAS: Mesa[] = [];
 
+/**
+ * R4-C6 — telemetría de renders de PuestoRow (solo para la MEDICIÓN de
+ * aceptación del fix C6: abrir el visor debe dejarla en 0; se lee en
+ * consola con `window.__R4_FILAS.renders`). En el build de producción
+ * `process.env.NODE_ENV` se inline-a como "production" y el minificador
+ * elimina la rama: costo cero en prod.
+ */
+const RECUENTO_FILAS = { renders: 0 };
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  (window as unknown as { __R4_FILAS?: { renders: number } }).__R4_FILAS =
+    RECUENTO_FILAS;
+}
+
 interface PuestosTableProps {
   puestos: Puesto[];
   /**
@@ -426,6 +439,13 @@ const PuestoRow = memo(function PuestoRow({
   onAbrirVisorDePuesto: (puestoId: string) => void;
 }) {
   const acento = colorDeEstado(puesto.estadoGlobal);
+  // R4-C6 — telemetría de renders (ver RECUENTO_FILAS): el effect corre tras
+  // CADA commit donde la fila se renderizó de verdad; si el memo SALTA el
+  // render, el effect no corre y el contador no sube. SOLO dev: la mutación
+  // de telemetría vive en un effect (el lugar que el propio lint recomienda).
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") RECUENTO_FILAS.renders += 1;
+  });
   // KIT SUP-4 T3.4 — el 👁 abre el visor en la primera mesa CON acta del
   // puesto; deshabilitado si el puesto no tiene ninguna (todas
   // NO_INICIADO).
