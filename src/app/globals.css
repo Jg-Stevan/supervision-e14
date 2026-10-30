@@ -89,7 +89,14 @@
   --radius-lg: var(--radius);
   --radius-xl: var(--radius);
 
-  /* Fuentes: estructura = Hanken Grotesk, datos = JetBrains Mono */
+  /* Fuentes: estructura = Hanken Grotesk, datos = JetBrains Mono.
+     PREVIEW: next/font/google no está disponible en este entorno — las
+     variables caen a stacks de sistema equivalentes (el día del merge al
+     repo real, next/font vuelve a definirlas y este bloque sobra). */
+  --font-hanken: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-jetbrains: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
   --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, monospace;
 }
@@ -112,6 +119,16 @@
    Móvil: headline-lg 20px, stats-number 22px.
    ============================================================ */
 @layer utilities {
+  /* KIT visor-masiva-redesign-v1 — retícula de puntos del canvas del visor
+     (verbatim del diseño Stitch: radial emerald 5% sobre 20×20). */
+  .grid-paper-bg {
+    background-size: 20px 20px;
+    background-image: radial-gradient(
+      circle,
+      rgba(16, 185, 129, 0.05) 1px,
+      transparent 1px
+    );
+  }
   .headline-lg {
     font-size: 24px;
     line-height: 32px;

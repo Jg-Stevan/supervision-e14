@@ -1,22 +1,51 @@
 "use client";
 
-// ─── KIT carga-masiva-supervision-v1 (D27) — MODAL DE REVISIÓN ──────────────
-// ABRIR de la bandeja: aquí no existe la vista REVISIÓN del digitalizador
-// individual (vive en su propio repo) — la revisión es un modal propio que
-// muestra la foto procesada, los datos reconocidos y el desenlace de la
-// publicación en el monitor (VER EN MONITOR cuando aterrizó en el catálogo).
+// ─── KIT visor-masida-redesign-v1 — MODAL DE REVISIÓN REMODELADO ────────────
+// Redesign Stitch («Supervisión de Actas Electorales — Auditoría y
+// Escrutinio») aplicado al ABRIR de la bandeja masiva: workspace completo
+// a 2 columnas — canvas del documento (toolbar flotante + chevrons de
+// navegación entre imágenes procesadas + MOSTRAR ORIGINAL + franja de
+// metadata) y panel del auditor a la derecha (ENVÍO AUTOMÁTICO con los
+// datos reconocidos, OBSERVACIONES, ACCIONES DEL SUPERVISOR con RECHAZAR
+// (REESCANEAR) y nota de auditoría).
 //
-// ─── KIT editor-masiva-v1 — MODAL DE REVISIÓN CON EDITOR ────────────────────
-// ABRIR de la bandeja: modal propio del módulo (D27) + EDITOR para las actas
-// SIN envío automático (pedido del dueño): RECORTAR (arrastre sobre la foto,
-// horneado por canvas) y ROTAR (90° por toque) — las que SÍ se enviaron auto
-// solo mejoran su VISOR: zoom con la rueda del mouse / pellizco con los
-// dedos / arrastre (VisorZoom del dashboard — mismo primitivo, misma UX).
-// Persistencia: editarActaActual parchea el acta abierta en vivo; al cerrar,
-// sincronizarAlVolver (store masiva) re-persiste en IDB + thumb fresco + fila.
-//
-// R6: SPLIT move-only de MasivaView.tsx (reporte 03b M-2) — código verbatim.
-import { useEffect, useRef, useState } from "react";
+// DISCIPLINA DE SIEMPRE — cero cambios de lógica, solo remodelación:
+// · Contrato de props intacto (+2 props NUEVAS opcionales de navegación:
+//   posNavegacion/onNavegar — el orquestador las alimenta con la bandeja).
+// · El editor (RECORTAR/ROTAR/DESHACER horneados por canvas) sigue vivo
+//   para las actas SIN envío automático — ahora vive en la toolbar. Para
+//   las ENVIADAS AUTO la rotación es VISUAL (ayuda de lectura, no hornea).
+// · Las ediciones siguen viajando por editarActaActual; la persistencia
+//   sigue siendo sincronizarAlVolver al cerrar (store masiva, intacto).
+// · RECHAZAR (nueva acción del supervisor): motivo OBLIGATORIO + armado a
+//   2 toques (mismo patrón VACIAR/REINICIAR de la bandeja) → parchea el
+//   acta abierta (status RECHAZADA + rechazo SUPERVISOR con el motivo) y
+//   pasa al siguiente acta del lote. Nada del runner/store se toca.
+// · Honestidad de datos (kit §1): score real, página real (o «- DE -»),
+//   identificador = código de barras agrupado por su gramática real
+//   (7100|KIT|TIPO|VER|PÁG|TOTAL) — jamás inventar campos.
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  Contrast,
+  Crop,
+  Eye,
+  EyeOff,
+  Info,
+  Loader2,
+  Maximize,
+  Minimize,
+  RotateCw,
+  ShieldCheck,
+  Undo2,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 import {
   joinDeActa,
@@ -36,13 +65,7 @@ import {
   VisorZoom,
   type VisorZoomHandle,
 } from "@/modules/supervision/components/actas/visor-zoom";
-import {
-  LoaderIcon,
-  RefreshIcon,
-  StitchCropIcon,
-  StitchRotateIcon,
-} from "../../icons";
-import { filaInfo, pildoraEstadoActa } from "./helpers";
+import { pildoraEstadoActa } from "./helpers";
 import { PublicacionChip } from "./publicacion-chip";
 import type { PropsMasivaView } from "./orquestador";
 
@@ -58,21 +81,102 @@ interface RectPct {
 /** Mínimo % en CADA eje para habilitar APLICAR (evita recortes absurdos). */
 const RECT_MIN_PCT = 3;
 
+/** Modos de contraste del visor (mismo trío del visor del dashboard). */
+type ContrasteModo = "NORMAL" | "ALTO" | "NEGATIVO";
+
+const FILTRO_CONTRASTE: Record<ContrasteModo, string | undefined> = {
+  NORMAL: undefined,
+  ALTO: "contrast(1.4) brightness(1.05)",
+  NEGATIVO: "invert(1)",
+};
+
+/** Score honesto: entero sin decimales (10/10), el resto a 1 decimal. */
+function scoreTexto(score: number): string {
+  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+}
+
+/** Identificador del acta: el código de barras REAL agrupado por su
+ * gramática impresa (7100 | KIT(4) | TIPO(1) | VER(2) | PÁG(2) | TOTAL(2)).
+ * Sin 15 dígitos → el crudo tal cual; vacío → null (la caja no se pinta). */
+function formatoIdentificador(codigo: string): string | null {
+  if (!codigo) return null;
+  if (/^\d{15}$/.test(codigo)) {
+    return `X  ${codigo.slice(0, 4)} · ${codigo.slice(4, 8)} · ${codigo.slice(8, 9)} · ${codigo.slice(9, 11)} · ${codigo.slice(11, 13)} · ${codigo.slice(13, 15)}  X`;
+  }
+  return `X  ${codigo}  X`;
+}
+
+/** Etiqueta del formulario (misma convención del adaptador D27 —
+ * store-e14.ts): TRANSMISION → «TRANSMISIÓN», DELEGADOS → «CÓNSUL/
+ * EMBAJADOR». Sin clasificación → el tipo crudo del acta o «—». */
+function etiquetaFormularioDe(acta: Acta): string {
+  const t = acta.clasificacion?.tipo ?? acta.tipo;
+  if (t === "TRANSMISION") return "TRANSMISIÓN";
+  if (t === "DELEGADOS") return "CÓNSUL/EMBAJADOR";
+  return t || "—";
+}
+
+/** Etiqueta ORIGEN del panel (tipo de copia del acta). */
+function origenDe(acta: Acta): string {
+  const t = acta.clasificacion?.tipo ?? acta.tipo;
+  if (t === "TRANSMISION") return "Transmisión";
+  if (t === "DELEGADOS") return "Delegados";
+  return t || "—";
+}
+
 export function ModalRevisor({
   acta,
   publicacion,
   onVerEnMonitor,
   onCerrar,
+  posNavegacion,
+  onNavegar,
+  cargarOriginal,
 }: {
   acta: Acta | null;
   publicacion?: PublicacionActa;
   onVerEnMonitor?: PropsMasivaView["onVerEnMonitor"];
   onCerrar: () => void;
+  /** Posición 1-based del acta abierta entre las imágenes LISTAS del lote
+   * (null = fuera de la lista — chevrons sin destino). */
+  posNavegacion?: { index: number; total: number } | null;
+  /** Navegación entre imágenes procesadas (orquestador: sincroniza el acta
+   * abierta y carga la vecina — misma puerta que ABRIR de la bandeja). */
+  onNavegar?: (direccion: -1 | 1) => void;
+  /** MOSTRAR ORIGINAL — materializa el archivo ORIGINAL del registro
+   * (orquestador: FileReader del File en IDB). null si no hay archivo. */
+  cargarOriginal?: (id: string) => Promise<string | null>;
 }) {
+  // ── Visor (estado del redesign — todo local, cero acople con el store) ──
+  const [verOriginal, setVerOriginal] = useState(false);
+  const [rotacionVisual, setRotacionVisual] = useState(0);
+  const [contraste, setContraste] = useState<ContrasteModo>("NORMAL");
+  const [expandido, setExpandido] = useState(false);
+  const [escala, setEscala] = useState<number | null>(null);
+  // MOSTRAR ORIGINAL: la foto cruda puede vivir en el acta (fotoOriginal),
+  // en el archivo del registro (materialización on-demand) o no existir
+  // (registros sin archivo — degradación honesta del toggle).
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [cargandoOriginal, setCargandoOriginal] = useState(false);
+  const [sinOriginal, setSinOriginal] = useState(false);
+  // Espejo del expandido para el listener de Escape (lectura sin re-suscribir).
+  const expandidoRef = useRef(false);
+  useEffect(() => {
+    expandidoRef.current = expandido;
+  }, [expandido]);
+  // Reporte de escala estable (VisorZoom llama onZoomChange en cada gesto).
+  const onZoomChange = useCallback((e: number) => setEscala(e), []);
+
+  // Escape: pantalla completa sale primero; fuera de ella cierra el modal.
   useEffect(() => {
     if (!acta) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCerrar();
+      if (e.key !== "Escape") return;
+      if (expandidoRef.current) {
+        setExpandido(false);
+        return;
+      }
+      onCerrar();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -90,18 +194,52 @@ export function ModalRevisor({
   const zonaRecorteRef = useRef<HTMLDivElement>(null);
   const arrastreRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Reset del editor al cambiar de acta abierta (abrir otra fila / cerrar).
+  // ── Rechazo del supervisor (motivo obligatorio + armado a 2 toques) ────
+  const [observaciones, setObservaciones] = useState("");
+  const [errorMotivo, setErrorMotivo] = useState(false);
+  const [rechazoArmado, setRechazoArmado] = useState(false);
+  const [rechazoHecho, setRechazoHecho] = useState(false);
+  const timerRechazoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset del visor/editor/rechazo al cambiar de acta abierta (navegación
+  // incluida) — y del timer de avance pendiente.
   useEffect(() => {
     setEditandoRecorte(false);
     setRect(null);
     setOcupado(null);
     setEditada(false);
     fotoPreEdicionRef.current = null;
+    setVerOriginal(false);
+    setOriginalUrl(null);
+    setCargandoOriginal(false);
+    setSinOriginal(false);
+    setRotacionVisual(0);
+    setContraste("NORMAL");
+    setRechazoArmado(false);
+    setRechazoHecho(false);
+    setErrorMotivo(false);
+    setObservaciones("");
+    if (timerRechazoRef.current) {
+      clearTimeout(timerRechazoRef.current);
+      timerRechazoRef.current = null;
+    }
   }, [acta?.id]);
 
-  /** ROTAR 90° horario — hornea la foto por canvas y parchea el acta. */
+  useEffect(
+    () => () => {
+      if (timerRechazoRef.current) clearTimeout(timerRechazoRef.current);
+    },
+    [],
+  );
+
+  /** ROTAR: actas sin envío automático → HORNEA 90° (persiste en el acta);
+   *  enviadas auto → rotación VISUAL del visor (ayuda de lectura). */
   const rotarFoto = async () => {
     if (!acta || !foto || ocupado) return;
+    if (!editable) {
+      setRotacionVisual((r) => (r + 90) % 360);
+      return;
+    }
     if (!fotoPreEdicionRef.current) fotoPreEdicionRef.current = foto;
     setEditandoRecorte(false);
     setRect(null);
@@ -155,8 +293,37 @@ export function ModalRevisor({
     setRect(null);
   };
 
+  /** MOSTRAR ORIGINAL — alterna procesada ↔ cruda. La cruda viene del acta
+   *  (fotoOriginal) o se materializa del archivo del registro on-demand. */
+  const alternarOriginal = async () => {
+    if (cargandoOriginal || !acta) return;
+    if (verOriginal) {
+      setVerOriginal(false);
+      return;
+    }
+    if (acta.fotoOriginal || originalUrl) {
+      setVerOriginal(true);
+      return;
+    }
+    if (!cargarOriginal) {
+      setSinOriginal(true);
+      return;
+    }
+    setCargandoOriginal(true);
+    const url = await cargarOriginal(acta.id);
+    setCargandoOriginal(false);
+    if (url) {
+      setOriginalUrl(url);
+      setVerOriginal(true);
+    } else {
+      setSinOriginal(true); // sin archivo en el registro — el botón se oculta
+    }
+  };
+
   // ── Dibujo del rectángulo de recorte (puntero = mouse o dedo) ──────────
-  const pctDePuntero = (e: React.PointerEvent): { x: number; y: number } | null => {
+  const pctDePuntero = (
+    e: React.PointerEvent,
+  ): { x: number; y: number } | null => {
     const zona = zonaRecorteRef.current;
     if (!zona) return null;
     const r = zona.getBoundingClientRect();
@@ -196,71 +363,280 @@ export function ModalRevisor({
     arrastreRef.current = null;
   };
 
+  // ── RECHAZAR (REESCANEAR): motivo obligatorio + armado a 2 toques ──────
+  const rechazarActa = () => {
+    if (!acta || acta.status === "RECHAZADA") return;
+    const motivo = observaciones.trim();
+    if (!motivo) {
+      setErrorMotivo(true);
+      setRechazoArmado(false);
+      return;
+    }
+    setErrorMotivo(false);
+    if (!rechazoArmado) {
+      setRechazoArmado(true);
+      return;
+    }
+    setRechazoArmado(false);
+    const rechazo = { tipo: "SUPERVISOR", detalle: motivo } as const;
+    // Parche del acta ABIERTA (la persistencia la hace sincronizarAlVolver
+    // al cerrar/navegar — misma plomería del editor, intacta).
+    useE14Store.getState().editarActaActual({
+      status: "RECHAZADA",
+      rechazo,
+    });
+    // Balde de motivos (misma maquinaria del adaptador — clave
+    // «rechazo:supervisor» con el Set anti-dup de siempre).
+    useE14Store
+      .getState()
+      .contarMotivoNoEnvioActa({ ...acta, status: "RECHAZADA", rechazo });
+    // Flash de confirmación → avance al siguiente acta del lote.
+    setRechazoHecho(true);
+    if (timerRechazoRef.current) clearTimeout(timerRechazoRef.current);
+    timerRechazoRef.current = setTimeout(() => {
+      timerRechazoRef.current = null;
+      setRechazoHecho(false);
+      onNavegar?.(1);
+    }, 1200);
+  };
+
   if (!acta) return null;
   const join = joinDeActa(acta);
   const pildora = pildoraEstadoActa(acta);
   const ubic = acta.ubicacion;
-  const rectValido = Boolean(rect && rect.w >= RECT_MIN_PCT && rect.h >= RECT_MIN_PCT);
+  const rectValido = Boolean(
+    rect && rect.w >= RECT_MIN_PCT && rect.h >= RECT_MIN_PCT,
+  );
+
+  // Foto visible (MOSTRAR ORIGINAL alterna a la cruda si existe).
+  const fotoVisible = verOriginal
+    ? (acta.fotoOriginal ?? originalUrl ?? foto)
+    : foto;
+  const hayOriginal =
+    Boolean(acta.fotoProcesada) &&
+    (Boolean(acta.fotoOriginal) ||
+      Boolean(originalUrl) ||
+      (!sinOriginal && Boolean(cargarOriginal)));
+
+  // ── Datos reconocidos (clasificación DIVIPOL + acta — jamás inventar) ──
+  const c = acta.clasificacion;
+  const pais =
+    c?.municipio != null
+      ? `${c.municipio.nombre} (${c.municipio.codigo})`
+      : (ubic?.municipio ?? "—");
+  const zonaTxt = c?.zona ? `Zona ${c.zona.codigo}` : (ubic?.zona ?? "—");
+  const puesto =
+    c?.puesto != null
+      ? `${c.puesto.codigo} - ${c.puesto.nombre}`
+      : (ubic?.puesto ?? "—");
+  const mesa =
+    c?.mesa != null
+      ? `Mesa ${String(c.mesa).padStart(3, "0")}`
+      : (ubic?.mesa ?? "—");
+  const pagina = acta.pagina ?? c?.pagina ?? null;
+  const kit =
+    c?.kit != null
+      ? String(c.kit)
+      : c?.codigoUnico?.kit != null
+        ? String(c.codigoUnico.kit)
+        : "—";
+  const identificador = formatoIdentificador(
+    c?.codigoUnico?.crudo || acta.codigoBarras || "",
+  );
+  const lugar = c?.puesto?.nombre ?? "";
+  const etiquetaForm = etiquetaFormularioDe(acta);
+  const enviadaAuto = Boolean(acta.enviadoAutomaticamente);
+  const rechazadaYa = acta.status === "RECHAZADA";
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={`Revisión de acta ${acta.titulo}`}
-      onClick={onCerrar}
+      className="fixed inset-0 z-50 flex h-dvh flex-col overflow-hidden bg-[#070b0a] lg:flex-row"
     >
-      <div
-        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#10161f] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center gap-3 border-b border-slate-800 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate font-mono text-xs font-black uppercase tracking-wider text-white">
-              REVISIÓN DE ACTA
-            </h2>
-            <p className="truncate font-mono text-[10px] uppercase tracking-wider text-slate-400">
-              {acta.titulo}
-            </p>
-          </div>
-          {editada && (
-            <span className="rounded-full border border-amber-400/60 bg-amber-400/10 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-400">
-              EDITADA
-            </span>
-          )}
-          <span
-            className={`rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${pildora.clases}`}
+      {/* ════════════════ CANVAS — VISOR DEL DOCUMENTO ════════════════ */}
+      <main className="grid-paper-bg relative flex h-[52vh] shrink-0 flex-col overflow-hidden bg-[#060a09] lg:h-auto lg:min-w-0 lg:flex-1">
+        {/* ── Toolbar flotante de inspección ── */}
+        <div className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 flex-wrap items-center justify-center gap-x-1 gap-y-1 rounded-md border border-[#21362e] bg-[#0d1613]/90 px-3 py-1.5 font-mono text-xs text-gray-300 shadow-2xl backdrop-blur">
+          <button
+            type="button"
+            onClick={() => visorRef.current?.alejar()}
+            disabled={editandoRecorte}
+            title="Reducir zoom"
+            aria-label="Reducir zoom"
+            className="p-1 transition-colors hover:text-emerald-400 disabled:opacity-40"
           >
-            {pildora.label}
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <span className="min-w-[40px] text-center font-bold tabular-nums text-gray-200">
+            {escala != null ? `${Math.round(escala * 100)}%` : "—"}
           </span>
           <button
             type="button"
-            onClick={onCerrar}
-            aria-label="Cerrar revisión del acta"
-            className="min-h-[44px] min-w-[44px] rounded-lg font-mono text-sm text-slate-400 transition hover:bg-white/5 hover:text-white"
+            onClick={() => visorRef.current?.acercar()}
+            disabled={editandoRecorte}
+            title="Aumentar zoom"
+            aria-label="Aumentar zoom"
+            className="p-1 transition-colors hover:text-emerald-400 disabled:opacity-40"
           >
-            ✕
+            <ZoomIn className="h-4 w-4" />
           </button>
-        </header>
+          <span className="h-3 w-px bg-[#21362e]" />
+          {/* AJUSTAR = PANTALLA COMPLETA del acta (pedido del dueño). */}
+          <button
+            type="button"
+            onClick={() => setExpandido((v) => !v)}
+            disabled={editandoRecorte}
+            title={expandido ? "Salir de pantalla completa" : "Ajustar — pantalla completa"}
+            aria-label={expandido ? "Salir de pantalla completa" : "Ver el acta en pantalla completa"}
+            className="p-1 transition-colors hover:text-emerald-400 disabled:opacity-40"
+          >
+            {expandido ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+          </button>
+          {/* ROTAR: hornea (sin envío auto) o gira visual (enviadas auto). */}
+          <button
+            type="button"
+            onClick={() => void rotarFoto()}
+            disabled={!!ocupado || editandoRecorte || !fotoVisible}
+            title={
+              editable
+                ? "Rotar 90° horario (hornea la foto)"
+                : "Rotar la vista 90° horario"
+            }
+            aria-label="Rotar la foto 90 grados"
+            className="p-1 transition-colors hover:text-emerald-400 disabled:opacity-40"
+          >
+            {ocupado === "rotando" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCw className="h-4 w-4" />
+            )}
+          </button>
+          {/* RECORTAR + DESHACER — SOLO actas sin envío automático. */}
+          {editable && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setRect(null);
+                  setEditandoRecorte(true);
+                }}
+                disabled={!!ocupado || editandoRecorte}
+                title="Recortar un área de la foto"
+                aria-label="Recortar la foto"
+                className={`p-1 transition-colors hover:text-emerald-400 disabled:opacity-40 ${
+                  editandoRecorte ? "text-emerald-400" : ""
+                }`}
+              >
+                {ocupado === "recortando" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Crop className="h-4 w-4" />
+                )}
+              </button>
+              {editada && (
+                <button
+                  type="button"
+                  onClick={deshacerEdicion}
+                  disabled={!!ocupado}
+                  title="Devolver la foto a como estaba antes de editar"
+                  aria-label="Deshacer las ediciones de la foto"
+                  className="p-1 text-amber-400 transition-colors hover:text-amber-300 disabled:opacity-40"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </button>
+              )}
+            </>
+          )}
+          {/* CONTRASTE: NORMAL → ALTO → NEGATIVO (ciclo del dashboard). */}
+          <button
+            type="button"
+            onClick={() =>
+              setContraste((m) =>
+                m === "NORMAL" ? "ALTO" : m === "ALTO" ? "NEGATIVO" : "NORMAL",
+              )
+            }
+            disabled={editandoRecorte || !fotoVisible}
+            title={`Contraste: ${contraste === "NORMAL" ? "alto contraste B/N" : contraste === "ALTO" ? "negativo" : "normal"}`}
+            aria-label={`Modo de contraste: ${contraste}`}
+            className={`p-1 transition-colors hover:text-emerald-300 disabled:opacity-40 ${
+              contraste !== "NORMAL" ? "text-emerald-400" : ""
+            }`}
+          >
+            <Contrast className="h-4 w-4" />
+          </button>
+          <span className="h-3 w-px bg-[#21362e]" />
+          {/* SCORE — dato real del pipeline (misma escala /10 de siempre). */}
+          <span
+            className="flex items-center gap-1.5 rounded border border-emerald-400 bg-emerald-500/25 px-2 py-0.5 text-[11px] font-bold tracking-wider text-emerald-400"
+            title="Score de calidad del acta"
+          >
+            <CircleCheck className="h-3 w-3" />
+            SCORE: {scoreTexto(acta.score)}/10
+          </span>
+          {editada && (
+            <span className="rounded border border-amber-400/60 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-400">
+              EDITADA
+            </span>
+          )}
+        </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-          {foto ? (
+        {/* ── Cerrar (✕ flotante) + EDITADA ── */}
+        <button
+          type="button"
+          onClick={onCerrar}
+          aria-label="Cerrar revisión del acta"
+          className="absolute right-3 top-4 z-30 flex h-9 w-9 items-center justify-center rounded-md border border-[#21362e] bg-[#0d1613]/90 font-mono text-sm text-gray-400 shadow-2xl backdrop-blur transition hover:bg-[#12201c] hover:text-white"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        {/* ── Chevrons de navegación entre imágenes procesadas ── */}
+        {onNavegar && !editandoRecorte && (
+          <>
+            <button
+              type="button"
+              onClick={() => onNavegar(-1)}
+              disabled={!posNavegacion || posNavegacion.index <= 1}
+              title="Imagen anterior del lote"
+              aria-label="Imagen anterior del lote"
+              className="absolute left-4 top-1/2 z-10 flex h-14 w-9 -translate-y-1/2 items-center justify-center rounded border border-[#21362e] bg-[#0d1613]/80 text-gray-400 shadow-lg transition-colors hover:bg-[#12201c] hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ChevronLeft className="h-5 w-5" strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavegar(1)}
+              disabled={
+                !posNavegacion || posNavegacion.index >= posNavegacion.total
+              }
+              title="Imagen siguiente del lote"
+              aria-label="Imagen siguiente del lote"
+              className="absolute right-4 top-1/2 z-10 flex h-14 w-9 -translate-y-1/2 items-center justify-center rounded border border-[#21362e] bg-[#0d1613]/80 text-gray-400 shadow-lg transition-colors hover:bg-[#12201c] hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
+            </button>
+          </>
+        )}
+
+        {/* ── Documento (visor con gestos / modo recorte / sin foto) ── */}
+        <div className="flex min-h-0 w-full flex-1 items-start justify-center px-14 pb-24 pt-16">
+          {fotoVisible ? (
             editandoRecorte ? (
               /* MODO RECORTAR — foto estática (sin zoom): el arrastre dibuja
                  el área; el mapeo % → píxeles naturales queda 1:1. */
-              <div className="flex flex-col gap-2">
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3">
                 <div
                   ref={zonaRecorteRef}
-                  className="relative mx-auto max-w-full overflow-hidden rounded-xl border-2 border-dashed border-[#10b981]/70 bg-white"
+                  className="relative max-h-full max-w-full overflow-hidden rounded border-2 border-dashed border-emerald-500/70 bg-white"
                 >
                   <img
-                    src={foto}
+                    src={fotoVisible}
                     alt={`Foto del acta ${acta.titulo} — marcando área de recorte`}
-                    className="block max-h-[44vh] max-w-full select-none"
+                    className="block max-h-[42vh] max-w-full select-none lg:max-h-[56vh]"
                     draggable={false}
                   />
-                  {/* Overlay de arrastre — cubre EXACTAMENTE la foto (el
-                      wrapper la abraza; touch-none: el dedo dibuja, no hace
-                      scroll). pointer-events auto solo aquí. */}
                   <div
                     className="absolute inset-0 cursor-crosshair touch-none"
                     onPointerDown={onRecorteDown}
@@ -271,7 +647,7 @@ export function ModalRevisor({
                   />
                   {rect && rect.w > 0.5 && rect.h > 0.5 && (
                     <div
-                      className="pointer-events-none absolute border-2 border-dashed border-[#10b981]"
+                      className="pointer-events-none absolute border-2 border-dashed border-emerald-400"
                       style={{
                         left: `${rect.x}%`,
                         top: `${rect.y}%`,
@@ -282,186 +658,362 @@ export function ModalRevisor({
                     />
                   )}
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                <div className="flex items-center gap-2">
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-gray-400">
                     {rectValido
                       ? "ÁREA MARCADA — APLICAR PARA RECORTAR"
                       : "ARRASTRA SOBRE LA FOTO PARA MARCAR EL ÁREA"}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditandoRecorte(false);
-                        setRect(null);
-                      }}
-                      disabled={!!ocupado}
-                      className="min-h-[44px] rounded-xl border border-slate-800 bg-[#090d12] px-3.5 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-300 transition hover:border-slate-700 hover:text-white disabled:opacity-40"
-                    >
-                      CANCELAR
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void aplicarRecorte()}
-                      disabled={!rectValido || !!ocupado}
-                      className="min-h-[44px] rounded-xl bg-[#10b981] px-3.5 font-mono text-[10px] font-black uppercase tracking-wider text-[#090d12] shadow-md shadow-[#10b981]/25 transition hover:bg-[#059669] active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
-                    >
-                      {ocupado === "recortando" ? "RECORTANDO…" : "APLICAR"}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditandoRecorte(false);
+                      setRect(null);
+                    }}
+                    disabled={!!ocupado}
+                    className="min-h-[44px] rounded border border-[#21362e] bg-[#0d1613] px-3.5 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-300 transition hover:border-[#2a4037] hover:text-white disabled:opacity-40"
+                  >
+                    CANCELAR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void aplicarRecorte()}
+                    disabled={!rectValido || !!ocupado}
+                    className="min-h-[44px] rounded bg-emerald-500 px-3.5 font-mono text-[10px] font-black uppercase tracking-wider text-[#04120c] shadow-md shadow-emerald-500/25 transition hover:bg-emerald-400 active:scale-[0.98] disabled:opacity-40 disabled:shadow-none"
+                  >
+                    {ocupado === "recortando" ? "RECORTANDO…" : "APLICAR"}
+                  </button>
                 </div>
               </div>
             ) : (
               /* VISOR — KIT visor-gestos-v1: zoom con la RUEDA del mouse
                  (ancla en el cursor), PELLIZCO con 2 dedos, arrastre para
                  mover y doble clic/toque (ajustar ↔ acercar). fitKey = la
-                 foto: tras rotar/recortar re-ajusta sola. */
-              <div className="relative h-[44vh] shrink-0 overflow-hidden rounded-xl border border-slate-800 bg-[#0a0e13] sm:h-[52vh]">
-                <VisorZoom
-                  ref={visorRef}
-                  fitKey={foto}
-                  ariaLabel="Foto del acta — zoom con la rueda del mouse o pellizco con los dedos"
-                  className="h-full w-full"
-                >
-                  <img
-                    src={foto}
-                    alt={`Foto procesada del acta ${acta.titulo}`}
-                    draggable={false}
-                    onLoad={() => visorRef.current?.ajustar()}
-                    className="block max-h-[50vh] max-w-[76vw] select-none rounded-xl border border-slate-800 bg-white sm:max-w-[46vw]"
-                  />
-                </VisorZoom>
-                <p className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center px-3">
-                  <span className="rounded-full border border-slate-800 bg-[#090d12]/90 px-3 py-1 font-mono text-[9px] uppercase tracking-widest text-slate-400 backdrop-blur">
-                    ZOOM: RUEDA DEL MOUSE O PELLIZCO · MOVER: ARRASTRA · DOBLE TOQUE: AJUSTAR
-                  </span>
-                </p>
-              </div>
+                 foto visible: al alternar original/procesada re-ajusta. */
+              <VisorZoom
+                ref={visorRef}
+                fitKey={`${acta.id}::${verOriginal ? "original" : "procesada"}::${fotoVisible.length}`}
+                rotacion={rotacionVisual}
+                filtro={FILTRO_CONTRASTE[contraste]}
+                onZoomChange={onZoomChange}
+                ariaLabel="Foto del acta — zoom con la rueda del mouse o pellizco con los dedos"
+                className="h-full w-full"
+              >
+                <img
+                  src={fotoVisible}
+                  alt={`Foto ${verOriginal ? "original" : "procesada"} del acta ${acta.titulo}`}
+                  draggable={false}
+                  onLoad={() => visorRef.current?.ajustar()}
+                  className="block max-h-[40vh] max-w-[68vw] select-none border border-white/25 bg-white shadow-[0_0_40px_rgba(0,0,0,0.8)] lg:max-h-[64vh] lg:max-w-[38vw]"
+                />
+              </VisorZoom>
             )
           ) : (
-            <p className="rounded-lg border border-slate-800 bg-[#090d12] px-3 py-4 text-center font-mono text-[10px] uppercase tracking-wider text-slate-400">
+            <p className="rounded-lg border border-[#16231e] bg-[#080d0b] px-4 py-5 text-center font-mono text-[11px] uppercase tracking-wider text-gray-400">
               SIN FOTO PROCESADA EN MEMORIA
             </p>
           )}
-
-          {/* EDITOR — SOLO actas sin envío automático (pedido del dueño):
-              recortar y rotar la foto; las enviadas auto van tal cual. */}
-          {editable && !editandoRecorte && (
-            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-800 bg-[#090d12] px-2.5 py-2">
-              <span className="mr-auto font-mono text-[9px] uppercase tracking-widest text-slate-500">
-                {ocupado
-                  ? "PROCESANDO EDICIÓN…"
-                  : "EDITAR FOTO (SIN ENVÍO AUTOMÁTICO)"}
-              </span>
-              {ocupado && (
-                <span
-                  className="inline-flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-[#10b981]"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <LoaderIcon className="w-3.5 h-3.5 animate-spin" />
-                  {ocupado === "rotando" ? "ROTANDO" : "RECORTANDO"}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => void rotarFoto()}
-                disabled={!!ocupado}
-                title="Rotar 90° horario (hornea la foto)"
-                aria-label="Rotar la foto 90 grados"
-                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-slate-700 px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-300 transition hover:border-brand-green hover:text-brand-green disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <StitchRotateIcon className="w-3.5 h-3.5" />
-                ROTAR
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRect(null);
-                  setEditandoRecorte(true);
-                }}
-                disabled={!!ocupado}
-                title="Recortar un área de la foto"
-                aria-label="Recortar la foto"
-                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-slate-700 px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-300 transition hover:border-brand-green hover:text-brand-green disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <StitchCropIcon className="w-3.5 h-3.5" />
-                RECORTAR
-              </button>
-              {editada && (
-                <button
-                  type="button"
-                  onClick={deshacerEdicion}
-                  disabled={!!ocupado}
-                  title="Devolver la foto a como estaba antes de editar"
-                  aria-label="Deshacer las ediciones de la foto"
-                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-amber-400/50 px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400 transition hover:border-amber-400 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <RefreshIcon className="w-3.5 h-3.5" />
-                  DESHACER
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            {ubic?.departamento && filaInfo("DEPARTAMENTO", ubic.departamento)}
-            {ubic?.municipio && filaInfo("MUNICIPIO / PAÍS", ubic.municipio)}
-            {ubic?.zona && filaInfo("ZONA", ubic.zona)}
-            {ubic?.puesto && filaInfo("PUESTO", ubic.puesto)}
-            {ubic?.mesa && filaInfo("MESA", ubic.mesa)}
-            {acta.tipo && filaInfo("FORMULARIO", acta.tipo)}
-            {filaInfo(
-              "PÁGINA",
-              acta.pagina ? `${acta.pagina.index}/${acta.pagina.total}` : "-/-",
-            )}
-            {filaInfo("SCORE", `${acta.score.toFixed(1)} / 10`)}
-            {filaInfo("INTENTO", `${acta.intento} DE ${acta.maxIntentos}`)}
-            {acta.codigoBarras && filaInfo("CÓDIGO", acta.codigoBarras)}
-            {join && filaInfo("IDENLACE (D22)", join.idEnlace)}
-            {acta.hashSha256 &&
-              filaInfo(
-                "HASH",
-                acta.hashSha256 === "EN COLA"
-                  ? "EN COLA"
-                  : `${acta.hashSha256.slice(0, 12)}…`,
-              )}
-          </div>
-
-          {acta.rechazo && (
-            <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-red-300">
-              {acta.rechazo.tipo} — {acta.rechazo.detalle}
-            </p>
-          )}
-
-          <PublicacionChip publicacion={publicacion} />
         </div>
 
-        <footer className="flex items-center justify-between gap-2 border-t border-slate-800 px-4 py-3">
-          <p className="font-mono text-[9px] uppercase tracking-widest text-slate-500">
-            {acta.enviadoAutomaticamente
-              ? `ENVIADA AUTO · ${acta.enviadoAutomaticamente}`
-              : "SIN ENVÍO AUTOMÁTICO"}
+        {/* ── MOSTRAR ORIGINAL (toggle foto cruda ↔ procesada) ── */}
+        <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 lg:bottom-16">
+          {hayOriginal && (
+            <button
+              type="button"
+              onClick={() => void alternarOriginal()}
+              disabled={cargandoOriginal}
+              className="pointer-events-auto flex items-center gap-1.5 rounded border border-[#21362e] bg-[#0d1613]/90 px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-wider text-gray-200 shadow-lg backdrop-blur transition-colors hover:bg-[#12201c] hover:text-white disabled:opacity-60"
+            >
+              {cargandoOriginal ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+              ) : verOriginal ? (
+                <EyeOff className="h-3.5 w-3.5 text-gray-400" />
+              ) : (
+                <Eye className="h-3.5 w-3.5 text-gray-400" />
+              )}
+              {cargandoOriginal
+                ? "CARGANDO ORIGINAL…"
+                : verOriginal
+                  ? "MOSTRAR PROCESADA"
+                  : "MOSTRAR ORIGINAL"}
+            </button>
+          )}
+        </div>
+
+        {/* ── Franja de metadata (footer del canvas) ── */}
+        <footer className="absolute bottom-3 left-1/2 z-20 flex w-[94%] max-w-4xl -translate-x-1/2 items-center justify-center gap-2 rounded border border-[#21362e] bg-[#0b1310]/95 px-4 py-2 text-center font-mono shadow-2xl backdrop-blur">
+          <span
+            className="inline-block h-2 w-2 shrink-0 rounded-full border border-emerald-400 bg-emerald-500/30"
+            aria-hidden
+          />
+          <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium tracking-wide text-gray-300">
+            {posNavegacion && (
+              <>
+                <span className="font-bold text-emerald-400">
+                  IMG {posNavegacion.index}/{posNavegacion.total}
+                </span>
+                <span aria-hidden>·</span>
+              </>
+            )}
+            <span>{etiquetaForm}</span>
+            <span aria-hidden>·</span>
+            <span className="font-bold">
+              PÁG {pagina ? `${pagina.index}/${pagina.total}` : "-/-"}
+            </span>
+            <span className="text-gray-600" aria-hidden>
+              |
+            </span>
+            <span className="font-normal text-gray-400">
+              PAÍS {c?.municipio ? `${c.municipio.codigo} - ${c.municipio.nombre}` : (ubic?.municipio ?? "—")}
+            </span>
+            <span className="font-normal text-gray-400">
+              MESA {c?.mesa != null ? String(c.mesa).padStart(3, "0") : (ubic?.mesa ?? "—")}
+            </span>
+            {lugar && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="font-normal text-gray-400 uppercase">{lugar}</span>
+              </>
+            )}
           </p>
-          <div className="flex items-center gap-2">
+        </footer>
+      </main>
+
+      {/* ════════════════ PANEL DEL AUDITOR (SIDEBAR) ════════════════ */}
+      <aside
+        className={`w-full shrink-0 overflow-y-auto border-t border-[#16231e] bg-[#0c1210] p-5 lg:w-[380px] lg:border-l lg:border-t-0 ${
+          expandido ? "hidden" : "flex flex-col gap-6"
+        }`}
+      >
+        {/* ── ENVÍO AUTOMÁTICO + datos reconocidos ── */}
+        <div className="overflow-hidden rounded border border-[#16231e] bg-[#080d0b]">
+          <div className="flex items-center justify-between gap-2 border-b border-[#16231e]/60 bg-[#0d1613]/90 px-3 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              {enviadaAuto ? (
+                <>
+                  <Check className="h-4 w-4 shrink-0 text-emerald-400" strokeWidth={2.5} />
+                  <span className="truncate font-mono text-xs font-bold uppercase tracking-wider text-gray-200">
+                    ENVÍO AUTOMÁTICO
+                  </span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+                  <span className="truncate font-mono text-xs font-bold uppercase tracking-wider text-gray-200">
+                    SIN ENVÍO AUTOMÁTICO
+                  </span>
+                </>
+              )}
+            </div>
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${pildora.clases}`}
+            >
+              {pildora.label}
+            </span>
+          </div>
+          <div className="space-y-3 p-3.5 font-mono text-xs">
+            {enviadaAuto && (
+              <p className="text-center text-[10px] uppercase tracking-wider text-emerald-400/90">
+                ENVIADA AUTO · {acta.enviadoAutomaticamente}
+              </p>
+            )}
+            {/* VERIFICACIÓN DE IDENTIFICADOR / CÓDIGO */}
+            {identificador && (
+              <div>
+                <span className="mb-1 block text-center text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                  Verificación de Identificador / Código
+                </span>
+                <div
+                  title="Código único impreso: 7100 · KIT · TIPO (2=delegados, 3=transmisión) · VER · PÁG · TOTAL"
+                  className="rounded border border-[#16231e] bg-[#060a09] px-2 py-1.5 text-center"
+                >
+                  <span className="text-sm font-bold tracking-widest text-emerald-400">
+                    {identificador}
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <DatoPanel etiqueta="País" valor={pais} />
+              <DatoPanel etiqueta="Zona" valor={zonaTxt} />
+              <DatoPanel etiqueta="Puesto" valor={puesto} />
+              <DatoPanel etiqueta="Mesa" valor={mesa} />
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-[#16231e]/40 pt-2">
+              <DatoPanel etiqueta="Origen" valor={origenDe(acta)} />
+              <DatoPanel
+                etiqueta="Página"
+                valor={pagina ? `${pagina.index} DE ${pagina.total}` : "- DE -"}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-[#16231e]/40 pt-2">
+              <DatoPanel etiqueta="Kit" valor={kit} />
+              <DatoPanel
+                etiqueta="Código de Barras"
+                valor={acta.codigoBarras || "—"}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-[#16231e]/40 pt-2">
+              <DatoPanel
+                etiqueta="Intento"
+                valor={`${acta.intento} DE ${acta.maxIntentos}`}
+              />
+              <DatoPanel
+                etiqueta="Hash"
+                valor={
+                  !acta.hashSha256
+                    ? "—"
+                    : acta.hashSha256 === "EN COLA"
+                      ? "EN COLA"
+                      : `${acta.hashSha256.slice(0, 12)}…`
+                }
+              />
+            </div>
+            {join && (
+              <div className="border-t border-[#16231e]/40 pt-2">
+                <DatoPanel etiqueta="IdEnlace (D22)" valor={join.idEnlace} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Banner de rechazo (estado del acta) ── */}
+        {acta.rechazo && (
+          <p className="rounded border border-red-900/60 bg-[#1b0d0e] px-3 py-2 font-mono text-[10px] uppercase leading-relaxed tracking-wider text-red-400">
+            {acta.rechazo.tipo} — {acta.rechazo.detalle}
+          </p>
+        )}
+
+        <div className="mt-auto space-y-6 border-t border-[#16231e] pt-4">
+          {/* ── OBSERVACIONES (motivo de la decisión — obligatorio) ── */}
+          <div>
+            <label
+              htmlFor="masiva-observaciones-input"
+              className="mb-2 block font-mono text-xs font-bold uppercase tracking-wider text-gray-400"
+            >
+              OBSERVACIONES
+            </label>
+            <textarea
+              id="masiva-observaciones-input"
+              value={observaciones}
+              onChange={(e) => {
+                setObservaciones(e.target.value);
+                if (errorMotivo) setErrorMotivo(false);
+                if (rechazoArmado) setRechazoArmado(false);
+              }}
+              placeholder="Ingrese el motivo de la decisión..."
+              rows={4}
+              aria-invalid={errorMotivo || undefined}
+              aria-describedby={
+                errorMotivo ? "masiva-observaciones-error" : undefined
+              }
+              className={`w-full resize-none rounded border bg-[#080d0b] p-3 text-xs text-gray-200 placeholder-gray-600 transition-colors focus:outline-none focus:ring-1 ${
+                errorMotivo
+                  ? "border-red-500/70 focus:border-red-500 focus:ring-red-500"
+                  : "border-[#16231e] focus:border-emerald-500 focus:ring-emerald-500"
+              }`}
+            />
+            {errorMotivo && (
+              <p
+                id="masiva-observaciones-error"
+                role="alert"
+                className="mt-1 font-mono text-[10px] uppercase tracking-wider text-red-400"
+              >
+                Ingrese el motivo de la decisión
+              </p>
+            )}
+          </div>
+
+          {/* ── ACCIONES DEL SUPERVISOR ── */}
+          <div>
+            <div className="mb-3 flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider text-gray-400">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" />
+              <span>ACCIONES DEL SUPERVISOR</span>
+            </div>
+            {rechazoHecho ? (
+              <p
+                role="status"
+                className="flex w-full items-center justify-center gap-2 rounded border border-red-900/60 bg-[#1b0d0e] px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-red-400"
+              >
+                <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                RECHAZADA — REGISTRADA
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={rechazarActa}
+                disabled={rechazadaYa}
+                title={
+                  rechazadaYa
+                    ? "Esta acta ya está rechazada"
+                    : "Rechazar el acta y solicitar reescaneo (motivo obligatorio)"
+                }
+                className={`flex w-full items-center justify-center gap-2 rounded border px-4 py-2.5 font-bold text-xs uppercase tracking-wider transition-colors ${
+                  rechazoArmado
+                    ? "animate-pulse border-red-500 bg-red-500/25 text-red-300"
+                    : "border-red-900/60 bg-[#1b0d0e] text-red-400 hover:bg-[#281315] hover:text-red-300"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
+                {rechazadaYa
+                  ? "RECHAZADA"
+                  : rechazoArmado
+                    ? "¿CONFIRMAR RECHAZO?"
+                    : "RECHAZAR (REESCANEAR)"}
+              </button>
+            )}
+          </div>
+
+          {/* ── Nota de auditoría ── */}
+          <div className="flex items-start gap-2 border-t border-[#16231e]/40 pt-2">
+            <Info className="mt-px h-3.5 w-3.5 shrink-0 text-gray-400" />
+            <span className="font-mono text-[10px] uppercase tracking-wider text-gray-500">
+              ESTA ACCIÓN QUEDARÁ REGISTRADA EN LA AUDITORÍA.
+            </span>
+          </div>
+
+          {/* ── Publicación en el monitor (D27) + VER EN MONITOR ── */}
+          <div className="space-y-2">
+            <PublicacionChip publicacion={publicacion} />
             {publicacion?.estado === "publicada" && join && onVerEnMonitor && (
               <button
                 type="button"
-                onClick={() => onVerEnMonitor(join.idEnlace, join.mesa, join.tipo)}
-                className="min-h-[44px] rounded-xl bg-[#10b981] px-4 font-mono text-[11px] font-black uppercase tracking-wider text-[#090d12] shadow-md shadow-[#10b981]/25 transition hover:bg-[#059669] active:scale-[0.98]"
+                onClick={() =>
+                  onVerEnMonitor(join.idEnlace, join.mesa, join.tipo)
+                }
+                className="min-h-[44px] w-full rounded bg-emerald-500 px-4 font-mono text-[11px] font-black uppercase tracking-wider text-[#04120c] shadow-md shadow-emerald-500/25 transition hover:bg-emerald-400 active:scale-[0.98]"
               >
                 VER EN MONITOR
               </button>
             )}
-            <button
-              type="button"
-              onClick={onCerrar}
-              className="min-h-[44px] rounded-xl border border-slate-800 bg-[#090d12] px-4 font-mono text-[11px] font-bold uppercase tracking-wider text-slate-300 transition hover:border-slate-700 hover:text-white"
-            >
-              CERRAR
-            </button>
           </div>
-        </footer>
+
+          {/* ── Cerrar (visible siempre — el redesign no tiene scrim-clic) ── */}
+          <button
+            type="button"
+            onClick={onCerrar}
+            className="min-h-[44px] w-full rounded border border-[#16231e] bg-[#080d0b] px-4 font-mono text-[11px] font-bold uppercase tracking-wider text-gray-300 transition hover:border-[#2a4037] hover:text-white"
+          >
+            CERRAR
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/** Celda de dato del panel del auditor (etiqueta caps + caja mono). */
+function DatoPanel({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <div className="min-w-0">
+      <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-gray-400">
+        {etiqueta}
+      </span>
+      <div
+        className="truncate rounded border border-[#16231e] bg-[#060a09] px-2 py-1.5 font-mono text-xs text-gray-200"
+        title={valor}
+      >
+        {valor}
       </div>
     </div>
   );

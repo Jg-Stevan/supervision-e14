@@ -260,7 +260,14 @@ export interface Acta {
     /** KIT e14-gate-v2 (FASE G2): marcador OBLIGATORIO fallido — la zona de
      *  votos del acta no tiene tinta (fallo 2026-10-16: acta sin votos
      *  10/10 y auto-enviada). Rechazo directo → se repite la captura. */
-    | { tipo: "SIN_VOTOS"; detalle: string };
+    | { tipo: "SIN_VOTOS"; detalle: string }
+    /** KIT visor-masiva-redesign-v1 (RECHAZAR del panel del supervisor):
+     *  el SUPERVISOR rechaza el acta abierta y solicita REESCANEO con
+     *  motivo obligatorio (observaciones). Aditivo al union — los
+     *  consumidores existentes son display-only (motivo → fila) o
+     *  comparan tipos concretos (ILEGIBLE/BAJO); nadie hace exhaustivo
+     *  sobre esta unión. */
+    | { tipo: "SUPERVISOR"; detalle: string };
   intento: number;
   maxIntentos: number; // "INTENTO 1 DE 4"
   enviadoAutomaticamente?: string | null; // "16:42:00" · e66: null EXPLÍCITO en la gemela DUPLICADA (el envío no es suyo — plan P2); undefined = sin envío aún

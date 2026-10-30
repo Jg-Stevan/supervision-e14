@@ -20,7 +20,7 @@
  * modal en modal-revisor.tsx, chip en publicacion-chip.tsx. La ruta pública
  * `screens/MasivaView.tsx` queda como barrel de compatibilidad.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cerrarActaMasiva,
   useE14Store,
@@ -37,6 +37,16 @@ import { prescanYIniciar, usePrescanQrEstado } from "@/modules/digitalizador/lib
 // KIT e14-gama-adaptativa-v1 (D74): chip de gama adaptada — el tier detectado
 // consume presupuestos de recursos en BAJO/MEDIO (transparencia del dueño).
 import { planGamaActual, refrescarPlanGama, type PlanGama } from "@/modules/digitalizador/lib/e14/gama";
+// KIT visor-masiva-redesign-v1: lote DEMO (6 fotos REALES del dueño) — entra
+// por agregarFiles (misma puerta de siempre, pipeline completo sin atajos).
+import { fetchActasDemo } from "@/modules/digitalizador/lib/e14/actas-demo";
+// Traza de la siembra demo (mismo logger del módulo — D51 formato congelado).
+import { logger } from "@/modules/digitalizador/lib/logger";
+// KIT visor-masiva-redesign-v1 — MOSTRAR ORIGINAL: el acta ENVIADA duerme su
+// foto original fuera (cleanup §3 de e68), pero el REGISTRO conserva el
+// archivo original (lo consume REINTENTAR/PROCESAR IGUAL) — el visor lo
+// materializa on-demand para alternar procesada ↔ cruda.
+import { leerRegistro } from "@/modules/digitalizador/lib/e14/masiva/cola";
 // D34 — KIT e14-metricas-corrida-v1: informe de comportamiento de la carga
 // (corrida viva + historial + export JSON) — datos reales para diagnosticar.
 import InformeCorrida from "../InformeCorrida";
@@ -118,6 +128,86 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
     setRevisorAbierto(false);
     void sincronizarAlVolver().finally(() => cerrarActaMasiva());
   };
+
+  // ── KIT visor-masiva-redesign-v1 — NAVEGACIÓN ENTRE IMÁGENES PROCESADAS ──
+  // Los chevrons del visor recorren las filas LISTAS de la bandeja (las
+  // imágenes que ya tienen desenlace, en su orden). Cada salto persiste el
+  // acta abierta (sincronizarAlVolver — misma plomería del cierre) y carga
+  // la vecina por la puerta de ABRIR (abrirActa: auto-pausa + IDB).
+  // NOTA de identidad (fix auditoría 2-c C4 del store): la fila vive en
+  // espacio "masiva-*" y el acta en "acta-*" — la fila abierta ACTUAL se
+  // resuelve con origenAbierto (el store la estampa en ABRIR), JAMÁS
+  // comparando actaAbierta.id contra ids de fila.
+  const origenAbierto = useMasivaStore((s) => s.origenAbierto);
+  const idsNavegables = useMemo(
+    () => filas.filter((f) => f.estado === "LISTA").map((f) => f.id),
+    [filas],
+  );
+  const posNavegacion = useMemo(() => {
+    if (!origenAbierto) return null;
+    const idx = idsNavegables.indexOf(origenAbierto);
+    return idx >= 0
+      ? { index: idx + 1, total: idsNavegables.length }
+      : null;
+  }, [idsNavegables, origenAbierto]);
+  const navegarActa = useCallback(
+    async (direccion: -1 | 1) => {
+      if (!origenAbierto) return;
+      const idx = idsNavegables.indexOf(origenAbierto);
+      if (idx < 0) return;
+      const destino = idsNavegables[idx + direccion];
+      if (!destino) return;
+      await sincronizarAlVolver();
+      await abrirActa(destino);
+    },
+    [origenAbierto, idsNavegables, sincronizarAlVolver, abrirActa],
+  );
+
+  // MOSTRAR ORIGINAL — materialización on-demand del archivo ORIGINAL del
+  // registro (Blob/File que duerme en IDB — el mismo que consume REINTENTAR).
+  // Solo-lectura: no toca el acta ni el registro (jamás re-persiste).
+  // NOTA de identidad: el modal pregunta por el acta ABIERTA — el registro
+  // se resuelve con origenAbierto (espacio "masiva-*"; el acta vive en
+  // "acta-*" — prefijos distintos, jamás comparar directo).
+  const cargarOriginal = useCallback(async (_actaId: string): Promise<string | null> => {
+    try {
+      const idRegistro = useMasivaStore.getState().origenAbierto;
+      if (!idRegistro) return null;
+      const registro = await leerRegistro(idRegistro);
+      const archivo = registro.archivo;
+      if (!(archivo instanceof Blob)) return null;
+      return await new Promise<string | null>((resolve) => {
+        const fr = new FileReader();
+        fr.onload = () =>
+          resolve(typeof fr.result === "string" ? fr.result : null);
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(archivo);
+      });
+    } catch {
+      return null; // registro ausente/IDB caído → el toggle degrada honesto
+    }
+  }, []);
+
+  // ── KIT visor-masiva-redesign-v1 — SEMBRADO DEL LOTE DEMO (preview) ──
+  // reiniciarEnvios (cola + ledger — mismo corte del dueño) → las 6 fotos
+  // REALES entran como Files → pre-scan QR + runner de siempre.
+  const [demoSembrando, setDemoSembrando] = useState(false);
+  const sembrarDemo = useCallback(async () => {
+    if (demoSembrando || corriendo) return;
+    setDemoSembrando(true);
+    try {
+      await reiniciarEnvios();
+      const archivos = await fetchActasDemo();
+      await agregarFiles(archivos);
+      await prescanYIniciar();
+    } catch (error) {
+      // ingesta fallida — la bandeja queda como está; la traza queda viva
+      // (mismo gesto del adaptador: la publicación jamás muere en silencio).
+      logger.info(`[e14] demo: siembra falló (${String(error)})`);
+    } finally {
+      setDemoSembrando(false);
+    }
+  }, [demoSembrando, corriendo, reiniciarEnvios, agregarFiles]);
 
   // Al montar: cargarFilas() (incluye recuperarCola — zombis fuera) +
   // sincronizarAlVolver() al regresar de REVISIÓN (kit §6). Acciones de
@@ -499,6 +589,24 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
               </button>
             )}
 
+            {/* KIT visor-masiva-redesign-v1 — botón DEMO del preview: siembra
+                el lote real del dueño (6 fotos) y arranca el pipeline. */}
+            <button
+              type="button"
+              onClick={() => void sembrarDemo()}
+              disabled={demoSembrando || corriendo}
+              aria-label="Sembrar el lote demo de 6 fotos reales y procesarlo"
+              title="Siembra el lote demo (6 fotos reales) y procesa la cola"
+              className="min-h-[44px] px-3 rounded-xl border border-amber-500/50 bg-amber-500/10 text-amber-300 font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer hover:bg-amber-500/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              {demoSembrando ? (
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              ) : (
+                <span className="w-2 h-2 rounded-full border border-amber-400" />
+              )}
+              {demoSembrando ? "SEMBRANDO…" : "DEMO ×6"}
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -668,6 +776,9 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
         publicacion={publicacionAbierta}
         onVerEnMonitor={onVerEnMonitor}
         onCerrar={cerrarRevisor}
+        posNavegacion={posNavegacion}
+        onNavegar={(d) => void navegarActa(d)}
+        cargarOriginal={cargarOriginal}
       />
     </section>
   );
