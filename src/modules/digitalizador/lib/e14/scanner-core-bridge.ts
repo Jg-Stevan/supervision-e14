@@ -30,6 +30,26 @@
  * este pipeline — la fuente carga el acta E-14 REAL incluida (§1) y la trata
  * EXACTAMENTE como un `archivo` de IMPORTAR (mismo File → fileToCaptureDataUrl
  * → F-IMPORT: EXIF/12MP). El mock de la fase gráfica se retiró.
+ *
+ * ── R7b — PARTICIÓN DEL BRIDGE (docs/revision-v1/03a-digitalizador-nucleo
+ *    §7; movimientos move-only, un commit por módulo) ─────────────────────
+ * Este archivo queda como FACHADA del núcleo: aquí viven el pipeline ×2, la
+ * clase RealCoreBridge y TODO lo público (RealCoreBridge,
+ * OpcionesEscaneoConTimeout, marcoPerdonadoPorLectura — get-bridge.ts,
+ * masiva/runner.ts y __tests__/gate.test.ts siguen importando de aquí SIN
+ * cambios). Lo auxiliar vive ahora en módulos por responsabilidad:
+ *   · gate.ts                    (R7a/M3)  — desenlace unificado (criterio)
+ *   · calidad.ts                 (R7b/M1)  — medición del acta + score §4.1
+ *   · ocr-escalonado-runner.ts   (R7b/M2)  — runner RapidOCR + banda dirigida
+ *   · sim-assets.ts              (R7b/M5a) — assets SIM + ciclo/caché §G/§D3
+ *   · acta-factory.ts            (R7b/M5b) — construirActa/firmas/capturarFrame
+ *   · auditoria.ts               (R7b/M4)  — payload del registro del desenlace
+ *   · qr-zxing.ts                (R7b/M10) — loader zxing-wasm (antes en masiva/)
+ * PENDIENTE (dueño, r7c/R8): unificar los CUERPOS gemelos de pipeline()/
+ * pipelineRecorte() (M6 — banda dirigida, clasificación+lazo, escudo e71,
+ * log de auditoría ~60 l ×2), la extracción rapidocr (R4/M8) y el
+ * vendor/jsQR.js que orientacion-qr aún toma de masiva/vendor (activo
+ * byte-idéntico, red line 9).
  */
 import {
   detectDocumentEdgesDetail,
