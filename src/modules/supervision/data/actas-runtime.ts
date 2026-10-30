@@ -8,8 +8,8 @@
  * procesada + encabezado impreso verbatim). La MISMA forma del loader:
  * `ActaRealLista` (reexportada del módulo estático — una sola fuente).
  *
- * VALIDACIÓN (D25 a/b/d) contra el catálogo DIVIPOLA (`CARGAR_CATALOGO()` —
- * import de solo-lectura; el adaptador NO cambia): (a) `idEnlace` existe;
+ * VALIDACIÓN (D25 a/b/d) contra el catálogo DIVIPOLA (`cargarCatalogoDivipola()` —
+ * Result de solo-lectura; jamás lanza, C1): (a) `idEnlace` existe;
  * (b) `mesa` ≤ `totalMesas`; (d) página dentro de rango. La que falla NO se
  * publica → `BLOQUEADA: <motivo>` en consola y en el desenlace que el
  * adaptador muestra en la bandeja (cuarentena); el resto sigue.
@@ -31,7 +31,7 @@
 
 import type { FormularioTipo, FotoActa, ImpresionActa } from "../domain/acta";
 import type { ActaRealLista } from "./actas-reales/actas-reales";
-import { CARGAR_CATALOGO } from "./divipola-adapter";
+import { cargarCatalogoDivipola } from "./divipola-adapter";
 // KIT recepcion-actas-v1 (D28): toda publicación deja su entrada en el
 // log de RECEPCIÓN (PUBLICADA/BLOQUEADA) — el embudo es este módulo.
 import { registrarRecepcion } from "./recepcion-log";
@@ -123,10 +123,17 @@ export async function publicarActaMasiva(
 ): Promise<ResultadoPublicacion> {
   const clave = `${entrada.idEnlace}::${entrada.mesa}`;
 
-  // (a) idEnlace existe en el catálogo (solo-lectura — D25).
-  const registro = CARGAR_CATALOGO().find((r) => r.idEnlace === entrada.idEnlace);
+  // (a) idEnlace existe en el catálogo (solo-lectura — D25). C1: el
+  // adaptador devuelve Result — catálogo no disponible → BLOQUEADA
+  // (cuarentena), jamás una excepción en la publicación.
+  const catalogo = cargarCatalogoDivipola();
+  const registro = catalogo.ok
+    ? catalogo.catalogo.find((r) => r.idEnlace === entrada.idEnlace)
+    : undefined;
   if (!registro) {
-    const motivo = `(a) idEnlace "${entrada.idEnlace}" ausente en el catálogo DIVIPOLA`;
+    const motivo = catalogo.ok
+      ? `(a) idEnlace "${entrada.idEnlace}" ausente en el catálogo DIVIPOLA`
+      : `(a) catálogo DIVIPOLA no disponible (${catalogo.motivo})`;
     registrarRecepcion({
       fecha: Date.now(),
       origen: "carga-masiva",

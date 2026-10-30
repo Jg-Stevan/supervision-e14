@@ -12,7 +12,7 @@
  * ambos son la clave de dominio DELEGADOS).
  *
  * VALIDACIÓN (D25 a–e) de CADA acta contra el catálogo DIVIPOLA
- * (`CARGAR_CATALOGO()` — import de solo-lectura; el adaptador NO cambia):
+ * (`cargarCatalogoDivipola()` — Result de solo-lectura; jamás lanza, C1):
  * (a) `idEnlace` existe en el catálogo; (b) `mesa` ≤ `totalMesas` del
  * puesto; (c) `formulario` es clave conocida del dominio; (d) páginas
  * 1..N completas y continuas; (e) asset importable. La que falla NO se
@@ -35,7 +35,7 @@ import type {
   FotoActa,
   ImpresionActa,
 } from "../../domain/acta";
-import { CARGAR_CATALOGO } from "../divipola-adapter";
+import { cargarCatalogoDivipola } from "../divipola-adapter";
 import manifestBruto from "./actas-reales-manifest.json";
 
 // ─── Assets (imports estáticos — Next entrega { src, width, height }) ──────
@@ -233,7 +233,15 @@ function ingestar(): ResultadoIngesta {
   }
 
   // Catálogo DIVIPOLA (solo-lectura) para las validaciones (a)/(b).
-  const catalogo = new Map(CARGAR_CATALOGO().map((r) => [r.idEnlace, r]));
+  // C1: el adaptador devuelve Result — si el catálogo está BLOQUEADA
+  // (validación estructural) el manifest COMPLETO va a cuarentena (nada
+  // se publica — honesto) y el loader NUNCA lanza.
+  const catalogoResultado = cargarCatalogoDivipola();
+  if (!catalogoResultado.ok) {
+    bloquear("(manifest)", `catálogo DIVIPOLA no disponible — ${catalogoResultado.motivo}`);
+    return { actas: {}, bloqueadas };
+  }
+  const catalogo = new Map(catalogoResultado.catalogo.map((r) => [r.idEnlace, r]));
 
   const actas: Record<string, ActaRealLista> = {};
 
