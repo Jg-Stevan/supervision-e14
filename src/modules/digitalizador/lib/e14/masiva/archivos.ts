@@ -236,12 +236,18 @@ export function parecePdfMasiva(archivo: File): boolean {
 
 /** Guard del kit T2.2 que NO invalida el lote (viajan junto a las imágenes
  *  extraídas — el store los convierte en filas ERROR con motivo corto).
- *  D60 añade LIMITE_PAGINAS_PDF (una fila por PDF que exceda el tope). */
+ *  D60 añade LIMITE_PAGINAS_PDF (una fila por PDF que exceda el tope).
+ *  R5 (M-1 de 03b-digitalizador-masiva) añade los tres topes de bytes:
+ *  TOPE_BYTES_ENTRADA / RATIO_SOSPECHOSO / TOPE_BYTES_COMPRIMIDO — rechazos
+ *  TRAZABLES por entrada (o del comprimido entero), jamás tumban la cola. */
 export type MotivoExtraccion =
   | "PROTEGIDO_O_CORRUPTO"
   | "ARCHIVO_ANIDADO"
   | "LIMITE_500_POR_COMPRIMIDO"
-  | "LIMITE_PAGINAS_PDF";
+  | "LIMITE_PAGINAS_PDF"
+  | "TOPE_BYTES_ENTRADA"
+  | "RATIO_SOSPECHOSO"
+  | "TOPE_BYTES_COMPRIMIDO";
 
 export interface ErrorExtraccion {
   nombre: string;
@@ -263,20 +269,190 @@ function nombreDeEntrada(ruta: string): string {
   return ruta.split("/").pop() ?? ruta;
 }
 
-/** File desde una entrada extraída (mismo contenido, nombre plano).
- *  `.slice()` → copia con ArrayBuffer propio (el typing estricto de TS 5.7
- *  no acepta la vista genérica como BlobPart). */
-function archivoDeEntrada(nombre: string, datos: Uint8Array): File {
-  return new File([datos.slice().buffer as ArrayBuffer], nombre, {
+/** File desde las PARTES descomprimidas de una entrada (nombre plano).
+ *  R5 (M-1): SIN copia manual — antes era `datos.slice()` (duplicaba el
+ *  buffer de cada entrada; con cientos de fotos eran cientos de copias).
+ *  El constructor de File YA copia los bytes una vez por especificación
+ *  (BlobPart se copia al blob) — el slice extra duplicaba ese costo. Los
+ *  chunks que entrega fflate por `ondata` son copias independientes
+ *  (fflate 0.8.3 hace `slc()` interno antes del callback — nunca son vistas
+ *  reutilizable) y node-unrar-js materializa buffers propios; el cast
+ *  DOCUMENTA ese contrato (jamás SharedArrayBuffer) sin transformar nada
+ *  en runtime. */
+function archivoDePartes(nombre: string, partes: Uint8Array[]): File {
+  return new File(partes as Uint8Array<ArrayBuffer>[], nombre, {
     lastModified: Date.now(),
   });
 }
 
+// ---------- R5 — GUARD de comprimidos (M-1: zip bomb / RAM desbocada) ----------
+
+/** R5 (M-1 de 03b-digitalizador-masiva, recomendación #4) — Topes de bytes
+ *  para zip/rar. Hoy el comprimido se descomprimía COMPLETO en RAM antes de
+ *  filtrar (unzipSync → Record<string,Uint8Array>) y el tope de 500 solo
+ *  contaba ARCHIVOS: un zip de 500×100 MB (o 1 entrada de GB) revientaba la
+ *  pestaña antes del tope. Doctrina del conservador: ante duda, RECHAZAR la
+ *  entrada con traza (fila ERROR trazable) es mejor que consumir RAM — la
+ *  cola jamás se tumba (los rechazos viajan como filas, patrón kit T2.2).
+ *
+ *  Los tres topes son tuneables por llamada (OpcionesGuardaR5 — el default
+ *  es la constante de abajo) para que el dueño los ajuste sin tocar código
+ *  y para que los tests puedan ejercitarlos con fixtures chicas. */
+export interface OpcionesGuardaR5 {
+  /** Techo ACUMULADO de bytes descomprimidos por comprimido (default 2 GB). */
+  topeBytesComprimido?: number;
+  /** Techo de bytes descomprimidos POR ENTRADA (default 128 MB). */
+  topeBytesEntrada?: number;
+  /** Ratio descomprimido/comprimido sospechoso (default 100). */
+  ratioSospechoso?: number;
+}
+
+/** R5 — Techo acumulado por comprimido: 2 GB (propuesta de la misión +
+ *  M-1). Una carga real de 500 fotos (el tope) × ~4 MB vive holgada; lo que
+ *  excede esto ya no es una carga de actas. */
+const TOPE_BYTES_COMPRIMIDO_DEFAULT = 2 * 1024 ** 3;
+/** R5 — Techo por entrada: 128 MB. Una foto real de acta (4032² JPEG/HEIC)
+ *  vive entre 1-6 MB; 128 MB da margen ×20 para cámaras enormes y corta
+ *  cualquier entrada que pretenda hincharse sola. */
+const TOPE_BYTES_ENTRADA_DEFAULT = 128 * 1024 ** 2;
+/** R5 — Ratio descomprimido/comprimido sospechoso (>100). Los formatos de
+ *  foto reales (JPEG/HEIC/WEBP/PNG/GIF) ya viajan comprimidos: ratio ≈ 1.
+ *  >100 significa contenido fabricado para hincharse (zip bomb). Caso borde
+ *  documentado: un BMP escaneado de página casi vacía puede pasar de 100 en
+ *  condiciones legítimas — ante duda se rechaza con traza (doctrina) y el
+ *  dueño puede subir el umbral vía OpcionesGuardaR5. */
+const RATIO_SOSPECHOSO_DEFAULT = 100;
+/** R5 — Piso de bytes descomprimidos para que el ratio decida: debajo de
+ *  1 MB el riesgo de RAM es trivial (el techo acumulado cubre el volumen)
+ *  y así no se rechazan entradas chicas legítimas por ruido de cabecera. */
+const RATIO_PISO_DESCOMPRIMIDO = 1024 * 1024;
+/** R5 — Trozo de empuje al stream de fflate: define la granularidad con la
+ *  que se ABORTA la extracción (64 KB comprimidos × ratio 100 ≈ 6.4 MB de
+ *  pico transitorio por callback — la peor mentira de cabecera queda acotada
+ *  a un solo chunk antes del corte). */
+const CHUNK_PUSH_ZIP = 1 << 16;
+
+/** Veredicto de contabilización de un chunk/entrada REAL descomprimido.
+ *  RETENER: sigue normal · DESCARTAR: la entrada perdió su guard en vuelo
+ *  (fila ya dejada — el caller tira sus chunks y sigue con el resto) ·
+ *  ABORTAR: techo acumulado reventado (fila ya dejada — el caller CORTA
+ *  todo el comprimido; lo extraído viaja parcial). */
+type VeredictoContabilidad = "RETENER" | "DESCARTAR" | "ABORTAR";
+
+/** R5 — Portero de extracción: UNA instancia por comprimido; decide por
+ *  entrada (anidado → extensión → límite 500 → techo/ratio de cabecera) y
+ *  lleva la contabilidad acumulada de bytes descomprimidos REALES (también
+ *  los de entradas descartadas en vuelo: la RAM transitoria es RAM igual).
+ *  Misma semántica EXACTA para zip y para rar — guarda el contrato del kit
+ *  T2.2: anidado y límite dejan SU fila; no-imagen se descarta en silencio;
+ *  nada de esto lanza (jamás tumba la cola — los throws quedan reservados a
+ *  comprimido ilegible/protegido/corrupto, como desde siempre). */
+function crearPortero(
+  nombreComprimido: string,
+  errores: ErrorExtraccion[],
+  opciones?: OpcionesGuardaR5,
+) {
+  const topeTotal = opciones?.topeBytesComprimido ?? TOPE_BYTES_COMPRIMIDO_DEFAULT;
+  const topeEntrada = opciones?.topeBytesEntrada ?? TOPE_BYTES_ENTRADA_DEFAULT;
+  const ratioMax = opciones?.ratioSospechoso ?? RATIO_SOSPECHOSO_DEFAULT;
+  let aceptados = 0;
+  let bytesAcumulados = 0;
+  let limiteAlcanzado = false;
+  let techoReventado = false;
+  // Estado de la entrada EN VUELO (reset en cada clasificar).
+  let nombreEntradaActual = "";
+  let bytesEntradaActual = 0;
+  let rechazadaActual = false;
+  return {
+    /** ¿Se alcanzó el tope de 500 archivos? (la fila ya fue dejada). */
+    lleno: () => limiteAlcanzado,
+    /** ¿Reventó el techo acumulado? (la fila ya fue dejada). */
+    reventado: () => techoReventado,
+    /** Clasifica una entrada por cabecera/ruta → ¿se extrae? Los rechazos
+     *  por entrada dejan SU fila (trazable). `tamComp`/`tamDesc` vienen de
+     *  la cabecera (undefined en zips «streamed» → los guards reales
+     *  actúan en contabilizar). */
+    clasificar(
+      nombreEntrada: string,
+      tamComp: number | undefined,
+      tamDesc: number | undefined,
+    ): boolean {
+      nombreEntradaActual = nombreDeEntrada(nombreEntrada);
+      bytesEntradaActual = 0;
+      rechazadaActual = false;
+      if (limiteAlcanzado) return false; // tras el límite: SILENCIO (≡ break de siempre)
+      if (EXT_COMPRIMIDO_ANIDADO.test(nombreEntrada)) {
+        errores.push({ nombre: nombreEntradaActual, motivo: "ARCHIVO_ANIDADO" });
+        return false;
+      }
+      if (!EXT_IMAGEN.test(nombreEntrada)) return false; // no-imagen: descartada sin fila (≡ hoy)
+      if (aceptados >= TOPE_POR_COMPRIMIDO) {
+        limiteAlcanzado = true;
+        errores.push({ nombre: nombreComprimido, motivo: "LIMITE_500_POR_COMPRIMIDO" });
+        return false;
+      }
+      // R5 (M-1): techo por entrada y ratio DECLARADOS (cabeceras honestas
+      // — una bomba con cabecera mentirosa la caza contabilizar en vuelo).
+      if (tamDesc !== undefined && tamDesc > topeEntrada) {
+        errores.push({ nombre: nombreEntradaActual, motivo: "TOPE_BYTES_ENTRADA" });
+        return false;
+      }
+      if (
+        tamComp !== undefined &&
+        tamDesc !== undefined &&
+        tamDesc >= RATIO_PISO_DESCOMPRIMIDO &&
+        tamComp >= 1 &&
+        tamDesc / tamComp > ratioMax
+      ) {
+        errores.push({ nombre: nombreEntradaActual, motivo: "RATIO_SOSPECHOSO" });
+        return false;
+      }
+      aceptados++;
+      return true;
+    },
+    /** Contabiliza bytes descomprimidos REALES (chunks del stream o entradas
+     *  materializadas). `comprimidosEntrada` ≈ bytes comprimidos consumidos
+     *  por la entrada en vuelo (aproximación ±1 chunk — ver extraerZip). */
+    contabilizar(bytes: number, comprimidosEntrada: number): VeredictoContabilidad {
+      bytesAcumulados += bytes; // TODO lo materializado cuenta (también lo descartado)
+      if (techoReventado) return "ABORTAR";
+      if (bytesAcumulados > topeTotal) {
+        techoReventado = true;
+        errores.push({ nombre: nombreComprimido, motivo: "TOPE_BYTES_COMPRIMIDO" });
+        return "ABORTAR";
+      }
+      bytesEntradaActual += bytes;
+      if (rechazadaActual) return "DESCARTAR";
+      if (bytesEntradaActual > topeEntrada) {
+        // La cabecera MINTIÓ (descompresa más de lo declarado): fila + descarte.
+        rechazadaActual = true;
+        errores.push({ nombre: nombreEntradaActual, motivo: "TOPE_BYTES_ENTRADA" });
+        return "DESCARTAR";
+      }
+      if (
+        bytesEntradaActual >= RATIO_PISO_DESCOMPRIMIDO &&
+        comprimidosEntrada >= 1 &&
+        bytesEntradaActual / comprimidosEntrada > ratioMax
+      ) {
+        rechazadaActual = true;
+        errores.push({ nombre: nombreEntradaActual, motivo: "RATIO_SOSPECHOSO" });
+        return "DESCARTAR";
+      }
+      return "RETENER";
+    },
+  };
+}
+
 /** Punto de entrada (kit T2.2): .zip → fflate · .rar → node-unrar-js ·
- *  lo demás NO debería llegar aquí (el store clasifica antes). */
-export async function extraerArchivo(archivo: File): Promise<ResultadoExtraccion> {
-  if (/\.zip$/i.test(archivo.name)) return extraerZip(archivo);
-  if (/\.rar$/i.test(archivo.name)) return extraerRar(archivo);
+ *  lo demás NO debería llegar aquí (el store clasifica antes). R5: acepta
+ *  `opciones` (OpcionesGuardaR5) para tunar los topes — el store y el resto
+ *  de los callers siguen llamando con UN solo argumento (defaults). */
+export async function extraerArchivo(
+  archivo: File,
+  opciones?: OpcionesGuardaR5,
+): Promise<ResultadoExtraccion> {
+  if (/\.zip$/i.test(archivo.name)) return extraerZip(archivo, opciones);
+  if (/\.rar$/i.test(archivo.name)) return extraerRar(archivo, opciones);
   throw new Error("FORMATO_NO_SOPORTADO");
 }
 
@@ -376,10 +552,21 @@ export async function extraerPdf(archivo: File): Promise<ResultadoExtraccion> {
   }
 }
 
-/** ZIP con fflate (sync, ~8 KB). Contraseña/corrupto → unzipSync lanza →
- *  el guard del kit convierte en fila ERROR PROTEGIDO_O_CORRUPTO. */
-async function extraerZip(archivo: File): Promise<ResultadoExtraccion> {
-  const { unzipSync } = await import("fflate");
+/** ZIP con fflate en STREAMING (R5, M-1). Antes `unzipSync` descomprimía
+ *  TODO el archivo a un `Record<string, Uint8Array>` (incluidos adjuntos
+ *  ajenos y bombas) ANTES de filtrar; ahora `Unzip` empuja el stream por
+ *  trozos (CHUNK_PUSH_ZIP) y CADA entrada se clasifica por cabecera
+ *  (portero) antes de retener un byte — lo rechazado jamás se descomprime.
+ *  Cabeceras mentirosas / zips «streamed» (sin tamaños en cabecera local):
+ *  contabilidad REAL en vuelo (techo por entrada + ratio + techo
+ *  acumulado) corta el stream. Contraseña/corrupto → PROTEGIDO_O_CORRUPTO
+ *  (igual que siempre); si ya había imágenes extraídas, viajan PARCIALES +
+ *  una fila (mismo trato que el rar desde siempre — jamás tumba la cola). */
+async function extraerZip(
+  archivo: File,
+  opciones?: OpcionesGuardaR5,
+): Promise<ResultadoExtraccion> {
+  const { Unzip, UnzipInflate } = await import("fflate");
   // D35 (UX-1): lectura de disco ≠ corrupción del zip (ver extraerPdf).
   let bytesZip: ArrayBuffer;
   try {
@@ -387,38 +574,117 @@ async function extraerZip(archivo: File): Promise<ResultadoExtraccion> {
   } catch {
     throw new Error("ARCHIVO_ILEGIBLE");
   }
-  let entradas: Record<string, Uint8Array>;
-  try {
-    entradas = unzipSync(new Uint8Array(bytesZip));
-  } catch {
-    // fflate no descifra: zip protegido/corrupto/truncado cae aquí.
-    throw new Error("PROTEGIDO_O_CORRUPTO");
-  }
   const archivos: File[] = [];
   const errores: ErrorExtraccion[] = [];
-  for (const [ruta, datos] of Object.entries(entradas)) {
-    if (ruta.endsWith("/")) continue; // directorio
-    if (EXT_COMPRIMIDO_ANIDADO.test(ruta)) {
-      // Kit T2.2: anidado NO se extrae — fila ERROR (por entrada).
-      errores.push({ nombre: nombreDeEntrada(ruta), motivo: "ARCHIVO_ANIDADO" });
-      continue;
+  const portero = crearPortero(archivo.name, errores, opciones);
+
+  // Los callbacks de fflate son SÍNCRONOS dentro de push(): UNA entrada en
+  // vuelo a la vez. `partesEnVuelo === null` → descartar chunks (entrada
+  // omitida, rechazada en vuelo o aborto).
+  let partesEnVuelo: Uint8Array[] | null = null;
+  let nombreEnVuelo = "";
+  let comprimidosEmpujados = 0; // bytes de zip empujados al stream
+  let inicioComprimidoEntrada = 0; // marca por entrada → ratio incremental
+  let corrupto = false; // fflate reportó error de stream (ondata con err)
+  let entradasVistas = 0; // ¿se PARSEÓ siquiera una entrada? (diagnóstico honesto)
+  const abortado = () => portero.lleno() || portero.reventado() || corrupto;
+
+  const uz = new Unzip();
+  uz.register(UnzipInflate); // STORED (0) lo resuelve Unzip de fábrica
+  uz.onfile = (f) => {
+    if (abortado()) return; // tras un aborto no se arranca NADA más
+    entradasVistas++;
+    if (f.name.endsWith("/")) return; // directorio
+    nombreEnVuelo = nombreDeEntrada(f.name);
+    inicioComprimidoEntrada = comprimidosEmpujados;
+    if (!portero.clasificar(f.name, f.size, f.originalSize)) {
+      // Omitida (anidado/no-imagen/límite/techo/ratio de cabecera): NO se
+      // arranca — jamás se descomprime. fflate retiene sus bytes
+      // COMPRIMIDOS en su buffer interno hasta descartar el stream: acotado
+      // por el tamaño del zip, que ya está en RAM. Sin costo de CPU.
+      partesEnVuelo = null;
+      return;
     }
-    if (!EXT_IMAGEN.test(ruta)) continue; // sin extensión de imagen → descartada (no es error)
-    if (archivos.length >= TOPE_POR_COMPRIMIDO) {
-      // Kit T2.2: primeras 500 encoladas + UNA fila ERROR de límite.
-      errores.push({ nombre: archivo.name, motivo: "LIMITE_500_POR_COMPRIMIDO" });
-      break;
+    partesEnVuelo = [];
+    f.ondata = (err, chunk, final) => {
+      if (err) {
+        corrupto = true; // método de compresión desconocido / stream roto
+        return;
+      }
+      if (chunk && chunk.length) {
+        const veredicto = portero.contabilizar(
+          chunk.length,
+          // Aproximación del comprimido de la entrada: bytes empujados desde
+          // su cabecera (±1 chunk + cabeceras — irrelevante al piso de 1 MB
+          // y al umbral de ratio 100).
+          Math.max(1, comprimidosEmpujados - inicioComprimidoEntrada),
+        );
+        if (veredicto === "ABORTAR") {
+          partesEnVuelo = null;
+          return; // el bucle de empuje corta tras este trozo
+        }
+        if (veredicto === "DESCARTAR") {
+          partesEnVuelo = null; // RAM plana: el resto de la entrada se tira
+        } else if (partesEnVuelo) {
+          partesEnVuelo.push(chunk);
+        }
+      }
+      if (final && partesEnVuelo) {
+        if (partesEnVuelo.length) {
+          archivos.push(archivoDePartes(nombreEnVuelo, partesEnVuelo));
+        }
+        partesEnVuelo = null;
+      }
+    };
+    f.start();
+  };
+
+  // Empuje por trozos: cada push procesa ≤64 KB comprimidos y deja revisar
+  // las señales de aborto entre trozos (un push único no es interrumpible).
+  const datos = new Uint8Array(bytesZip);
+  for (let i = 0; i < datos.length && !abortado(); i += CHUNK_PUSH_ZIP) {
+    const fin = Math.min(i + CHUNK_PUSH_ZIP, datos.length);
+    comprimidosEmpujados += fin - i;
+    try {
+      uz.push(datos.subarray(i, fin), fin >= datos.length);
+    } catch {
+      // fflate lanza al parsear/inflar corrupto (≡ unzipSync de siempre).
+      if (!archivos.length && !errores.length) throw new Error("PROTEGIDO_O_CORRUPTO");
+      // Extracción PARCIAL: lo conseguido se encola + fila del fallo.
+      errores.push({ nombre: archivo.name, motivo: "PROTEGIDO_O_CORRUPTO" });
+      return { archivos, errores };
     }
-    archivos.push(archivoDeEntrada(nombreDeEntrada(ruta), datos));
   }
-  if (!archivos.length && !errores.length) throw new Error("SIN_IMAGENES_DENTRO");
+  if (corrupto) {
+    // err() reportado en ondata (método de compresión desconocido —
+    // unzipSync tampoco podía con esto): mismo trato que el catch de arriba.
+    if (!archivos.length && !errores.length) throw new Error("PROTEGIDO_O_CORRUPTO");
+    errores.push({ nombre: archivo.name, motivo: "PROTEGIDO_O_CORRUPTO" });
+    return { archivos, errores };
+  }
+  if (!archivos.length && !errores.length) {
+    // Diagnóstico honesto (mismo espíritu del D35 del PDF): un zip donde ni
+    // siquiera se PARSEÓ una entrada es basura/corrupto (unzipSync también
+    // lanzaba) → PROTEGIDO_O_CORRUPTO. Un zip VÁLIDO sin fotos dentro es
+    // SIN_IMAGENES_DENTRO (motivo de siempre).
+    throw new Error(entradasVistas === 0 ? "PROTEGIDO_O_CORRUPTO" : "SIN_IMAGENES_DENTRO");
+  }
   return { archivos, errores };
 }
 
 /** RAR con node-unrar-js (wasm MIT). El wasmBinary viaja EXPLÍCITO desde el
  *  propio paquete (asset de node_modules resuelto por el bundler — ver
- *  cabecera del módulo). Contraseña/corrupto → fila ERROR (kit T2.2). */
-async function extraerRar(archivo: File): Promise<ResultadoExtraccion> {
+ *  cabecera del módulo). Contraseña/corrupto → fila ERROR (kit T2.2).
+ *  R5 (M-1): el generador de extract() ya era perezoso, pero extraía
+ *  TAMBIÉN lo no-imagen y no topaba bytes. Ahora el PREDICADO `files`
+ *  corre POR CABECERA (packSize/unpSize) ANTES de extraer cada entrada —
+ *  lo rechazado jamás se descomprime (readFile(skip=true) lo salta) y la
+ *  contabilidad acumulada corta el generador al reventar el techo. Mismos
+ *  topes y motivo que zip (portero compartido). */
+async function extraerRar(
+  archivo: File,
+  opciones?: OpcionesGuardaR5,
+): Promise<ResultadoExtraccion> {
   const [{ createExtractorFromData }, wasmBinario] = await Promise.all([
     import("node-unrar-js"),
     fetchWasmUnrar(),
@@ -441,35 +707,36 @@ async function extraerRar(archivo: File): Promise<ResultadoExtraccion> {
   }
   const archivos: File[] = [];
   const errores: ErrorExtraccion[] = [];
+  const portero = crearPortero(archivo.name, errores, opciones);
   let protegiDoAvisado = false;
   try {
-    const extraidos = extractor.extract({});
-    for (const entrada of extraidos.files) {
-      const cabecera = entrada.fileHeader;
-      if (cabecera.flags.directory) continue;
-      if (cabecera.flags.encrypted) {
-        // Entrada cifrada: el guard del kit manda (una fila por archivo).
-        if (!protegiDoAvisado) {
-          protegiDoAvisado = true;
-          errores.push({ nombre: archivo.name, motivo: "PROTEGIDO_O_CORRUPTO" });
+    const extraidos = extractor.extract({
+      // R5: el predicado corre por cabecera, ANTES de extraer cada entrada.
+      files: (cabecera) => {
+        if (portero.lleno()) return false; // tras el límite: silencio (≡ break)
+        if (cabecera.flags.directory) return false;
+        if (cabecera.flags.encrypted) {
+          // Entrada cifrada: el guard del kit manda (UNA fila por archivo).
+          if (!protegiDoAvisado) {
+            protegiDoAvisado = true;
+            errores.push({ nombre: archivo.name, motivo: "PROTEGIDO_O_CORRUPTO" });
+          }
+          return false;
         }
-        continue;
-      }
-      if (EXT_COMPRIMIDO_ANIDADO.test(cabecera.name)) {
-        errores.push({
-          nombre: nombreDeEntrada(cabecera.name),
-          motivo: "ARCHIVO_ANIDADO",
-        });
-        continue;
-      }
-      if (!EXT_IMAGEN.test(cabecera.name)) continue; // descartada (no es error)
+        return portero.clasificar(cabecera.name, cabecera.packSize, cabecera.unpSize);
+      },
+    });
+    for (const entrada of extraidos.files) {
+      // Corte honesto: límite/techo ya dejaron su fila — dejar de tirar del
+      // generador (el wasm deja de descomprimir en cuanto se abandona).
+      if (portero.lleno() || portero.reventado()) break;
       const datos = entrada.extraction;
-      if (!datos) continue; // entrada fallida (raro) — sin inventar motivos
-      if (archivos.length >= TOPE_POR_COMPRIMIDO) {
-        errores.push({ nombre: archivo.name, motivo: "LIMITE_500_POR_COMPRIMIDO" });
-        break;
-      }
-      archivos.push(archivoDeEntrada(nombreDeEntrada(cabecera.name), datos));
+      // 'skipped' = rechazada por el portero (predicado) — sin datos, sin fila.
+      if (!datos || typeof datos === "string") continue;
+      const veredicto = portero.contabilizar(datos.length, entrada.fileHeader.packSize);
+      if (veredicto === "ABORTAR") break; // techo acumulado: fila ya dejada
+      if (veredicto === "DESCARTAR") continue; // cabecera mintió: fila ya dejada
+      archivos.push(archivoDePartes(nombreDeEntrada(entrada.fileHeader.name), [datos]));
     }
   } catch (err) {
     const razon = (err as { reason?: string })?.reason ?? "";
