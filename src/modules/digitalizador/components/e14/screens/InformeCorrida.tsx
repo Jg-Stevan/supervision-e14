@@ -27,6 +27,11 @@ import {
   type CorridaMetrica,
   type MetricaActa,
 } from "@/modules/digitalizador/lib/e14/masiva/metricas";
+// R6 — adopción de la capa shared (Ola 0, reporte 04 §B2 #9): fmtMs y hhmm
+// viven en @/shared/format/tiempo — COPIAS VERBATIM de ESTE archivo
+// (fmtMs:81-88 · hh:mm de fmtFechaRelativa:92-93). Mismo output byte a
+// byte; el test de paridad de shared lo fija.
+import { fmtMs, hhmm } from "@/shared/format/tiempo";
 
 // KIT e14-etapas-preocr-v1 (D43) — las etapas OCULTAS suben a las barras:
 // preOcr (runner: capa-0 QR + origen + deskew + master), proceso (warp ×2 +
@@ -78,20 +83,13 @@ const PROCESO_SUBS: { key: ProcesoSubKey; label: string }[] = [
   { key: "procesoOcrMs", label: "WARP LECTURA" },
 ];
 
-function fmtMs(ms: number | null | undefined): string {
-  if (ms == null) return "—";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)} s`;
-  const m = Math.floor(s / 60);
-  return `${m} m ${Math.round(s - m * 60)} s`;
-}
+// R6 — fmtMs adoptado de @/shared/format/tiempo (copia verbatim de aquí).
 
 function fmtFechaRelativa(ms: number): string {
   const d = new Date(ms);
-  const hh = d.getHours().toString().padStart(2, "0");
-  const mm = d.getMinutes().toString().padStart(2, "0");
-  return `${d.toLocaleDateString()} ${hh}:${mm}`;
+  // R6 — las partes "HH:MM" son el patrón ×3 homeado como hhmm() en
+  // @/shared/format/tiempo (idéntico output: String().padStart(2, "0")).
+  return `${d.toLocaleDateString()} ${hhmm(d)}`;
 }
 
 function percentil(sorted: number[], p: number): number | null {
