@@ -39,6 +39,15 @@ import type { ActaRealLista } from "./actas-reales/actas-reales";
 import { ID_ENLACE_ROMA } from "./divipola-adapter";
 import { cargarActasReales } from "./actas-reales/actas-reales";
 
+// M13 — reglas de derivación CANÓNICAS en el dominio: `delegadosAcreditados`
+// (n/16) y `ciudadDePuesto` vivían duplicadas aquí y en documento-e14.tsx.
+// Re-export por compatibilidad; el export canónico es domain/acta.ts y el
+// lado documento-e14 lo adopta R4.
+export {
+  delegadosAcreditados,
+  ciudadDePuesto,
+} from "../domain/acta";
+
 // ─── Utilidades de formato ──────────────────────────────────────────────────
 
 function minutosAHora(minutos: number): string {
@@ -52,12 +61,6 @@ function minutosAHora(minutos: number): string {
 export function horaAMinutos(hora: string): number {
   const [hh, mm] = hora.replace(" LOCAL", "").split(":").map(Number);
   return hh * 60 + mm;
-}
-
-/** Ciudad del puesto ("02 - Roma" → "ROMA"). */
-export function ciudadDePuesto(puesto: Puesto): string {
-  const partes = puesto.puesto.split(" - ");
-  return (partes.length > 1 ? partes[1] : puesto.puesto).toUpperCase();
 }
 
 // ─── Identidad del acta (seed → id #XXX-Y) ─────────────────────────────────
@@ -266,14 +269,6 @@ export function tieneActa(mesa: Mesa): boolean {
   return mesa.estadoMesa !== "NO_INICIADO";
 }
 
-/** Delegados acreditados de la mesa (n/16, kit §2.3): 2 partes ok → 16,
- * 1 → 8, 0 → 0. Regla de derivación documentada en el REPORTE. */
-export function delegadosAcreditados(mesa: Mesa): number {
-  const ok =
-    (mesa.delegados.p1 === "ok" ? 1 : 0) + (mesa.delegados.p2 === "ok" ? 1 : 0);
-  return ok * 8;
-}
-
 const CACHE_ACTAS: Record<string, ActaMesa> = {};
 
 function clonarActa(acta: ActaMesa): ActaMesa {
@@ -284,6 +279,17 @@ function clonarActa(acta: ActaMesa): ActaMesa {
       DELEGADOS: acta.formularios.DELEGADOS.map((p) => ({ ...p })),
     },
     historial: acta.historial.map((e) => ({ ...e })),
+    // M11 — clonado PROFUNDO mínimo (reporte 02a 🟡-1): `fotos` (y el
+    // encabezado `impresion`) quedaban ALIASADOS al acta en caché / al
+    // registro real del loader; un mutador externo corrompía el documento
+    // histórico (y las fotos reales compartidas) sin rastro.
+    fotos: acta.fotos
+      ? {
+          TRANSMISION: acta.fotos.TRANSMISION?.map((f) => (f ? { ...f } : null)),
+          DELEGADOS: acta.fotos.DELEGADOS?.map((f) => (f ? { ...f } : null)),
+        }
+      : undefined,
+    impresion: acta.impresion ? { ...acta.impresion } : undefined,
   };
 }
 

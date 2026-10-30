@@ -11,8 +11,10 @@
  * queda como `DELEGADOS` o `CONSUL_EMBAJADOR` según el lote de origen —
  * ambos son la clave de dominio DELEGADOS).
  *
- * VALIDACIÓN (D25 a–e) de CADA acta contra el catálogo DIVIPOLA
- * (`CARGAR_CATALOGO()` — import de solo-lectura; el adaptador NO cambia):
+ * VALIDACIÓN (D25 a–e) de CADA acta contra el catálogo DIVIPOLA — las
+ * puertas (a)/(b) por el validador ÚNICO `data/validacion-d25.ts`
+ * (`validarJoinDivipola`, M13; el catálogo llega por el adaptador Result,
+ * jamás lanza — C1):
  * (a) `idEnlace` existe en el catálogo; (b) `mesa` ≤ `totalMesas` del
  * puesto; (c) `formulario` es clave conocida del dominio; (d) páginas
  * 1..N completas y continuas; (e) asset importable. La que falla NO se
@@ -35,7 +37,7 @@ import type {
   FotoActa,
   ImpresionActa,
 } from "../../domain/acta";
-import { CARGAR_CATALOGO } from "../divipola-adapter";
+import { validarJoinDivipola } from "../validacion-d25";
 import manifestBruto from "./actas-reales-manifest.json";
 
 // ─── Assets (imports estáticos — Next entrega { src, width, height }) ──────
@@ -232,8 +234,10 @@ function ingestar(): ResultadoIngesta {
     return { actas: {}, bloqueadas };
   }
 
-  // Catálogo DIVIPOLA (solo-lectura) para las validaciones (a)/(b).
-  const catalogo = new Map(CARGAR_CATALOGO().map((r) => [r.idEnlace, r]));
+  // D25 (a)/(b) — validador ÚNICO compartido con el runtime (M13). El
+  // catálogo llega por el adaptador Result (C1 — jamás lanza): si no está
+  // disponible, (a) falla entrada por entrada y TODO va a cuarentena
+  // (nada se publica — honesto), sin excepción en el loader.
 
   const actas: Record<string, ActaRealLista> = {};
 
@@ -245,24 +249,11 @@ function ingestar(): ResultadoIngesta {
     }
     const clave = `${entrada.idEnlace}::${entrada.mesa}`;
 
-    // (a) idEnlace existe en el catálogo.
-    const registro = catalogo.get(entrada.idEnlace);
-    if (!registro) {
-      bloquear(clave, `(a) idEnlace "${entrada.idEnlace}" ausente en el catálogo DIVIPOLA`);
-      continue;
-    }
-
-    // (b) mesa ≤ totalMesas del puesto.
-    const numeroMesa = Number(entrada.mesa);
-    if (
-      !Number.isInteger(numeroMesa) ||
-      numeroMesa < 1 ||
-      numeroMesa > registro.totalMesas
-    ) {
-      bloquear(
-        clave,
-        `(b) mesa ${entrada.mesa} fuera de rango (totalMesas: ${registro.totalMesas})`
-      );
+    // (a) idEnlace existe en el catálogo + (b) mesa ≤ totalMesas del
+    // puesto — validador ÚNICO (M13, antes duplicado aquí y en runtime).
+    const motivoJoin = validarJoinDivipola(entrada.idEnlace, entrada.mesa);
+    if (motivoJoin) {
+      bloquear(clave, motivoJoin);
       continue;
     }
 

@@ -2,7 +2,7 @@
  * Implementación mock de SupervisionRepository.
  *
  * KIT SUP-5 (T3 / D21): los puestos YA NO son un array demo de 20 — la
- * fuente es el catálogo DIVIPOLA exterior real (`CARGAR_CATALOGO()`,
+ * fuente es el catálogo DIVIPOLA exterior real (`cargarCatalogoDivipola()`,
  * 949 puestos / 67 países / 3.670 mesas). El estado (Global/Mesas/
  * Delegados/Transmisión) se SIEMBRA por hash determinístico del `idEnlace`
  * divipola (mismo seed → mismos KPIs siempre; nada aleatorio en render,
@@ -18,6 +18,14 @@
  * estado demo completo: CRÍTICO, mesas 001-003 EXACTAS del mockup,
  * acta `#A92-F` con historial 14:00/14:18/14:20 y P2 con advertencia.
  * Los IDs internos quedan re-anclados al `idEnlace` real.
+ *
+ * C1 — SIN EFECTO DE IMPORT: importar este módulo no carga nada ni puede
+ * lanzar. Los datos se siembran en `initSupervisionDatos()` (explícito e
+ * idempotente); las lecturas del repo la invocan perezosamente
+ * (`asegurarDatos()`) para no requerir cambios en el consumidor actual
+ * (datos-provider, zona R4 — adopción explícita pendiente). Si la
+ * validación ESTRUCTURAL del catálogo falla, el repo arranca VACÍO y el
+ * motivo `BLOQUEADA: …` vuelve como Result — jamás un white-screen.
  *
  * Kit SUP-3: mesas determinísticas por puesto (cantidad EXACTA =
  * totalMesas del catálogo), pcts derivados de las mesas (D16), interfaz
@@ -43,7 +51,7 @@ import {
 } from "../domain/tiempo-cierre";
 import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
 import { consultarActaRuntime } from "./actas-runtime";
-import { ID_ENLACE_ROMA, CARGAR_CATALOGO } from "./divipola-adapter";
+import { ID_ENLACE_ROMA, cargarCatalogoDivipola } from "./divipola-adapter";
 import { crearRandomDeterministico } from "../domain/acta";
 import { diaDeNombrePuesto } from "../domain/jornada";
 import type { SupervisionRepository } from "./supervision-repository";
@@ -222,8 +230,9 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
   };
 }
 
-/** Puestos = catálogo DIVIPOLA exterior real (949 — §2.4). */
-const PUESTOS: Puesto[] = CARGAR_CATALOGO().map(puestoDeRegistro);
+/** Puestos = catálogo DIVIPOLA exterior real (949 — §2.4). Se siembran
+ * en `initSupervisionDatos()` — C1: importar el módulo NO carga nada. */
+let PUESTOS: Puesto[] = [];
 
 // ─── Generación determinística de mesas (T2 / D13) ──────────────────────────
 
@@ -484,18 +493,8 @@ function estadoGlobalTrasMesas(actual: Puesto["estadoGlobal"], mesas: Mesa[]): P
 // ─── Estado mutable del mock (en memoria — sin persistencia, §0-5) ─────────
 
 const MESAS_POR_PUESTO: Record<string, Mesa[]> = {};
-for (const puesto of PUESTOS) {
-  const mesas = generarMesasPuesto(puesto);
-  MESAS_POR_PUESTO[puesto.id] = mesas;
-  // T2: los pcts del puesto deben ser DERIVABLES de sus mesas — se
-  // corrigen al inicializar (D16 documenta los valores que cambian).
-  const pcts = pctsDeMesas(mesas);
-  puesto.pctDelegado = pcts.delegado;
-  puesto.pctTransmision = pcts.transmision;
-}
-
-const AHORA = Date.now();
-const MIN = 60_000;
+let NOTIFICACIONES: Notificacion[] = [];
+let ANOMALIAS: Anomalia[] = [];
 
 /** Etiqueta de puesto para textos ("ITALIA — 02 - Roma - Consulado"). */
 function etiquetaDePuesto(puesto: Puesto): string {
@@ -527,45 +526,116 @@ function buscarPuestoDePais(
   return candidatos.length > 0 ? candidatos[0] : null;
 }
 
-const anclaRoma = PUESTOS.find((p) => p.id === ID_ENLACE_ROMA) ?? PUESTOS[0];
+export type ResultadoInitSupervision =
+  | { ok: true; puestos: number; paises: number; mesas: number }
+  | { ok: false; motivo: string };
 
-// España/México/Países Bajos: puestos REALES del catálogo para las
-// semillas (determinístico — §0-9). INGLATERRA existe en el catálogo
-// (Londres); su anomalía es de puesto (sin mesa).
-const semillaEspana = buscarPuestoDePais("ESPAÑA", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
-const semillaMexico = buscarPuestoDePais("MEXICO", 1) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
-const semillaPaisesBajos = buscarPuestoDePais("PAISES BAJOS", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
-const semillaInglaterra =
-  PUESTOS.find((p) => p.pais === "INGLATERRA") ?? anclaRoma;
-const mesaEnCursoMexico =
-  MESAS_POR_PUESTO[semillaMexico.puesto.id]?.find((m) => m.estadoMesa === "EN_PROCESO") ??
-  semillaMexico.mesa;
+let RESULTADO_INIT: ResultadoInitSupervision | null = null;
 
-/** Semillas T5 (7): coherentes con los datos (Roma rescaneo, España
- * retraso…), ya re-ancladas a los códigos reales del catálogo.
- * 3 no leídas → badge inicial 3. */
-const NOTIFICACIONES: Notificacion[] = [
-  { id: "notif-1", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 001 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 12 * MIN, leida: false },
-  { id: "notif-2", tipo: "retraso", texto: `Retraso en transmisión — ${etiquetaDePuesto(semillaEspana.puesto)}`, fecha: AHORA - 38 * MIN, leida: false },
-  { id: "notif-3", tipo: "transmision", texto: `Transmisión en curso — Mesa ${mesaEnCursoMexico.id} (${etiquetaDePuesto(semillaMexico.puesto)})`, fecha: AHORA - 47 * MIN, leida: false },
-  { id: "notif-4", tipo: "sistema", texto: `Sincronización completada: ${PUESTOS.length} puestos al día`, fecha: AHORA - 65 * MIN, leida: true },
-  { id: "notif-5", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 004 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 21 * MIN, leida: false },
-  { id: "notif-6", tipo: "sistema", texto: "Respaldo de datos del consolidado completado", fecha: AHORA - 5 * 60 * MIN, leida: true },
-  { id: "notif-7", tipo: "transmision", texto: `Transmisión restablecida — ${etiquetaDePuesto(semillaPaisesBajos.puesto)}`, fecha: AHORA - 26 * 60 * MIN, leida: true },
-];
+/**
+ * C1 — inicialización EXPLÍCITA de los datos de supervisión (sustituye al
+ * efecto de import que había hoy): carga el catálogo (Result — nunca
+ * lanza), siembra puestos + mesas + semillas de notificaciones/anomalías
+ * y deja el repo servible. IDEMPOTENTE (memoizada — la prep es una sola
+ * vez, D12).
+ *
+ * Contrato del fallo: si la validación ESTRUCTURAL del catálogo falla, el
+ * repo arranca VACÍO (0 puestos: la UI muestra el monitor sin filas,
+ * jamás un white-screen) y el motivo `BLOQUEADA: …` vuelve por aquí. Los
+ * conteos del kit (949/67/3.670) NO bloquean (C1): una desviación solo
+ * advierte en consola — el guard vive en data/__tests__.
+ *
+ * ADOPCIÓN PENDIENTE (R4): el punto de consumo actual
+ * (components/datos-provider.tsx) no la llama aún — las lecturas del
+ * repo inicializan perezosamente (`asegurarDatos()`) para no exigir
+ * cambios en R4. Llamarla en el mount haría explícito el momento de
+ * carga y el manejo del motivo BLOQUEADA.
+ */
+export function initSupervisionDatos(): ResultadoInitSupervision {
+  if (RESULTADO_INIT) return RESULTADO_INIT;
 
-/** Semillas T6: 5 ABIERTAS (badge dinámico real del mockup) + 2 revisadas
- * de histórico (para el filtro por estado) — re-ancladas al catálogo. */
+  const catalogo = cargarCatalogoDivipola();
+  if (!catalogo.ok) {
+    RESULTADO_INIT = { ok: false, motivo: catalogo.motivo };
+    return RESULTADO_INIT;
+  }
 
-const ANOMALIAS: Anomalia[] = [
-  { id: "anom-1", tipo: "Rescaneo", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
-  { id: "anom-2", tipo: "Mesa incompleta", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
-  { id: "anom-3", tipo: "Transmisión caída", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), mesaId: semillaEspana.mesa.id, severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
-  { id: "anom-4", tipo: "Desfase de hora", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
-  { id: "anom-5", tipo: "Mesa incompleta", puestoId: semillaMexico.puesto.id, puesto: etiquetaDePuesto(semillaMexico.puesto), mesaId: semillaMexico.mesa.id, severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
-  { id: "anom-6", tipo: "Rescaneo", puestoId: semillaPaisesBajos.puesto.id, puesto: etiquetaDePuesto(semillaPaisesBajos.puesto), mesaId: semillaPaisesBajos.mesa.id, severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
-  { id: "anom-7", tipo: "Desfase de hora", puestoId: semillaInglaterra.id, puesto: etiquetaDePuesto(semillaInglaterra), severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
-];
+  PUESTOS = catalogo.catalogo.map(puestoDeRegistro);
+
+  for (const puesto of PUESTOS) {
+    const mesas = generarMesasPuesto(puesto);
+    MESAS_POR_PUESTO[puesto.id] = mesas;
+    // T2: los pcts del puesto deben ser DERIVABLES de sus mesas — se
+    // corrigen al inicializar (D16 documenta los valores que cambian).
+    const pcts = pctsDeMesas(mesas);
+    puesto.pctDelegado = pcts.delegado;
+    puesto.pctTransmision = pcts.transmision;
+  }
+
+  // Época de la sesión congelada: las fechas relativas de las semillas
+  // son estables entre renders (igual que el AHORA de módulo anterior).
+  const AHORA = Date.now();
+  const MIN = 60_000;
+
+  const anclaRoma = PUESTOS.find((p) => p.id === ID_ENLACE_ROMA) ?? PUESTOS[0];
+  if (anclaRoma) {
+    // España/México/Países Bajos: puestos REALES del catálogo para las
+    // semillas (determinístico — §0-9). INGLATERRA existe en el catálogo
+    // (Londres); su anomalía es de puesto (sin mesa).
+    const semillaEspana = buscarPuestoDePais("ESPAÑA", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+    const semillaMexico = buscarPuestoDePais("MEXICO", 1) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+    const semillaPaisesBajos = buscarPuestoDePais("PAISES BAJOS", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+    const semillaInglaterra =
+      PUESTOS.find((p) => p.pais === "INGLATERRA") ?? anclaRoma;
+    const mesaEnCursoMexico =
+      MESAS_POR_PUESTO[semillaMexico.puesto.id]?.find((m) => m.estadoMesa === "EN_PROCESO") ??
+      semillaMexico.mesa;
+
+    /** Semillas T5 (7): coherentes con los datos (Roma rescaneo, España
+     * retraso…), ya re-ancladas a los códigos reales del catálogo.
+     * 3 no leídas → badge inicial 3. */
+    NOTIFICACIONES = [
+      { id: "notif-1", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 001 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 12 * MIN, leida: false },
+      { id: "notif-2", tipo: "retraso", texto: `Retraso en transmisión — ${etiquetaDePuesto(semillaEspana.puesto)}`, fecha: AHORA - 38 * MIN, leida: false },
+      { id: "notif-3", tipo: "transmision", texto: `Transmisión en curso — Mesa ${mesaEnCursoMexico.id} (${etiquetaDePuesto(semillaMexico.puesto)})`, fecha: AHORA - 47 * MIN, leida: false },
+      { id: "notif-4", tipo: "sistema", texto: `Sincronización completada: ${PUESTOS.length} puestos al día`, fecha: AHORA - 65 * MIN, leida: true },
+      { id: "notif-5", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 004 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 21 * MIN, leida: false },
+      { id: "notif-6", tipo: "sistema", texto: "Respaldo de datos del consolidado completado", fecha: AHORA - 5 * 60 * MIN, leida: true },
+      { id: "notif-7", tipo: "transmision", texto: `Transmisión restablecida — ${etiquetaDePuesto(semillaPaisesBajos.puesto)}`, fecha: AHORA - 26 * 60 * MIN, leida: true },
+    ];
+
+    /** Semillas T6: 5 ABIERTAS (badge dinámico real del mockup) + 2 revisadas
+     * de histórico (para el filtro por estado) — re-ancladas al catálogo. */
+    ANOMALIAS = [
+      { id: "anom-1", tipo: "Rescaneo", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
+      { id: "anom-2", tipo: "Mesa incompleta", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
+      { id: "anom-3", tipo: "Transmisión caída", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), mesaId: semillaEspana.mesa.id, severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
+      { id: "anom-4", tipo: "Desfase de hora", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
+      { id: "anom-5", tipo: "Mesa incompleta", puestoId: semillaMexico.puesto.id, puesto: etiquetaDePuesto(semillaMexico.puesto), mesaId: semillaMexico.mesa.id, severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
+      { id: "anom-6", tipo: "Rescaneo", puestoId: semillaPaisesBajos.puesto.id, puesto: etiquetaDePuesto(semillaPaisesBajos.puesto), mesaId: semillaPaisesBajos.mesa.id, severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
+      { id: "anom-7", tipo: "Desfase de hora", puestoId: semillaInglaterra.id, puesto: etiquetaDePuesto(semillaInglaterra), severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
+    ];
+  }
+
+  const mesasSembradas = Object.values(MESAS_POR_PUESTO).reduce(
+    (suma, mesas) => suma + mesas.length,
+    0
+  );
+  RESULTADO_INIT = {
+    ok: true,
+    puestos: PUESTOS.length,
+    paises: new Set(PUESTOS.map((p) => p.pais)).size,
+    mesas: mesasSembradas,
+  };
+  return RESULTADO_INIT;
+}
+
+/** C1 — inicialización PEREZOSA por compatibilidad: los métodos del repo
+ * siembran al primer uso si nadie llamó `initSupervisionDatos()` aún
+ * (datos-provider no lo hace — adopción explícita pendiente de R4). */
+function asegurarDatos(): void {
+  if (!RESULTADO_INIT) initSupervisionDatos();
+}
 
 let contadorNotificaciones = 0;
 
@@ -688,6 +758,14 @@ function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   if (f.zona && puesto.zonaId !== f.zona) return false;
   if (f.puesto && puesto.puesto !== f.puesto) return false;
   if (f.estado && puesto.estadoGlobal !== f.estado) return false;
+  // M3 — contrato de filtros COMPLETO (reporte 02a 🔴-1): cierreCol y
+  // tiempo estaban declarados en FiltrosPuestos (types.ts:140-145) pero
+  // no implementados aquí (código muerto; el filtrado real vivía
+  // duplicado en monitor-global.tsx:68-72). Misma semántica que allí:
+  if (f.cierreCol && puesto.horaCierreColombia !== f.cierreCol) return false;
+  if (f.tiempo && tramoDeMinutos(puesto.minutosDesdeCierre).id !== f.tiempo) {
+    return false;
+  }
   const q = f.busqueda?.trim().toLowerCase();
   if (q) {
     const texto = [
@@ -704,8 +782,26 @@ function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
   return true;
 }
 
+/**
+ * M11 — clonado PROFUNDO mínimo en la frontera del repo (reporte 02a
+ * 🟡-1): `{...mesa}` dejaba `delegados` y `transmision` (con `p1/p2` y
+ * `alerta`) ALIASADOS al singleton; un mutador externo corrompía el
+ * estado global del demo sin rastro.
+ */
+function clonarMesa(mesa: Mesa): Mesa {
+  return {
+    ...mesa,
+    delegados: { ...mesa.delegados },
+    transmision: {
+      p1: { ...mesa.transmision.p1 },
+      p2: { ...mesa.transmision.p2 },
+    },
+  };
+}
+
 export const mockSupervisionRepository: SupervisionRepository = {
   async getResumen(): Promise<ResumenGlobal> {
+    asegurarDatos();
     const resumen: ResumenGlobal = {
       total: PUESTOS.length,
       completo: 0,
@@ -723,22 +819,27 @@ export const mockSupervisionRepository: SupervisionRepository = {
   },
 
   async getPuestos(filtros?: FiltrosPuestos): Promise<Puesto[]> {
+    asegurarDatos();
     return conLatencia(PUESTOS.filter((puesto) => coincide(puesto, filtros)).map((p) => ({ ...p })));
   },
 
   async getMesasDePuesto(puestoId: string): Promise<Mesa[]> {
-    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map((m) => ({ ...m })));
+    asegurarDatos();
+    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map(clonarMesa));
   },
 
   async getNotificaciones(): Promise<Notificacion[]> {
+    asegurarDatos();
     return conLatencia(NOTIFICACIONES.map((n) => ({ ...n })));
   },
 
   async getAnomalias(): Promise<Anomalia[]> {
+    asegurarDatos();
     return conLatencia(ANOMALIAS.map((a) => ({ ...a })));
   },
 
   async resolverRescaneo(puestoId, mesaId) {
+    asegurarDatos();
     await esperar(LATENCIA_REINSPECCION_MS);
     const puesto = puestoPorId(puestoId);
     const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
@@ -756,10 +857,11 @@ export const mockSupervisionRepository: SupervisionRepository = {
       `Rescaneo completado en Mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
     );
     NOTIFICACIONES.unshift(notificacion);
-    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
+    return { mesa: clonarMesa(mesa), notificacion: { ...notificacion } };
   },
 
   async aplicarTransicionVida() {
+    asegurarDatos();
     await conLatencia(true);
     // Candidatas: mesas EN_PROCESO. Preferencia (D13): la primera cuya
     // transición COMPLETA su puesto (KPIs en vivo); si ninguna completa,
@@ -802,6 +904,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
   // ── KIT SUP-4 (actas-v1) — el acta llega por el repositorio (§0-9) ──────
 
   async getActaDeMesa(puestoId: string, mesaId: string) {
+    asegurarDatos();
     const puesto = puestoPorId(puestoId);
     const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
     if (!puesto || !mesa) return conLatencia(null);
@@ -821,6 +924,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
   // ── KIT carga-masiva-supervision-v1 (D27) — estado del monitor ──────────
 
   async registrarCargaMasiva(puestoId, mesaId, formulario, paginas) {
+    asegurarDatos();
     await conLatencia(true);
     const puesto = puestoPorId(puestoId);
     const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
@@ -845,10 +949,11 @@ export const mockSupervisionRepository: SupervisionRepository = {
       `CARGA MASIVA — MESA ${mesa.id} (${etiquetaDePuesto(puesto)})`
     );
     NOTIFICACIONES.unshift(notificacion);
-    return { mesa: { ...mesa }, notificacion: { ...notificacion } };
+    return { mesa: clonarMesa(mesa), notificacion: { ...notificacion } };
   },
 
   async aprobarActa(actaId: string, observacion: string) {
+    asegurarDatos();
     await esperar(LATENCIA_REINSPECCION_MS);
     const acta = aprobarActaMock(actaId, observacion);
     if (!acta) return null;
@@ -875,6 +980,7 @@ export const mockSupervisionRepository: SupervisionRepository = {
   },
 
   async confirmarRescanActa(actaId: string, _observacion: string) {
+    asegurarDatos();
     // La observación es OBLIGATORIA (T5.2) pero el kit no la imprime en el
     // evento/notificación del rescan (textos exactos de T5.4) — queda en la
     // auditoría del visor.

@@ -6,6 +6,8 @@
  * para el trasplante al monorepo del digitalizador (D2).
  */
 
+import type { Mesa, Puesto } from "./types";
+
 /** Formulario contenido en el acta (kit T1). */
 export type FormularioTipo = "TRANSMISION" | "DELEGADOS";
 
@@ -87,6 +89,27 @@ export interface ActaMesa {
  * kit §2.3) — derivado del historial, sin campo extra en el contrato. */
 export function actaAprobada(acta: ActaMesa): boolean {
   return acta.historial.some((evento) => evento.nivel === "APROBADA");
+}
+
+// ─── Reglas de derivación acta ← mesa/puesto (CANÓNICAS — M13) ──────────
+
+/** Delegados acreditados de la mesa (n/16, kit §2.3 «coherente con los
+ * delegados de la mesa»): 2 partes ok → 16, 1 → 8, 0 → 0. Regla ÚNICA
+ * (M13): vivía duplicada en `data/actas-mock.ts:271` y
+ * `components/actas/documento-e14.tsx:31` — este export canónico manda;
+ * el lado documento-e14 lo adopta R4. */
+export function delegadosAcreditados(mesa: Mesa): number {
+  const ok =
+    (mesa.delegados.p1 === "ok" ? 1 : 0) + (mesa.delegados.p2 === "ok" ? 1 : 0);
+  return ok * 8;
+}
+
+/** Ciudad del puesto ("02 - Roma" → "ROMA") — etiqueta del encabezado del
+ * acta. Regla ÚNICA (M13): vivía duplicada en `data/actas-mock.ts:58` y
+ * `components/actas/documento-e14.tsx:38` — este export canónico manda. */
+export function ciudadDePuesto(puesto: Puesto): string {
+  const partes = puesto.puesto.split(" - ");
+  return (partes.length > 1 ? partes[1] : puesto.puesto).toUpperCase();
 }
 
 // ─── Utilidades determinísticas (§0-7: todo dato se deriva por seed) ───────
