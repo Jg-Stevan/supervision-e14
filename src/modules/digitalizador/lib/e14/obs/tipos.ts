@@ -150,6 +150,8 @@ export interface FlagsApp {
   // ─── KIT ocr-router-v1 — campos ADITIVOS AL FINAL (D57) ───
   ocrMotorAdaptativo: boolean; // default true — ROUTER de motor OCR por dispositivo (docs/ESTRATEGIA-ocr-router-v1.md): BAJO/MEDIO = Tesseract best+psm4 (94,4 %, ~67 MB) · ALTO+SIMD = PP-OCRv5 (100 %, ~487 MB, sonda de carga + gobernador reactivo); false = Tesseract en TODOS los dispositivos (byte-idéntico a hoy)
   ocrMotor: "ppocrv5" | "tesseract-best-psm4" | "tesseract-spa-best-psm4" | null; // default null = el ROUTER decide; no-null = override MANUAL del dueño (D6 — el router NO decide). «tesseract-spa-best-psm4» = Tesseract REAL del benchmark (tesseract.js — fase 5b)
+  // ─── KIT e75-qr-zoom-zbar-v1 — campo ADITIVO AL FINAL (D57) ───
+  qrZoomTl: boolean; // default true — tier ZOOM TL re-escalado + zbar-wasm en la capa 0 (lab 12 imágenes: 3 páginas del escáner rescatadas con píxeles nativos del QR + 2 que SOLO zbar vio); false = cadena de hoy byte-idéntica (kill-switch del dueño)
 }
 
 export interface ReporteSesion {

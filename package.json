@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@jg-stevan/scanner-core": "^0.4.0",
+    "@undecaf/zbar-wasm": "^0.11.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",
     "fflate": "^0.8.3",

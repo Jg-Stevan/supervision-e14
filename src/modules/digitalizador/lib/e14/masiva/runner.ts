@@ -663,6 +663,10 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
               const qrQr = await decodificarQrDeCapture(captureQr, {
                 soloZxing: true,
                 ladoLargo: planQr.qrLadoLargo,
+                // KIT e75-qr-zoom-zbar-v1 — kill-switch del dueño (flag
+                // qrZoomTl): el tier ZOOM TL + zbar es main-only, justo aquí
+                // donde ya corre el otro tier wasm (cobertura aditiva).
+                zoomTl: leerFlags().qrZoomTl,
               });
               qrPayload = qrQr?.payload ?? null;
             }
@@ -680,6 +684,10 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
             ladoLargo: planQr.qrLadoLargo,
             rescate4096: planQr.qrRescate4096,
             presupuestoMs: planQr.qrPresupuestoMs,
+            // KIT e75-qr-zoom-zbar-v1 — kill-switch del dueño (flag qrZoomTl,
+            // default true = MEJORA): ZOOM TL re-escalado + zbar antes del
+            // rescate 4096 (lab: 3 páginas del escáner rescatadas).
+            zoomTl: leerFlags().qrZoomTl,
           });
           qrPayload = qrQr?.payload ?? null;
         }

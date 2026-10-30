@@ -103,6 +103,13 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // decide.
   ocrMotorAdaptativo: true,
   ocrMotor: null,
+  // KIT e75-qr-zoom-zbar-v1 — tier ZOOM TL re-escalado + zbar-wasm en la capa
+  // 0 (recorta la banda TL 50%×30% del ORIGINAL a píxeles nativos y la pasa
+  // por zxing→zbar ANTES del rescate 4096): el lab de 12 imágenes reales
+  // midió 3 páginas del escáner que la cadena completa no leyó NI a 4000 px
+  // full-frame y 2 actas que SOLO zbar vio. Kill-switch del dueño: false =
+  // cadena de hoy byte-idéntica.
+  qrZoomTl: true,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */
@@ -152,6 +159,8 @@ export function sanearFlags(o: unknown): Partial<FlagsApp> {
   // KIT ocr-router-v1 — whitelist aditiva (booleano + enum del motor).
   if (typeof p.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = p.ocrMotorAdaptativo;
   if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4" || p.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = p.ocrMotor;
+  // KIT e75-qr-zoom-zbar-v1 — whitelist aditiva (booleano).
+  if (typeof p.qrZoomTl === "boolean") limpio.qrZoomTl = p.qrZoomTl;
   return limpio;
 }
 
