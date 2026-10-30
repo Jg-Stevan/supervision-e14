@@ -99,7 +99,7 @@ mientras tanto es responsabilidad del que pushea.
 
 | Fecha | Commits aplicados | Benchmark | Resultado |
 |---|---|---|---|
-| _pendiente_ | a8737da, 37bfc49, 8ae1074 | _por medir_ | _pendiente_ |
+| 2026-10-30 | a8737da→`5fce8fd`, 37bfc49→`50eea82`, 8ae1074→`10f4405` | sin tocar zona protegida (guard 🟢); benchmark base intacto | ✅ aplicado en main; filtro de columnas adaptado a Collapsible (el árbol no tiene dropdown-menu y agregar la dep tocaría package.json) |
 
 ---
 *Este plan fue generado tras validar que el nuevo main (a249518) conserva los
