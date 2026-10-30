@@ -28,3 +28,11 @@ export const VAR_TONO: Record<Tono, string> = {
 export function colorDeTono(tono: Tono): string {
   return VAR_TONO[tono];
 }
+
+/**
+ * R4 — chip de filtro/píldora de las vistas (reporte 02-b §5.1: duplicado
+ * ×3). Clase COMPLETA idéntica a las copias de vista-recepcion /
+ * vista-anomalias / vista-notificaciones (h-11 = 44px de toque).
+ */
+export const CLASE_CHIP =
+  "label-caps inline-flex h-11 items-center gap-1.5 rounded-[4px] border px-3 text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)";

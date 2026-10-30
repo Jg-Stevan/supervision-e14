@@ -51,7 +51,7 @@ export function ActaAcciones({
         disabled={ocupado}
         onClick={() => void ejectuar("aprobar")}
         className={cn(
-          "label-caps flex w-full items-center justify-center gap-2 rounded-[4px] bg-(--primary) py-2.5 text-[#003912] transition-transform active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-(--primary)",
+          "label-caps flex w-full items-center justify-center gap-2 rounded-[4px] bg-(--primary) py-2.5 text-(--acta-aprobada) transition-transform active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-(--primary)",
           !ocupado && "hover:bg-(--primary)/90"
         )}
       >
@@ -73,7 +73,7 @@ export function ActaAcciones({
         type="button"
         disabled={ocupado}
         onClick={() => void ejectuar("rescanear")}
-        className="label-caps flex w-full items-center justify-center gap-2 rounded-[4px] border border-[#410004] bg-[#410004]/10 py-2.5 text-(--error-text) transition-transform active:scale-[0.98] hover:bg-[#410004]/20 focus-visible:outline-2 focus-visible:outline-(--primary)"
+        className="label-caps flex w-full items-center justify-center gap-2 rounded-[4px] border border-(--acta-error) bg-(--acta-error)/10 py-2.5 text-(--error-text) transition-transform active:scale-[0.98] hover:bg-(--acta-error)/20 focus-visible:outline-2 focus-visible:outline-(--primary)"
       >
         {accionEnCurso === "rescanear" ? (
           <>

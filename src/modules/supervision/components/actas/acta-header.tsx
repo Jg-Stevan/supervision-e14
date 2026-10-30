@@ -152,7 +152,7 @@ export function ActaHeader({
               className={cn(
                 "label-caps inline-flex items-center gap-1.5 rounded-[3px] border px-3 py-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-(--primary)",
                 tipo === valor
-                  ? "border-(--primary) bg-[#003912] text-(--primary)"
+                  ? "border-(--primary) bg-(--acta-aprobada) text-(--primary)"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
@@ -187,7 +187,7 @@ export function ActaHeader({
                   className={cn(
                     "label-caps inline-flex items-center gap-1.5 rounded-[4px] border px-2.5 py-1.5 focus-visible:outline-2 focus-visible:outline-(--primary)",
                     errorActiva
-                      ? "animate-pulse border-[#410004] bg-[#410004]/20 font-bold text-(--error-text)"
+                      ? "animate-pulse border-(--acta-error) bg-(--acta-error)/20 font-bold text-(--error-text)"
                       : activa
                         ? "border-(--outline-variant) bg-(--card) text-(--muted-foreground)"
                         : "border-(--border) bg-(--card) text-muted-foreground opacity-70 hover:opacity-100"
@@ -205,7 +205,7 @@ export function ActaHeader({
       {/* DER: chip de motivo + cierre */}
       <div className="ml-auto flex items-center gap-2">
         {acta?.motivo && (
-          <span className="label-caps inline-flex items-center gap-1.5 rounded-full border border-[#410004] bg-[#410004]/20 px-3 py-1 text-(--error-text)">
+          <span className="label-caps inline-flex items-center gap-1.5 rounded-full border border-(--acta-error) bg-(--acta-error)/20 px-3 py-1 text-(--error-text)">
             <AlertTriangle className="size-3.5" aria-hidden />
             Motivo: {acta.motivo}
           </span>

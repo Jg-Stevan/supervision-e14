@@ -32,6 +32,7 @@ import { SUPERVISOR } from "../data/mock-repository";
 // EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
 import { suscribirseRecepcion } from "../data/recepcion-log";
 import { StatusDot } from "./status-dot";
+import { Esqueleto } from "./esqueleto";
 import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
 // R4-M7 — espejo de la sesión en location.hash (D11: espejo, NO router).
 import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
@@ -492,8 +493,8 @@ function ShellInterno() {
         <main className="flex-1">
           {cargando && vista !== "monitor" ? (
             <div className="space-y-4 p-4 md:p-6">
-              <div className="h-11 w-full max-w-md animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
-              <div className="h-96 w-full animate-pulse rounded-[4px] bg-(--surface)" aria-hidden />
+              <Esqueleto className="h-11 w-full max-w-md" />
+              <Esqueleto className="h-96 w-full" />
             </div>
           ) : (
             <VistaActual

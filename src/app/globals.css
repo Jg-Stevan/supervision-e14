@@ -37,6 +37,12 @@
   --neutral-state: #869583; /* NO INICIADO / neutral (outline) */
   --error-text: #ff8d87; /* tertiary-container: texto/acentos de error */
 
+  /* R4 — visor de actas (D18): verde de aprobación y rojo de error del
+     visor. Antes hex sueltos (#003912 / #410004) en acta-header.tsx y
+     acta-acciones.tsx — mismos valores, ahora con nombre y un solo hogar. */
+  --acta-aprobada: #003912; /* fondo del toggle activo / texto sobre primary */
+  --acta-error: #410004; /* borde y fondo de páginas/chips de error */
+
   /* Bordes e inputs */
   --border: #242e2e; /* bordes de tabla/tarjetas (spec de componentes) */
   --input: #121919; /* fondo del input */
