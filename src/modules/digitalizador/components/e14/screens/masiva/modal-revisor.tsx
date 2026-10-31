@@ -98,6 +98,9 @@ import {
 } from "@/modules/supervision/components/actas/visor-zoom";
 import { pildoraEstadoActa } from "./helpers";
 import { PublicacionChip } from "./publicacion-chip";
+// KIT paginas-acta-e14-v1 (feedback del dueño): el total de PÁGINA es el
+// del ACTA (formulario de 2 hojas) — jamás del lote ni del OCR dudoso.
+import { PAGINAS_POR_ACTA_E14 } from "@/modules/digitalizador/lib/e14/masiva/tipos";
 import type { PropsMasivaView } from "./orquestador";
 
 /** Rectángulo de recorte en % del área de la foto (0–100 — mapea a píxeles
@@ -135,22 +138,28 @@ function scoreTexto(score: number): string {
  * su campo propio) y el pipeline no lo lee: se muestra tal cual va impreso. */
 const CODIGO_FORMA_ENTRE_XX = "7 - 23 - 10 - 19";
 
-/** Etiqueta del formulario (misma convención del adaptador D27 —
- * store-e14.ts): TRANSMISION → «TRANSMISIÓN», DELEGADOS → «CÓNSUL/
- * EMBAJADOR». Sin clasificación → el tipo crudo del acta o «—». */
+/** Etiqueta del formulario en la franja de metadata (feedback del dueño):
+ * SOLO el tipo de copia RECONOCIDO por la OCR — TRANSMISION → «TRANSMISIÓN»,
+ * DELEGADOS → «CÓNSUL/EMBAJADOR». Sin reconocimiento → «—» (dueño: «debería
+ * aparecer Cónsul/embajador o transmisión; si no se llega a reconocer se
+ * pone —»). El acta.tipo crudo es el TÍTULO del formulario mock («SENADO
+ * DE LA REPÚBLICA»): NO es un tipo de copia — NUNCA se muestra (fuga del
+ * mock reportada por el dueño). */
 function etiquetaFormularioDe(acta: Acta): string {
-  const t = acta.clasificacion?.tipo ?? acta.tipo;
+  const t = acta.clasificacion?.tipo;
   if (t === "TRANSMISION") return "TRANSMISIÓN";
   if (t === "DELEGADOS") return "CÓNSUL/EMBAJADOR";
-  return t || "—";
+  return "—";
 }
 
-/** Etiqueta ORIGEN del panel (tipo de copia del acta). */
+/** Etiqueta ORIGEN del panel (tipo de copia del acta) — misma regla del
+ *  dueño: solo lo reconocido, sin reconocimiento → «—» (jamás el título
+ *  crudo del mock). */
 function origenDe(acta: Acta): string {
-  const t = acta.clasificacion?.tipo ?? acta.tipo;
+  const t = acta.clasificacion?.tipo;
   if (t === "TRANSMISION") return "Transmisión";
   if (t === "DELEGADOS") return "Delegados";
-  return t || "—";
+  return "—";
 }
 
 export function ModalRevisor({
@@ -557,8 +566,9 @@ export function ModalRevisor({
             : c.puesto;
         const mesa = datosManual.mesa ?? c.mesa;
         const tipo = datosManual.tipo !== c.tipo ? datosManual.tipo : c.tipo;
-        const totalPaginas =
-          c.pagina?.total ?? acta.pagina?.total ?? 1;
+        // Kit paginas-acta-e14-v1: el total que se HORNEA es el del acta
+        // (2 hojas — dueño), no el total dudoso que viajara del OCR.
+        const totalPaginas = PAGINAS_POR_ACTA_E14;
         const paginaEditada =
           datosManual.paginaIndex !== (c.pagina?.index ?? acta.pagina?.index ?? 1)
             ? { index: datosManual.paginaIndex, total: totalPaginas }
@@ -677,8 +687,6 @@ export function ModalRevisor({
     totalMesas != null && totalMesas > 0
       ? Array.from({ length: totalMesas }, (_, i) => i + 1)
       : [];
-  const totalPaginas = c?.pagina?.total ?? acta.pagina?.total ?? 1;
-
   // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — rondas 2
   //    y 3): el 1D REAL leído al papel por el pipeline o el manifiesto de
   //  actas reales como respaldo — UNA sola fuente (barcodeRealDeActa del
@@ -1012,7 +1020,7 @@ export function ModalRevisor({
             <span>{etiquetaForm}</span>
             <span aria-hidden>·</span>
             <span className="font-bold">
-              PÁG {pagina ? `${pagina.index}/${pagina.total}` : "-/-"}
+              PÁG {pagina ? `${pagina.index}/${PAGINAS_POR_ACTA_E14}` : "-/-"}
             </span>
             <span className="text-gray-600" aria-hidden>
               |
@@ -1207,10 +1215,21 @@ export function ModalRevisor({
                   <DatoSelect
                     etiqueta="Página"
                     ariaLabel="Seleccionar página del acta"
-                    valor={String(datosManual.paginaIndex)}
-                    opciones={Array.from({ length: Math.max(1, totalPaginas) }, (_, i) => ({
+                    // Kit paginas-acta-e14-v1 (feedback del dueño): el total
+                    // del select es el del ACTA (2 hojas — «en este caso
+                    // serían 2 páginas»), NUNCA el del lote de ingesta ni un
+                    // total dudoso del OCR. El índice preseleccionado sigue
+                    // siendo el reconocido (clamp 1..2 por si el OCR viajó
+                    // fuera de rango).
+                    valor={String(
+                      Math.min(
+                        Math.max(1, datosManual.paginaIndex),
+                        PAGINAS_POR_ACTA_E14,
+                      ),
+                    )}
+                    opciones={Array.from({ length: PAGINAS_POR_ACTA_E14 }, (_, i) => ({
                       valor: String(i + 1),
-                      texto: `${i + 1} DE ${Math.max(1, totalPaginas)}`,
+                      texto: `${i + 1} DE ${PAGINAS_POR_ACTA_E14}`,
                     }))}
                     onCambiar={(v) => patchManual({ paginaIndex: Number(v) || 1 })}
                   />
@@ -1220,7 +1239,11 @@ export function ModalRevisor({
                   <DatoPanel etiqueta="Origen" valor={origenDe(acta)} />
                   <DatoPanel
                     etiqueta="Página"
-                    valor={pagina ? `${pagina.index} DE ${pagina.total}` : "- DE -"}
+                    valor={
+                      pagina
+                        ? `${pagina.index} DE ${PAGINAS_POR_ACTA_E14}`
+                        : "- DE -"
+                    }
                   />
                 </>
               )}

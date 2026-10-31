@@ -394,11 +394,21 @@ export interface RegistroMasiva {
   qrPresupuestoMs?: number | null;
 }
 
+/** KIT paginas-acta-e14-v1 (feedback del dueño): el E-14 es un formulario
+ *  de 2 HOJAS — el TOTAL de «PÁGINA» es siempre el del ACTA (2), jamás el
+ *  del lote de ingesta ni un total dudoso del OCR (dueño: «es el número de
+ *  páginas de las actas, en este caso serían 2 páginas»). El ÍNDICE sigue
+ *  siendo el reconocido (barcode/VerPag) o el corregido a mano. */
+export const PAGINAS_POR_ACTA_E14 = 2;
+
 /** KIT e14-carga-masiva-v1 (helper compartido runner/store): página corta del
- *  acta para la fila — "1/2" cuando el OCR la leyó, "-/-" si viajó null
- *  (honestidad del kit actas-vivas-paginas-v1, FASE B). */
+ *  acta para la fila — "1/2" cuando el OCR leyó el índice, "-/-" si viajó
+ *  null (honestidad del kit actas-vivas-paginas-v1, FASE B). Total = el del
+ *  acta (kit paginas-acta-e14-v1 — jamás un total dudoso del OCR o lote). */
 export function paginaDeActa(acta: Acta): string {
-  return acta.pagina ? `${acta.pagina.index}/${acta.pagina.total}` : "-/-";
+  return acta.pagina
+    ? `${acta.pagina.index}/${PAGINAS_POR_ACTA_E14}`
+    : "-/-";
 }
 
 /** D72 — KIT e14-masiva-formato-ancho-v1: título compacto del acta para la fila
@@ -443,11 +453,12 @@ export function tituloDeActa(acta: Acta): string | null {
     partes.push(`MESA ${String(c.mesa).padStart(3, "0")}`);
   }
 
-  // 6. Página (e.g. "PAG 1/2")
-  if (c.pagina && c.pagina.index != null && c.pagina.total != null) {
-    partes.push(`PAG ${c.pagina.index}/${c.pagina.total}`);
-  } else if (acta.pagina && acta.pagina.index != null && acta.pagina.total != null) {
-    partes.push(`PAG ${acta.pagina.index}/${acta.pagina.total}`);
+  // 6. Página (e.g. "PAG 1/2") — total SIEMPRE el del acta (kit
+  //    paginas-acta-e14-v1: 2 hojas; jamás un total dudoso del OCR/lote).
+  if (c.pagina && c.pagina.index != null) {
+    partes.push(`PAG ${c.pagina.index}/${PAGINAS_POR_ACTA_E14}`);
+  } else if (acta.pagina && acta.pagina.index != null) {
+    partes.push(`PAG ${acta.pagina.index}/${PAGINAS_POR_ACTA_E14}`);
   }
 
   const t = partes.join(" - ").toUpperCase();
