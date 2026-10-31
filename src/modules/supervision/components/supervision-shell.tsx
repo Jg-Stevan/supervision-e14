@@ -38,7 +38,6 @@ import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
 import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
-import { VistaRecepcion } from "./vista-recepcion";
 // KIT carga-masiva-supervision-v1 (D27) — la vista CARGA MASIVA es el módulo
 // digitalizador trasplantado (src/modules/digitalizador/**). ÚNICO seam de
 // UI supervision→digitalizador: la vista recibe `onVerEnMonitor` para
@@ -63,7 +62,14 @@ import { colorDeTono } from "@/shared/ui/tono";
  *
  * KIT SUP-5 (D20): "notificaciones" e "informes" quedan DORMIDAS — sus
  * componentes y su lógica en el store permanecen intactos e inalcanzables
- * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista. */
+ * (ver MODULOS_INACTIVOS); reactivar la entrada = editar esa lista.
+ *
+ * Ronda «reloj real» (pedido del dueño): «recepción debe ser el mismo que
+ * monitor global, ese se reemplaza (el de recepción)» — la vista de
+ * RECEPCIÓN se RETIRA (dormida con el mismo patrón D20) y su lugar lo
+ * ocupa el visor del MONITOR GLOBAL: un solo visor de monitoreo. Las
+ * llegadas EN VIVO siguen registrándose (recepcion-log) y reactivar la
+ * vista cuesta quitar "recepcion" de MODULOS_INACTIVOS. */
 export type VistaId =
   | "monitor"
   | "recepcion"
@@ -82,6 +88,9 @@ export type VistaId =
 export const MODULOS_INACTIVOS: readonly VistaId[] = [
   "notificaciones",
   "informes",
+  // Ronda «reloj real»: la RECEPCIÓN se reemplaza por el MONITOR GLOBAL
+  // (un solo visor de monitoreo — pedido del dueño). Dormida, reversible.
+  "recepcion",
 ];
 
 interface ItemNav {
@@ -289,9 +298,6 @@ function VistaActual({
   switch (vista) {
     case "anomalias":
       return <VistaAnomalias />;
-    case "recepcion":
-      // D28 — log de recepción: mismo seam por props del masiva (D27).
-      return <VistaRecepcion onVerEnMonitor={onVerEnMonitor} />;
     case "carga-masiva":
       return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
     case "perfil":

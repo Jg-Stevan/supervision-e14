@@ -74,6 +74,19 @@ export interface Puesto {
   pctTransmision: number;
   estadoGlobal: EstadoGlobal;
   /**
+   * Zona horaria IANA del PAÍS EMISOR del acta (ronda «reloj real»:
+   * «local es colombia, país es el q emite»). Alimenta el reloj real:
+   * hora actual, cierre 4:00 p. m. local y estado por tiempo — ver
+   * domain/reloj-jornada y domain/proyeccion-viva.
+   */
+  zonaEmisor: string;
+  /**
+   * Ancla con horario CONGELADO del mockup (kit §4.9 — Roma): su hora,
+   * tiempo y estado son los exactos del mockup y NO siguen el reloj real
+   * (true solo en la ancla de práctica).
+   */
+  relojFijo?: boolean;
+  /**
    * Día de la jornada electoral en el que VOTA el puesto (kit
    * monitor-jornada-v1). Derivado del prefijo real del catálogo DIVIPOLA
    * («LUNES LISBOA…», «SABADO LISBOA…»); los puestos base sin prefijo son

@@ -55,6 +55,9 @@ import { consultarActaRuntime } from "./actas-runtime";
 import { ID_ENLACE_ROMA, cargarCatalogoDivipola } from "./divipola-adapter";
 import { crearRandomDeterministico } from "../domain/acta";
 import { diaDeNombrePuesto } from "../domain/jornada";
+// Ronda «reloj real»: zona horaria IANA del PAÍS EMISOR (cada puesto vive
+// la hora de su país; la LOCAL del supervisor es Colombia).
+import { zonaDePuesto } from "../domain/zonas-emisor";
 import type { SupervisionRepository } from "./supervision-repository";
 import {
   aprobarActaMock,
@@ -256,6 +259,13 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
       estadoSembrado,
       horario.minutosDesdeCierre
     ),
+    // Ronda «reloj real» — la hora del puesto es la del PAÍS EMISOR:
+    // zona IANA real (refinada por ciudad en países multizona) para que
+    // la proyección viva derive hora actual/cierre/estado del reloj. El
+    // horario SEMBRADO queda como fallback/pre-hidratación (y es la
+    // historia congelada de los COMPLETO y del ancla Roma).
+    zonaEmisor: zonaDePuesto(registro.nombreMunicipio, registro.nombre),
+    ...(esAncla ? { relojFijo: true } : {}),
     diaJornada: diaDeNombrePuesto(registro.nombre),
   };
 }

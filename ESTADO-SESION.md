@@ -336,6 +336,97 @@ como recibida (el acta llegó pero fue rechazada); el CRÍTICO automático
    effect — quedaron resueltos con patrones canónicos: rAF diferido con
    limpieza, ancho determinista por `useId`, `useSyncExternalStore`).
 
+## 8e. Ronda «RELOJ REAL» — clasificaciones de TIEMPO + un solo visor (✅ IMPLEMENTADA Y VERIFICADA E2E)
+
+**Pedido del dueño:** «reloj real, cambia el estado del puesto, local es
+colombia país es el q emite» + clasificaciones: NO INICIADO (aún no son
+las 16:00 del país emisor) · normal ~1 hr de digitalización · > 1 hr
+amarillo (toca estar pendiente) · > 3 hrs rojo CRÍTICO · y «recepción
+debe ser el mismo que monitor global, ese se reemplaza (el de
+recepción)».
+
+**Diagnóstico:** todo el horario de la matriz era SEMBRADO por seed
+(draws: cierre COL 9 AM-1 PM, hora local = 16:00 + transcurrido, tramo
+derivado) — estático, sin reloj: nada cambiaba aunque pasaran horas.
+La vista Recepción duplicaba un segundo visor de monitoreo.
+
+**Regla implementada (4 piezas):**
+
+1. **`domain/zonas-emisor.ts` (nuevo):** mapa país→zona IANA de los 67
+   países del catálogo + refinamiento por CIUDAD del nombre del puesto en
+   países multizona (EE. UU. Eastern/Central/Mountain/Pacific/Alaska/
+   Hawaii, Canadá, Brasil, México, Australia). `normalizarNombre` quita
+   tildes («México»→MEXICO, «ESPAÑA»→ESPANA).
+2. **`domain/reloj-jornada.ts` (nuevo):** el instante de cierre = 16:00
+   HORA LOCAL del país emisor en la FECHA de su día de jornada de la
+   semana actual (anclada a la fecha de HOY en COLOMBIA — «local es
+   colombia»), derivado con `Intl.DateTimeFormat` (anclaje iterativo
+   probado contra DST en hemisferio sur). `minutosDesdeCierreReal`
+   (negativo = NO INICIADO), `relojDeZona` (hora real del país),
+   `cierreColombiaDe` (conversión REAL a Bogotá), `diaJornadaHoy`,
+   `relojColombiaConSegundos` (chip LOCAL COL).
+3. **`domain/proyeccion-viva.ts` (nuevo):** `proyectarPuesto(puesto,
+   ahora)` — los NO completos se proyectan sobre el reloj real: hora del
+   país emisor real y en vivo, cierre COL real, tramo/estado derivados
+   (`NO_INICIADO` min<0 · `PENDIENTE` 0-179 · `CRITICO` ≥180 · COMPLETO
+   jamás se degrada). Un puesto que aún no cierra muestra pcts en 0 (no
+   ha recibido nada — honestidad de recepción). Los COMPLETOS conservan
+   su historia sembrada pero alinean su «Cierre COL» al huso real del
+   emisor. El ancla Roma (`relojFijo`) queda congelada (kit §4.9).
+   `ahora === 0` (SSR) no proyecta — cero mismatch de hidratación.
+4. **`components/reloj-vivo.ts` (nuevo):** un solo interval de 1 s para
+   el módulo (store + `useSyncExternalStore`, canónico de lint);
+   `useRelojVivo()` cambia por MINUTO (alimenta la proyección),
+   `useRelojSegundos()` por segundo (solo el chip LOCAL COL hoja).
+
+**Clasificaciones TIEMPO (`domain/tiempo-cierre.ts`):** tramo nuevo
+`no-iniciado` (min < 0, severidad `inicial` — GRIS en la matriz con
+etiqueta «NO INICIADO»); < 1 hr verde; 1-3 hrs ámbar; > 3 hrs rojo.
+Los KPIs, el resumen, los filtros de estado y la matriz consumen los
+puestos PROYECTADOS → **el estado del puesto cambia solo conforme
+avanza el reloj real**. La vista abre en la jornada EN CURSO según
+Colombia (`diaJornadaHoy`) — el hash del dueño restaura el día que dejó
+elegido.
+
+**RECEPCIÓN retirada:** `MODULOS_INACTIVOS += "recepcion"` (patrón D20
+— reversible editando la lista): un solo visor de monitoreo, el MONITOR
+GLOBAL. La vista vive dormida (`vista-recepcion.tsx` intacto sin
+import); las llegadas EN VIVO siguen registrándose en `recepcion-log`.
+
+**Fix de coherencia del visor:** `horaActual()` de actas-mock usaba la
+hora del NAVEGADOR para los eventos nuevos (APROBADA / RESCANEO
+CONFIRMADO) — ahora resuelve la zona del puesto emisor por el catálogo
+y lleva la hora REAL del país («país es el q emite»).
+
+**Verificación:**
+1. Suite **314/314 pass** (45 tests nuevos: anclaje 16:00 exacto en 18
+   zonas × 4 epochs, DST hemisferio sur, Japón=14 h antes de Colombia,
+   signo de minutos, estados en vivo, identidad estable, zonas/ciudades,
+   historia COMPLETO con cierre real). Golden del store intacta (la
+   proyección es presentación — no toca la semilla).
+2. Lint **0 errores** (3 warnings preexistentes de código dormido/visor).
+3. E2E agent-browser (sábado real, 16:52 COL): KPIs vivos del SÁBADO
+   (45 CRÍTICO · 37 PENDIENTE · 8 NO INICIADO), chip **LOCAL COL con
+   segundos corriendo**, cierres COL REALES (NZ 10:00 PM · Japón 2:00 AM
+   · China 3:00 AM · Panamá/Perú 4:00 PM · México 5:00 PM), hora del
+   país emisor avanzando EN VIVO (Auckland 10:54→10:55 AM), las 4
+   clasificaciones simultáneas (gris/verde/ámbar/rojo), COMPLETOS verdes
+   al fondo, sidebar SIN «Recepción de actas», filtro KPI NO INICIADO →
+   8 filas todas grises, transición Filipinas 100/50 CRÍTICO →
+   REINSPECCIONAR → 100/100 COMPLETO.
+4. **Prueba del reloj moviendo estados SOLO:** mientras se verificaba,
+   Brasil (UTC-3, cierre 14:00 COL) cruzó los 180 min → CRÍTICO 45→51
+   en vivo; México/Costa Rica/Canadá-Calgary cruzaron su cierre 5:00 PM
+   COL → NO INICIADO 8→3. Nada se tocó a mano: el reloj real manda.
+5. Móvil 375×812: KPIs 2-col, chip LOCAL COL vivo, sin roturas. Cero
+   errores de página en consola.
+
+**Límites documentados del demo:** los pcts/mesas sembrados no avanzan
+con el reloj (la progresión en vivo será el botón de SIMULACIÓN del
+backlog); el horario interno del ACTA (historial sembrado «14:00
+LOCAL») es historia del demo — solo los eventos NUEVOS llevan la hora
+real del país emisor.
+
 ## 9. Cómo verificar (SIEMPRE)
 
 ```bash

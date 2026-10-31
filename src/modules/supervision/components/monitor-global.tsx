@@ -10,6 +10,11 @@ import { useDatos, useDatosAcciones, useDatosTicker, resumenDePuestos } from "./
 // R4-M7 — espejo de los filtros en location.hash (D11: espejo, NO router).
 import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
 import { tramoDeMinutos } from "../domain/tiempo-cierre";
+// Ronda «reloj real»: proyección viva de los puestos (estado/hora/tiempo
+// reales del país emisor) + reloj LOCAL del supervisor (Colombia).
+import { proyectarPuesto } from "../domain/proyeccion-viva";
+import { diaJornadaHoy, relojColombiaConSegundos } from "../domain/reloj-jornada";
+import { useRelojSegundos, useRelojVivo } from "./reloj-vivo";
 import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
 
 /**
@@ -24,6 +29,15 @@ import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
  * los KPIs — cada jornada se supervisa aislada, sin mezclar puestos de
  * días distintos (pedido del dueño). La regla de resumen es la MISMA
  * derivación del store (resumenDePuestos) sobre el conjunto del día.
+ *
+ * RONDA «RELOJ REAL» (pedido del dueño): los puestos se proyectan sobre
+ * el reloj real ANTES de alimentar KPIs, resumen y matriz — el estado,
+ * la hora del país emisor y el TIEMPO cambian solos conforme avanza el
+ * reloj (NO INICIADO antes de las 16:00 del emisor · verde < 1 hr ·
+ * amarillo > 1 hr · rojo CRÍTICO > 3 hrs). La vista abre en la jornada
+ * EN CURSO según Colombia (la LOCAL del supervisor): es la única que el
+ * reloj real está viviendo ahora — el hash restaurado del dueño gana si
+ * trae otro día.
  */
 export function VistaMonitor() {
   const {
@@ -40,23 +54,36 @@ export function VistaMonitor() {
   // contexto hoja — este componente (y las 949 filas) ya NO re-renderiza
   // cada 5 s; solo el chip del ticker lo hace.
   const { segundos: segundosDesdeSync } = useDatosTicker();
-  // Pedido del dueño: la vista abre en la jornada del LUNES (primer día
-  // de la semana electoral) — KPIs, resumen y matriz cargan SOLO ese día
-  // («no cargue todos los puestos de todos los días»). «Todos los días»
-  // sigue disponible a mano desde el select FECHA.
-  const [filtros, setFiltros] = useState<FiltrosPuestos>({ fecha: "LUNES" });
+  // Ronda «reloj real»: el reloj del supervisor (Colombia) corre en el
+  // chip LOCAL COL; el reloj de los PUESTOS (país emisor) entra por el
+  // minuto vivo que alimenta la proyección (ambos: reloj-vivo.ts).
+  const ahoraMinuto = useRelojVivo();
+  const ahoraSegundo = useRelojSegundos();
+  // Pedido del dueño (ronda «reloj real»): la vista abre en la jornada EN
+  // CURSO según Colombia — antes abría en LUNES (fijo del demo); con el
+  // reloj real, las jornadas pasadas quedan atrás (rezagados críticos
+  // reales) y la viva es HOY. La fecha NO se lee en el render (impura —
+  // lint de pureza): la fija el effect de restauración de más abajo, que
+  // además deja ganar al día que el dueño dejó en el hash.
+  const [filtros, setFiltros] = useState<FiltrosPuestos>({});
 
   // R4-M7 — restauración de los filtros desde el espejo hash, UNA vez al
   // montar (ref anti-doble-invoke). setState diferido a microtask (misma
-  // regla de lint que C8). El merge conserva el default del dueño para las
-  // claves que el hash no trae.
+  // regla de lint que C8). Ronda «reloj real»: si el hash no trae el día
+  // que dejó elegido el dueño, el default es la jornada EN CURSO según
+  // Colombia (la LOCAL del supervisor) — Date.now() vive AQUÍ (effect),
+  // nunca en el render.
   const filtrosRestauradosRef = useRef(false);
   useEffect(() => {
     if (filtrosRestauradosRef.current) return;
     filtrosRestauradosRef.current = true;
     const { filtros: delHash } = leerEstadoHash();
-    if (Object.keys(delHash).length === 0) return;
-    queueMicrotask(() => setFiltros((prev) => ({ ...prev, ...delHash })));
+    queueMicrotask(() =>
+      setFiltros((prev) => ({
+        ...prev,
+        fecha: delHash.fecha ?? diaJornadaHoy(Date.now()),
+      }))
+    );
   }, []);
 
   // R4-M7 — espejo de escritura de los filtros (merge con las otras
@@ -65,15 +92,25 @@ export function VistaMonitor() {
     escribirHashParcial({ filtros });
   }, [filtros]);
 
+  // Ronda «reloj real» — PROYECCIÓN VIVA: hora del país emisor, TIEMPO y
+  // estado global recalculados con el reloj real (los COMPLETO y el ancla
+  // Roma quedan intactos — domain/proyeccion-viva). Snapshot 0 (SSR) no
+  // proyecta. La identidad de cada puesto es estable si nada cambió → el
+  // memo de las filas evita re-renders entre minutos.
+  const puestosVivos = useMemo(
+    () => puestos.map((puesto) => proyectarPuesto(puesto, ahoraMinuto)),
+    [puestos, ahoraMinuto]
+  );
+
   // Conjunto del DÍA (solo filtro de fecha): alimenta KPIs y resumen —
   // los otros filtros (país/zona/puesto/búsqueda/estado toggle) siguen
   // afectando SOLO la matriz, como hoy.
   const puestosDelDia = useMemo(
     () =>
       filtros.fecha
-        ? puestos.filter((puesto) => puesto.diaJornada === filtros.fecha)
-        : puestos,
-    [puestos, filtros.fecha]
+        ? puestosVivos.filter((puesto) => puesto.diaJornada === filtros.fecha)
+        : puestosVivos,
+    [puestosVivos, filtros.fecha]
   );
   const resumenDelDia = useMemo(
     () => resumenDePuestos(puestosDelDia),
@@ -178,6 +215,11 @@ export function VistaMonitor() {
         <ResumenChips
           resumen={resumenDelDia}
           sincronizadoHace={`Sincronizado hace ${segundosDesdeSync}s`}
+          relojLocal={
+            ahoraSegundo === 0
+              ? undefined
+              : relojColombiaConSegundos(ahoraSegundo)
+          }
         />
         <PuestosTable
           puestos={filtrados}

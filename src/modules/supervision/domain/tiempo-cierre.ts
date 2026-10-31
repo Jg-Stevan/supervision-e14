@@ -3,16 +3,16 @@
  * vault §01 (kit monitor-jornada-v1): la votación y la digitalización del
  * E-14 en consulados cierran a las 4:00 p. m. HORA LOCAL del país del
  * puesto de digitalización. La columna «Tiempo» de la matriz muestra el
- * transcurrido desde ese cierre, señalizado por color según el tramo
- * (pedido del dueño: «más de 3 horas es crítico»):
+ * transcurrido desde ese cierre, señalizado por color según las
+ * CLASIFICACIONES del dueño (ronda «reloj real»):
  *
- *   < 1 hr   → ok (verde)      · digitalización al día
- *   1-2 hrs  → alerta (ámbar)
- *   2-3 hrs  → alerta (ámbar)
- *   > 3 hrs  → crítico (rojo)  · umbral del dueño
+ *   < 0      → NO INICIADO (gris) — aún no son las 16:00 del país emisor
+ *   < 1 hr   → ok (verde)      · digitalización al día (~1 hr normal)
+ *   1-3 hrs  → alerta (ámbar)  · «toca estar pendiente del puesto»
+ *   > 3 hrs  → crítico (rojo)  · «toca estar más atento» — umbral dueño
  *
- * La «Hora actual» del puesto es coherente por construcción con este
- * módulo: hora actual local = 16:00 local + transcurrido.
+ * Con el reloj real (domain/reloj-jornada) los minutos SON reales: el
+ * tramo y el color cambian solos conforme avanza el reloj.
  *
  * Frontera de dominio: sin dependencias de librerías ni de CSS.
  */
@@ -30,8 +30,12 @@ export const CIERRE_LOCAL_MIN = 16 * 60;
  */
 export const UMBRAL_CRITICO_MIN = 180;
 
-/** Severidad de señalización del tiempo transcurrido. */
-export type SeveridadTiempo = "ok" | "alerta" | "critico";
+/**
+ * Severidad de señalización del tiempo transcurrido. "inicial" = NO
+ * INICIADO (el puesto aún no cierra — antes de las 4:00 p. m. del país
+ * emisor): gris, sin urgencia de digitalización.
+ */
+export type SeveridadTiempo = "inicial" | "ok" | "alerta" | "critico";
 
 /** Un tramo de tiempo transcurrido desde el cierre (4:00 p. m. local). */
 export interface TramoTiempo {
@@ -46,8 +50,21 @@ export interface TramoTiempo {
   severidad: SeveridadTiempo;
 }
 
-/** Tramos canónicos en orden — alimenta la columna «Tiempo» y su filtro. */
+/**
+ * Tramos canónicos en orden — alimenta la columna «Tiempo» y su filtro.
+ * El PRIMER tramo es el NO INICIADO (minutos negativos: aún no cierra el
+ * puesto en su país emisor — clasificación del dueño); los puestos de
+ * jornadas FUTURAS de la semana (días por venir) caen aquí con valores
+ * muy negativos, y la severidad gris los mantiene fuera de la urgencia.
+ */
 export const TRAMOS_TIEMPO: readonly TramoTiempo[] = [
+  {
+    id: "no-iniciado",
+    etiqueta: "NO INICIADO",
+    minMin: Number.NEGATIVE_INFINITY,
+    maxMin: 0,
+    severidad: "inicial",
+  },
   { id: "<1", etiqueta: "< 1 hr", minMin: 0, maxMin: 60, severidad: "ok" },
   { id: "1-2", etiqueta: "1-2 hrs", minMin: 60, maxMin: 120, severidad: "alerta" },
   { id: "2-3", etiqueta: "2-3 hrs", minMin: 120, maxMin: UMBRAL_CRITICO_MIN, severidad: "alerta" },
@@ -60,12 +77,16 @@ export const TRAMOS_TIEMPO: readonly TramoTiempo[] = [
   },
 ];
 
-/** Tramo por minutos transcurridos desde el cierre local 4:00 p. m. */
+/**
+ * Tramo por minutos transcurridos desde el cierre local 4:00 p. m.
+ * Acepta negativos (NO INICIADO — aún no son las 16:00 del emisor).
+ */
 export function tramoDeMinutos(minutos: number): TramoTiempo {
   const hallado = TRAMOS_TIEMPO.find(
     (tramo) => minutos >= tramo.minMin && minutos < tramo.maxMin
   );
-  // Cualquier minutos ≥ 0 cae en algún tramo (el último es abierto).
+  // Cualquier minutos (también negativos) cae en algún tramo: el primero
+  // es abierto por abajo y el último por arriba.
   return hallado as TramoTiempo;
 }
 

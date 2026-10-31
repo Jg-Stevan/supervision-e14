@@ -35,8 +35,13 @@ import type {
   PaginaActa,
 } from "../domain/acta";
 import { crearRandomDeterministico as crearRandom } from "../domain/acta";
+// Ronda «reloj real»: los eventos NUEVOS del visor (aprobar/rescan) llevan
+// la hora REAL del PAÍS EMISOR («país es el q emite» — la LOCAL del
+// supervisor es Colombia y NO es la del acta).
+import { partesDeZona } from "../domain/reloj-jornada";
+import { zonaDePuesto } from "../domain/zonas-emisor";
 import type { ActaRealLista } from "./actas-reales/actas-reales";
-import { ID_ENLACE_ROMA } from "./divipola-adapter";
+import { ID_ENLACE_ROMA, cargarCatalogoDivipola } from "./divipola-adapter";
 import { cargarActasReales } from "./actas-reales/actas-reales";
 
 // M13 — reglas de derivación CANÓNICAS en el dominio: `delegadosAcreditados`
@@ -362,8 +367,26 @@ function actaEnCache(actaId: string): { clave: string; acta: ActaMesa } | null {
   return null;
 }
 
-/** Hora actual del navegador formateada como los eventos ("HH:MM"). */
-function horaActual(): string {
+/**
+ * Hora ACTUAL del PAÍS EMISOR del acta, formateada como los eventos
+ * ("HH:MM", 24 h) — ronda «reloj real»: la zona sale del catálogo
+ * DIVIPOLA por el puestoId del acta (misma fuente que la matriz).
+ * Respaldo: hora del navegador si el puesto no está en el catálogo.
+ */
+function horaActual(puestoId?: string): string {
+  if (puestoId) {
+    const catalogo = cargarCatalogoDivipola();
+    const registro = catalogo.ok
+      ? catalogo.catalogo.find((r) => r.idEnlace === puestoId)
+      : undefined;
+    if (registro) {
+      const zona = zonaDePuesto(registro.nombreMunicipio, registro.nombre);
+      const p = partesDeZona(zona, Date.now());
+      return `${String(Math.floor(p.min / 60)).padStart(2, "0")}:${String(
+        p.min % 60
+      ).padStart(2, "0")}`;
+    }
+  }
   const ahora = new Date();
   return `${String(ahora.getHours()).padStart(2, "0")}:${String(
     ahora.getMinutes()
@@ -399,7 +422,7 @@ export function aprobarActaMock(
   acta.motivo = undefined;
   acta.historial = [
     {
-      hora: `${horaActual()} LOCAL`,
+      hora: `${horaActual(acta.puestoId)} LOCAL`,
       titulo: "APROBADA POR SUPERVISOR",
       detalle: `ID: ADM-9482 · Obs: ${truncar(observacion)}`,
       nivel: "APROBADA",
@@ -436,7 +459,7 @@ export function confirmarRescanActaMock(
   acta.motivo = undefined;
   acta.historial = [
     {
-      hora: `${horaActual()} LOCAL`,
+      hora: `${horaActual(acta.puestoId)} LOCAL`,
       titulo: "RESCANEO CONFIRMADO",
       detalle: `Nueva transmisión recibida desde sesión ${acta.id}`,
       nivel: "ALERTA",

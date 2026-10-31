@@ -138,18 +138,24 @@ function BotonOrden({
   );
 }
 
-/** Color de señalización del «Tiempo» según la severidad del tramo. */
+/**
+ * Color de señalización del «Tiempo» según la severidad del tramo — las
+ * CLASIFICACIONES del dueño (ronda «reloj real»): NO INICIADO gris ·
+ * verde < 1 hr (normal, ~1 hr de digitalización) · ámbar > 1 hr (toca
+ * estar pendiente) · rojo > 3 hrs (CRÍTICO, más atento aún).
+ */
 const COLOR_SEVERIDAD: Record<SeveridadTiempo, string> = {
+  inicial: "var(--muted-foreground)",
   ok: "var(--success)",
   alerta: "var(--warning)",
   critico: "var(--danger)",
 };
 
 /**
- * Celda «Tiempo» — transcurrido desde el cierre de 4:00 p. m. HORA LOCAL
- * del país del puesto de digitalización (pedido del dueño), señalizado
- * por color según el tramo: verde < 1 hr · ámbar 1-3 hrs · rojo > 3 hrs
- * (umbral crítico del dueño).
+ * Celda «Tiempo» — transcurrido REAL desde el cierre de 4:00 p. m. HORA
+ * LOCAL del país del puesto de digitalización (reloj real), señalizado
+ * por las clasificaciones del dueño: NO INICIADO (aún no son las 16:00
+ * del país emisor) · verde < 1 hr · ámbar > 1 hr · rojo > 3 hrs.
  */
 function SenalTiempo({ minutos }: { minutos: number }) {
   const tramo = tramoDeMinutos(minutos);
@@ -158,7 +164,11 @@ function SenalTiempo({ minutos }: { minutos: number }) {
     <span
       className="inline-flex items-center gap-1.5 whitespace-nowrap"
       style={{ color }}
-      title="Tiempo transcurrido desde el cierre (4:00 p. m. hora local del país del puesto de digitalización). Más de 3 horas es crítico."
+      title={
+        tramo.severidad === "inicial"
+          ? "NO INICIADO — aún no son las 4:00 p. m. del país emisor (mesas abiertas)."
+          : "Tiempo transcurrido desde el cierre (4:00 p. m. hora local del país emisor). Normal ~1 hr; más de 1 hr toca estar pendiente (ámbar); más de 3 hrs es crítico (rojo)."
+      }
     >
       <span
         aria-hidden
@@ -513,14 +523,14 @@ const PuestoRow = memo(function PuestoRow({
             </TableCell>
             <TableCell
               className="body-md px-1.5 whitespace-nowrap"
-              title="Hora de cierre en hora de Colombia (cierre 4:00 p. m. hora local del país)"
+              title="Hora de cierre en hora de Colombia (4:00 p. m. hora local del país emisor, convertida a Bogotá)"
             >
               {puesto.horaCierreColombia}
             </TableCell>
-            <TableCell className="body-md px-1.5">
+            <TableCell className="body-md px-1.5 whitespace-nowrap">
               <span
                 className="inline-block rounded-[4px] border border-(--success) px-1.5 py-0.5 whitespace-nowrap"
-                title="Hora local del país del puesto de digitalización"
+                title="Hora ACTUAL del país emisor (zona horaria de su consulado) — avanza con el reloj real. La hora LOCAL del supervisor es Colombia."
               >
                 {puesto.horaActualLocal}
               </span>
