@@ -58,9 +58,12 @@
  * PENDIENTE (dueño): el import DINÁMICO de rescate
  * scanner-core-bridge→masiva/identidad-qr (decodificarQrDeCapture, e64-qr
  * T-2.1 — moverlo exige arrastrar la cadena completa de tiers QR de masiva;
- * lazy intencional, no es inversión de símbolos estática). Los cuerpos
- * gemelos de los pipelines quedaron unificados en pipeline-comun.ts (M6-fin,
- * R7c) — ver mapa arriba.
+ * lazy intencional, no es inversión de símbolos estática). RESUELTO en R10
+ * (M10-fin, ola 4): el decodificador llega INYECTADO por
+ * `OpcionesEscaneo.decodificadorQrCam` (tipo DecodificadorQrCam en types.ts
+ * — patrón R8 store-api); el bridge ya NO importa masiva (ver bloque
+ * e64-qr T-2.1 del pipeline). Los cuerpos gemelos de los pipelines quedaron
+ * unificados en pipeline-comun.ts (M6-fin, R7c) — ver mapa arriba.
  */
 import {
   detectDocumentEdgesDetail,
@@ -549,25 +552,37 @@ export class RealCoreBridge implements E14Bridge {
     parcial.fotoOriginal = fotoOriginal;
 
     // e64-qr T-2.1 — CAPA 0 QR también en cámara (kit FASE 2 / hermano C-1):
-    // el MISMO decodificador de masiva (import DINÁMICO — el bundle crítico
-    // del escaneo no engorda), señal ADITIVA — jamás afecta score/gate/OCR
-    // ni consume intento. Se lanza EN PARALELO al pipeline (el tier base
-    // resuelve en ~0.3-0.5 s — mucho antes del OCR) y se ESPETA donde el
-    // acta se construye. tiers "base" — ADAPTACIÓN DECLARADA: la cadena
-    // completa (~15-17 s sin-QR, bloques sync) rompería el timeout 15 s del
-    // flujo individual; el rescate pesado queda en masiva (timeout 120 s).
+    // el MISMO decodificador de masiva, señal ADITIVA — jamás afecta
+    // score/gate/OCR ni consume intento. Se lanza EN PARALELO al pipeline
+    // (el tier base resuelve en ~0.3-0.5 s — mucho antes del OCR) y se
+    // ESPETA donde el acta se construye. tiers "base" — ADAPTACIÓN DECLARADA:
+    // la cadena completa (~15-17 s sin-QR, bloques sync) rompería el timeout
+    // 15 s del flujo individual; el rescate pesado queda en masiva (timeout
+    // 120 s).
     // GUARD (D63-C): `origenActa` viaja SOLO en entradas de MASIVA — allí la
     // capa 0 del runner (cadena COMPLETA a nivel registro, no acta) manda y
     // la señal base-only del bridge sería redundante y doble-costo: OMITIDA.
     // El catch es el fallback silencioso del kit: sin la señal, el flujo de
     // cámara sigue intacto.
+    // R10 — M10-fin (fin de la ÚLTIMA dependencia invertida núcleo→masiva):
+    // el decodificador ya NO se importa aquí (antes: import DINÁMICO de
+    // masiva/identidad-qr — PENDIENTE heredado de R7b); llega INYECTADO en
+    // `opciones.decodificadorQrCam` (patrón R8 store-api — frontera
+    // bridge.ts/types.ts). El runner MASIVA lo inyecta SIEMPRE: filas con
+    // `origen=null` (duda honesta del detector D63-A) caen en esta rama hoy
+    // y su señal viaja al veto ya-enviada post-OCR del runner (H1) — la
+    // inyección de la MISMA función preserva ese comportamiento byte a byte;
+    // el cableado del flujo individual/CÁMARA vive en su repo anfitrión.
+    // Sin decodificador → null (la MISMA conducta del catch de abajo: sin
+    // señal, el flujo de cámara sigue intacto).
     const esMasiva = opciones.origenActa != null;
+    const decodificadorQrCam = opciones.decodificadorQrCam;
     const qrCamPromesa: Promise<ParcialPipeline["qrCam"]> = esMasiva
       ? Promise.resolve(undefined) // la capa 0 del runner manda en masiva
       : (async () => {
           try {
-            const { decodificarQrDeCapture } = await import("./masiva/identidad-qr");
-            return await decodificarQrDeCapture(fotoOriginal, { tiers: "base" });
+            if (!decodificadorQrCam) return null; // R10 — sin señal inyectada: flujo intacto
+            return await decodificadorQrCam(fotoOriginal, { tiers: "base" });
           } catch {
             return null; // sin-payload — el flujo de cámara sigue intacto
           }
