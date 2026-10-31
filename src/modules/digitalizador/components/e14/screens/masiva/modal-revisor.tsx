@@ -31,6 +31,14 @@
 //   (7-23-10-19 — plancha del formulario E-14 exterior), NO el barcode;
 //   móvil: el modal COMPLETO hace scroll (navegable) y AJUSTAR = canvas a
 //   pantalla completa real (h-dvh).
+// · Feedback del dueño (ronda 2): VER EN MONITOR es FIJO — no desaparece
+//   tras darle click (la condición sale del JOIN del acta misma, no del
+//   registro en memoria de la publicación; solo se oculta con cuarentena
+//   D25, donde el acta NO está en el monitor). Código de barras se muestra
+//   SIN los asteriscos Code 39 (el diseño lo trae limpio). Tarjeta de
+//   datos NUNCA se comprime (shrink-0) y su contenido lleva DESPLAZADOR
+//   interno (max-h + overflow) para ventanas medianas/pequeñas — la info
+//   del acta siempre alcanzable; el resto del panel se compacta (gap-4).
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -792,13 +800,20 @@ export function ModalRevisor({
       </main>
 
       {/* ════════════════ PANEL DEL AUDITOR (SIDEBAR) ════════════════ */}
+      {/* gap-4 (ronda 2): los demás espacios se compactan para darle sitio
+          a la tarjeta de datos — feedback del dueño. */}
       <aside
         className={`w-full shrink-0 overflow-y-auto border-t border-[#16231e] bg-[#0c1210] p-5 lg:w-[380px] lg:border-l lg:border-t-0 ${
-          expandido ? "hidden" : "flex flex-col gap-6"
+          expandido ? "hidden" : "flex flex-col gap-4"
         }`}
       >
         {/* ── ENVÍO AUTOMÁTICO + datos reconocidos ── */}
-        <div className="overflow-hidden rounded border border-[#16231e] bg-[#080d0b]">
+        {/* shrink-0 (ronda 2): la tarjeta JAMÁS se comprime como ítem flex
+            (overflow-hidden le daba mínimo 0 → el contenido quedaba tapado/
+            recortado por los demás campos en ventanas medianas/pequeñas);
+            ahora el propio aside desplaza y el contenido lleva su propio
+            desplazador interno (ver div de datos). */}
+        <div className="shrink-0 overflow-hidden rounded border border-[#16231e] bg-[#080d0b]">
           <div className="flex items-center justify-between gap-2 border-b border-[#16231e]/60 bg-[#0d1613]/90 px-3 py-3">
             <div className="flex min-w-0 items-center gap-2">
               {enviadaAuto ? (
@@ -818,9 +833,15 @@ export function ModalRevisor({
               )}
             </div>
             {/* VER EN MONITOR (feedback del dueño): en la CABECERA del panel,
-                outline verde + icono monitor — solo con la publicación D27
-                aterrizada (misma condición de siempre). */}
-            {publicacion?.estado === "publicada" && join && onVerEnMonitor && (
+                outline verde + icono monitor. RONDA 2 — BOTÓN FIJO: la
+                condición es el JOIN del acta (clasificación AUTO, viaja
+                persistida con el acta) — NO el registro en memoria de la
+                publicación, que se pierde al recargar/cerrar; así el botón
+                NO desaparece tras darle click. Solo se oculta en cuarentena
+                D25 (bloqueada): ahí el acta NO existe en el monitor. */}
+            {join &&
+              onVerEnMonitor &&
+              publicacion?.estado !== "bloqueada" && (
               <button
                 type="button"
                 onClick={() =>
@@ -849,7 +870,12 @@ export function ModalRevisor({
               </span>
             )}
           </div>
-          <div className="space-y-3 p-3.5 font-mono text-xs">
+          {/* DESPLAZADOR INTERNO (feedback del dueño — ronda 2): en ventanas
+              medianas/pequeñas la tarjeta puede no caber entera → su
+              contenido se desplaza DENTRO (max-h + overflow) con scroll
+              fino (.scroll-panel). overscroll-contain solo en lg para no
+              atrapar el dedo en móvil (el scroll fluye al modal). */}
+          <div className="max-h-[45dvh] space-y-3 overflow-y-auto p-3.5 font-mono text-xs scroll-panel lg:overscroll-contain">
             {/* VERIFICACIÓN DE IDENTIFICADOR / CÓDIGO — el código IMPRESO
                 ENTRE LAS X del acta física (feedback del dueño; NO el
                 código de barras, que va en su campo propio). */}
@@ -883,7 +909,7 @@ export function ModalRevisor({
               <DatoPanel etiqueta="Kit" valor={kit} />
               <DatoPanel
                 etiqueta="Código de Barras"
-                valor={acta.codigoBarras || "—"}
+                valor={(acta.codigoBarras ?? "").replace(/\*/g, "") || "—"}
               />
             </div>
           </div>
@@ -901,7 +927,7 @@ export function ModalRevisor({
           </p>
         )}
 
-        <div className="mt-auto space-y-6 border-t border-[#16231e] pt-4">
+        <div className="mt-auto shrink-0 space-y-4 border-t border-[#16231e] pt-4">
           {/* ── OBSERVACIONES (motivo de la decisión — obligatorio) ── */}
           <div>
             <label

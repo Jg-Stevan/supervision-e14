@@ -411,7 +411,9 @@ function VisorAbierto() {
                       <span className="block truncate font-normal text-muted-foreground">
                         {`CONSULADO ${impresion.consulado} · PAÍS ${impresion.pais} · ZONA ${impresion.zona} · PUESTO ${impresion.puesto} · MESA ${impresion.mesa} · LUGAR ${impresion.lugar}`}
                         {barcodeReal && (
-                          <span className="font-mono"> · {barcodeReal}</span>
+                          <span className="font-mono">
+                            {` · ${barcodeReal.replace(/\*/g, "")}`}
+                          </span>
                         )}
                       </span>
                     </span>
