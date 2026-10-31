@@ -15,6 +15,23 @@ import type { NivelLectura } from "./senal-lectura";
 /** Origen del archivo. null = sin veredicto (duda honesta — jamás inventar). */
 export type OrigenActa = "escaneo" | "foto" | null;
 
+// R10 — M10-fin (fin de la ÚLTIMA dependencia invertida núcleo→masiva):
+// firma estructural del DECODIFICADOR QR de cámara (e64-qr T-2.1, tiers
+// "base") que el pipeline consume INYECTADO en OpcionesEscaneo.
+// decodificadorQrCam — el bridge (scanner-core-bridge.ts) JAMÁS importa
+// masiva/identidad-qr (era el último import dinámico núcleo→masiva, el
+// PENDIENTE heredado de R7b): quien ya conoce identidad-qr lo provee —
+// el runner MASIVA (ya lo importa para su capa 0) y el cableado del flujo
+// individual/CÁMARA en su repo anfitrión (patrón R8 store-api: tipos/
+// inyección en la frontera). Subconjunto MÍNIMO de la firma real de
+// decodificarQrDeCapture (masiva/identidad-qr.ts): si identidad-qr crece,
+// esta frontera NO crece. El tier "base" tiene su techo propio (~0.5 s,
+// ADAPTACIÓN DECLARADA e64-qr T-2.1) — el contrato no lo re-declara.
+export type DecodificadorQrCam = (
+  foto: string,
+  opciones: { tiers?: "completos" | "base" },
+) => Promise<{ payload: string } | null>;
+
 // ---------- Captura y análisis (SPEC fase lógica §3.1) ----------
 export type FuenteCaptura = "SIMULACION" | "CAMARA" | "ARCHIVO";
 

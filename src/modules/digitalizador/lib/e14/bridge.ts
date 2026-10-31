@@ -12,7 +12,18 @@
  * Fuente: (diseño propio e14, D35 — el mock de la fase gráfica se retiró;
  * SIMULACIÓN = pipeline real sobre el acta incluida).
  */
-import type { Acta, ProgresoAnalisis, FuenteCaptura, TipoPagina, OrigenActa } from "./types";
+import type {
+  Acta,
+  ProgresoAnalisis,
+  FuenteCaptura,
+  TipoPagina,
+  OrigenActa,
+  // R10 — M10-fin: firma del decodificador QR de cámara INYECTADO (el bridge
+  // ya no importa masiva/identidad-qr — fin de la ÚLTIMA dependencia
+  // invertida núcleo→masiva; el TIPO vive en types.ts junto a OrigenActa,
+  // mismo precedente R7b M10).
+  DecodificadorQrCam,
+} from "./types";
 import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
 // KIT e14-esquinas-suaves-v1 (Q2): origen del quad en el contrato del
 // recorte (ver comentario del contrato — el flag manual viaja con él).
@@ -63,6 +74,20 @@ export interface OpcionesEscaneo {
    *  SOLO MASIVA lo llena (mismo criterio de origenActa); los flujos
    *  individual/video/recorte-manual corren el probe de siempre. */
   origenSenales?: string | null;
+  /** R10 — M10-fin: DECODIFICADOR QR de cámara INYECTADO (e64-qr T-2.1,
+   *  tiers "base"). Antes el bridge lo traía con un import DINÁMICO de
+   *  masiva/identidad-qr — la ÚLTIMA dependencia invertida núcleo→masiva
+   *  (PENDIENTE heredado de R7b). Ahora el caller que ya conoce identidad-qr
+   *  lo provee aquí: el runner MASIVA lo inyecta SIEMPRE (decodificarQrDeCapture
+   *  ya está en su bundle — filas con `origen=null`, duda honesta del detector
+   *  D63-A, caen hoy en la rama tier-base del bridge y su señal qrCam viaja
+   *  al veto ya-enviada post-OCR del runner H1) y el cableado del flujo
+   *  individual/CÁMARA vive en su repo anfitrión. Ausente → la señal qrCam
+   *  queda null (MISMA conducta del catch silencioso del kit: sin señal, el
+   *  flujo de cámara sigue intacto). Firma mínima: DecodificadorQrCam
+   *  (types.ts). El guard esMasiva (`origenActa != null`) la OMITE igual que
+   *  hoy cuando la capa 0 del runner manda. */
+  decodificadorQrCam?: DecodificadorQrCam;
   onProgreso?: (p: ProgresoAnalisis) => void;
 }
 

@@ -1226,6 +1226,15 @@ async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipe
           // la rotación la cubren deskew D63-B + probe e66/e70 + rescate §B).
           // Intersección LOCAL OpcionesEscaneoConTimeout — bridge.ts intacto.
           desdeMasiva: true,
+          // R10 — M10-fin: el runner INYECTA el decodificador QR (la MISMA
+          // función que ya importa arriba para la capa 0 — import intacto) —
+          // el bridge ya NO lo importa (fin de la ÚLTIMA dependencia
+          // invertida núcleo→masiva). Necesario para las filas con
+          // `origen=null` (duda honesta del detector D63-A): hoy caen en la
+          // rama tier-base del bridge y su señal qrCam alimenta el veto
+          // ya-enviada post-OCR (H1, abajo). Con `origenActa` presente el
+          // guard esMasiva la OMITE igual que siempre (capa 0 manda).
+          decodificadorQrCam: decodificarQrDeCapture,
           onProgreso: (p) => {
             senal = { etapa: p.etapa, fraccion: p.progreso }; // etapa al morir (T1.4)
             marcarVida(fila.id, p); // señal de vida (T3 — throttle 250 ms)

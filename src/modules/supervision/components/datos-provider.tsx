@@ -12,6 +12,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
+  initSupervisionDatos,
   mockSupervisionRepository,
   TICKER_SEGUNDOS,
   TRANSICION_CADA_SEGUNDOS,
@@ -179,6 +180,9 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   // el contexto de DATOS solo cambia con eventos REALES (transiciones,
   // publicaciones, acciones) y el `valor` memoizado no invalida cada 5 s.
   const [segundosTicker, setSegundosTicker] = useState(0);
+  // R9 (ola-3) — motivo de la init BLOQUEADA (banner simple y accesible).
+  // null = catálogo válido (estado normal; jamás se pinta el banner).
+  const [motivoBloqueo, setMotivoBloqueo] = useState<string | null>(null);
 
   // ── KIT SUP-4 — estado del visor de actas (T3.2) ─────────────────────
   const [visorActa, setVisorActa] = useState<EstadoVisorActa | null>(null);
@@ -198,6 +202,22 @@ export function DatosProvider({ children }: { children: ReactNode }) {
   // idempotente — cada instancia solo aplica su setState si sigue viva).
   useEffect(() => {
     let vivo = true;
+    // R9 (ola-3) — ADOPCIÓN explícita de initSupervisionDatos() (C1/R3 +
+    // propuesta R4, RESUMEN-ola-1 §4-3): el momento de carga deja de ser un
+    // efecto perezoso de la primera lectura y pasa a ser ESTE mount.
+    // IDEMPOTENTE (memoizada en el repo): StrictMode puede llamarla 2 veces.
+    // Si la validación ESTRUCTURAL del catálogo falla el repo arranca VACÍO
+    // (0 puestos, jamás un white-screen) y el motivo `BLOQUEADA: …` del
+    // Result alimenta el banner de abajo — las lecturas siguen (devuelven
+    // listas vacías) y la UI sigue servible.
+    const resultadoInit = initSupervisionDatos();
+    if (!resultadoInit.ok) {
+      // setState diferido a microtask (misma regla de lint que C8/R4: nada
+      // de setState sincrónico en el cuerpo del effect).
+      queueMicrotask(() => {
+        if (vivo) setMotivoBloqueo(resultadoInit.motivo);
+      });
+    }
     (async () => {
       const repo = mockSupervisionRepository;
       const [puestos, notificaciones, anomalias] = await Promise.all([
@@ -675,6 +695,25 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     <ContextoDatos.Provider value={valorDatos}>
       <ContextoAcciones.Provider value={valorAcciones}>
         <ContextoTicker.Provider value={valorTicker}>
+          {/* R9 (ola-3) — banner BLOQUEADA (propuesta R4, RESUMEN-ola-1
+              §4-3): visible en TODAS las vistas mientras la init del
+              catálogo haya fallado. UX conservadora: sin rediseño, un
+              bloque de texto con el motivo verbatim del Result. role="alert"
+              lo anuncia una vez al insertarse (aparece tras el mount). */}
+          {motivoBloqueo !== null && (
+            <div
+              role="alert"
+              className="border-b border-(--warning) bg-card px-4 py-2.5 md:px-6"
+            >
+              <p className="body-md font-semibold text-(--warning)">
+                Datos de supervisión no disponibles
+              </p>
+              <p className="body-md mt-0.5 text-muted-foreground">
+                {motivoBloqueo} — el monitor arranca sin filas hasta que el
+                catálogo vuelva a ser válido.
+              </p>
+            </div>
+          )}
           {children}
           {/* KIT SUP-4 — el visor de actas es un modal por estado (D17): se
               monta desde el store del módulo (estado visorActa). */}

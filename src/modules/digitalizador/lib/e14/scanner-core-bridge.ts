@@ -49,13 +49,21 @@
  *                                (git mv de masiva/vendor — 0 imports estáticos
  *                                núcleo→masiva; qr-pixeles.ts lo consume vía
  *                                ../vendor, dirección correcta masiva→núcleo)
- * PENDIENTE (dueño, r7c/R8): unificar los CUERPOS gemelos de pipeline()/
- * pipelineRecorte() (M6 — banda dirigida, clasificación+lazo, escudo e71,
- * log de auditoría ~60 l ×2), la extracción rapidocr (R4/M8) y el import
- * DINÁMICO de rescate scanner-core-bridge→masiva/identidad-qr
- * (decodificarQrDeCapture, e64-qr T-2.1 — moverlo exige arrastrar la cadena
- * completa de tiers QR de masiva; lazy intencional, no es inversión de
- * símbolos estática).
+ *   · pipeline-comun.ts          (R7c/M6-fin) — los CUERPOS gemelos restantes
+ *                                de los 2 pipelines (banda dirigida, esquinas
+ *                                e71, señales de texto, evidencia-borde, cola
+ *                                del log de auditoría D51 y payload del
+ *                                diagnóstico) — diferencias del sitio EXPLÍCITAS
+ *                                como campos tipados (patrón EntradaDesenlace)
+ * PENDIENTE (dueño): el import DINÁMICO de rescate
+ * scanner-core-bridge→masiva/identidad-qr (decodificarQrDeCapture, e64-qr
+ * T-2.1 — moverlo exige arrastrar la cadena completa de tiers QR de masiva;
+ * lazy intencional, no es inversión de símbolos estática). RESUELTO en R10
+ * (M10-fin, ola 4): el decodificador llega INYECTADO por
+ * `OpcionesEscaneo.decodificadorQrCam` (tipo DecodificadorQrCam en types.ts
+ * — patrón R8 store-api); el bridge ya NO importa masiva (ver bloque
+ * e64-qr T-2.1 del pipeline). Los cuerpos gemelos de los pipelines quedaron
+ * unificados en pipeline-comun.ts (M6-fin, R7c) — ver mapa arriba.
  */
 import {
   detectDocumentEdgesDetail,
@@ -82,10 +90,8 @@ import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
 import { cargarDivipol } from "./divipol";
 import {
   clasificarCabecera,
-  faltaSeccionInferior,
   PATRON_CABECERA,
   tituloYUbicacionDe,
-  tipoDeBanda,
   type ClasificacionE14,
 } from "./clasificador";
 // KIT e14-optimizacion-v1 (T1): los decodes del bridge pasan por el memo
@@ -96,12 +102,9 @@ import { procesadaVaciaDataUrl } from "./image-utils";
 // KIT identificacion-codigo-v1 (FASE F, Task 120): marcas fiduciales de
 // esquina sobre el crop ya enderezado — señal «sin recortar» que ve los
 // recortes SUPERIORES que faltaSeccionInferior (kit 118, solo inferior) no ve.
-import {
-  ESQUINAS_OK,
-  cuatroEsquinasFaltan,
-  ladoEsquinaFaltante,
-  trazaEsquinas,
-} from "./integridad";
+// (R7c M6-fin: ESQUINAS_OK/cuatroEsquinasFaltan/ladoEsquinaFaltante/
+// trazaEsquinas viajan con la medición de esquinas y el veto e71 —
+// pipeline-comun.ts los consume; el bridge ya no los importa directo.)
 // GUARD-BORDE Rev. 2 (SPEC-e14-guard-borde §2-§3, D1/D3): la verificación de
 // completitud vive en helper ÚNICO (completitud.ts) — «la geometría sospecha,
 // la tinta condena» — usado por AMBOS pipelines (escaneo y recorte, AC11).
@@ -114,8 +117,10 @@ import { medirZonaVotos } from "./marcadores";
 import { evaluarMarcoImpreso, type MarcoEscaneo, type MarcoImpreso } from "./marco-escaneo";
 // KIT e14-score-lectura-v1: señal de LECTURA del score v2 (módulo puro — §4-A).
 // (R7a: PISO_LECTURA_FUERTE/TECHO_LECTURA_DEBIL se consumen ahora DENTRO del
-// desenlace unificado — gate.ts; aquí solo quedan sus consumidores directos.)
-import { lazoPerdonadoPorLectura, senalDeLectura, type NivelLectura } from "./senal-lectura";
+// desenlace unificado — gate.ts. R7c M6-fin: lazoPerdonadoPorLectura y
+// senalDeLectura las consume pipeline-comun.ts; el bridge solo usa el TIPO
+// NivelLectura — firma de marcoPerdonadoPorLectura.)
+import type { NivelLectura } from "./senal-lectura";
 // R7a — M3 (revisión 03a-digitalizador-nucleo): DESENLACE unificado del gate.
 // pipeline() y pipelineRecorte() delegan en este módulo PURO (transcripción
 // literal de las ramas gemelas — pitfall §9.9): mismo orden de caps, mismo
@@ -129,13 +134,9 @@ import {
 } from "./gate";
 // R7b (M1) — medición de CALIDAD y mapeo a score MOVIDOS a calidad.ts
 // (partición §7 del reporte 03a — helpers libres sin estado de módulo).
-import {
-  calidadDeActa,
-  contrasteEfectivoDe,
-  esquinasDeActa,
-  scoreDeCalidad,
-  type InfoCrop,
-} from "./calidad";
+// (R7c M6-fin: contrasteEfectivoDe/esquinasDeActa/scoreDeCalidad las consume
+// pipeline-comun.ts — el bridge mide calidad y arma el InfoCrop del sitio.)
+import { calidadDeActa, type InfoCrop } from "./calidad";
 // R7b (M5a) — assets y fetch de la SIMULACIÓN MOVIDOS a sim-assets.ts
 // (partición §7 del reporte 03a): tabla ACTAS_SIM, ciclo rotativo §G-2,
 // caché por índice y fetch por chip §D3 viajan con su estado de módulo.
@@ -145,11 +146,8 @@ import type { E14Bridge, OpcionesEscaneo } from "./bridge";
 // R7b (M2) — runner del OCR ESCALONADO + banda dirigida MOVIDOS a
 // ocr-escalonado-runner.ts (partición §7 del reporte 03a): el bridge solo
 // orquesta (reconocerRapidOcr queda para reconocerTexto — mismo contrato).
-import {
-  ocrBanda,
-  reconocerRapidOcr,
-  reconocerRapidOcrEscalonado,
-} from "./ocr-escalonado-runner";
+// (R7c M6-fin: ocrBanda la consume bandaDirigidaSiFalta — pipeline-comun.ts.)
+import { reconocerRapidOcr, reconocerRapidOcrEscalonado } from "./ocr-escalonado-runner";
 // R7b (M5b) — fábrica del ACTA MOVIDA a acta-factory.ts (partición §7 del
 // reporte 03a): construirActa/firmasPorStatus eran métodos privados (el
 // contador de id era this.contador) — ahora funciones libres con contador de
@@ -177,14 +175,25 @@ import type { ProbeOrientacion } from "./orientacion";
 // decisión/elegir del módulo PURO (anclasDe/elegirMejor/necesitaSegunda)
 // viven ahora en ocr-escalonado-runner.ts — el runner es su único
 // consumidor en producción; el módulo puro sigue testeable headless — bun.)
-// KIT e14-diagnostico-autoenvio-v1 (C1) — R7b (M4): el PAYLOAD del registro
-// del desenlace vive en auditoria.ts (UNA implementación para los 2 sitios —
-// antes duplicado aquí y en pipelineRecorte, pitfall §9.9); la guarda y el
-// log de auditoría quedan EN EL CALLER. (construirDiagnostico sigue en
-// ./diagnostico — consumido por auditoria.ts.)
-import { construirDiagnosticoDelDesenlace } from "./auditoria";
-// (R7b M5b: canvasCon viaja con capturarFrame/calidadDeActa — acta-factory.ts
-// y calidad.ts lo importan directamente; el bridge ya no crea canvas.)
+// R7c (M6-fin) — los CUERPOS GEMELOS restantes de pipeline()/pipelineRecorte()
+// viven en pipeline-comun.ts (una implementación; diferencias del sitio
+// explícitas como campos tipados — patrón EntradaDesenlace de R7a): banda
+// dirigida, esquinas e71, señales de texto, evidencia-borde, cola del log de
+// auditoría (formato D51 congelado) y payload del diagnóstico.
+import {
+  bandaDirigidaSiFalta,
+  caracterizarLectura,
+  construirDiagnosticoSitio,
+  evidenciaBordeDe,
+  medirEsquinasSitio,
+  trazaDesenlaceComun,
+  vetoCuatroEsquinas,
+} from "./pipeline-comun";
+// KIT e14-observabilidad-v1 (A1-C7, cambio QUIRÚRGICO): emisión perf
+// del desenlace — lazy import + catch total (el rastreo jamás rompe
+// el pipeline, §2.4), mapea SOLO campos ya en scope (§9.10: tiempos/
+// gate/ocrValido leídos de diag — nada re-evaluado). El actaId sale
+// SIEMPRE hasheado (FNV-1a dentro de emitirPerfDeActa, §2.5).
 import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
 
 /** KIT e14-masiva-tiempos-v1 (PR-2, prefetch): memo de decode POR INSTANCIA
@@ -251,26 +260,12 @@ const DETALLE_TIMEOUT = "TIEMPO DE PROCESADO EXCEDIDO";
 // TECHO_SIN_SENAL · TECHO_ESCUDO_FONDO) viven AHORA en lib/e14/gate.ts
 // (desenlace unificado, M3) — importados arriba. El bridge conserva SOLO los
 // que aún consume en rutas propias: DETALLE_TIMEOUT (watchdogs de abajo),
-// DETALLE_ILEGIBLE (catch de detección L1284→) y TECHO_SIN_SENAL
-// (scoreDeCalidad). Los comentarios/valores originales viajaron íntegros.
+// DETALLE_ILEGIBLE (catch de detección del pipeline — el detalle vive hoy
+// en gate.ts) y TECHO_SIN_SENAL (scoreDeCalidad). Los comentarios/valores
+// originales viajaron íntegros.
 
-/**
- * §D1 (SPEC-e14-score-ocr): SEÑAL DE CONTENIDO del acta — se calcula DESPUÉS
- * del OCR + clasificación. El score del dueño mide el RECONOCIMIENTO («el
- * score se basa en el reconocimiento del acta por ocr y que el acta esté
- * completa»), no solo las métricas fotográficas. Señales: cabecera E-14 o
- * alguna lectura cruda del clasificador (MESA/tipo). `ocrTextIsValid` NO es
- * señal (la bolsa de papas lo pasa con texto ficticio del empaque).
- */
-function senalDeContenido(texto: string, clasificacion: ClasificacionE14): boolean {
-  const p = clasificacion.parciales;
-  return (
-    PATRON_CABECERA.test(texto) ||
-    p?.cabecera === true ||
-    (p?.mesa != null && Number.isFinite(p.mesa)) ||
-    p?.tipo != null
-  );
-}
+// R7c (M6-fin): senalDeContenido vive en pipeline-comun.ts (era gemela ×2 —
+// R7a §10.2; el módulo común la consume dentro de caracterizarLectura).
 
 // GUARD-BORDE Rev. 2 (D1/D3): la función esActaCompleta del guard del PR #33
 // (geometría: esquina al filo ≤0.001/≥0.999 o área <30% → INCOMPLETA) VIVIÓ
@@ -364,24 +359,8 @@ export type OpcionesEscaneoConTimeout = OpcionesEscaneo & {
   desdeMasiva?: boolean;
 };
 
-/** Traza §4.6: clasif={dep:88,mun:335,zon:05,std:02,mesa:001,tipo:T,nivel:AUTO}. */
-function fmtClasif(c: ClasificacionE14 | null): string {
-  if (!c) return "sin-clasificar";
-  const tipo = c.tipo === "TRANSMISION" ? "T" : c.tipo === "DELEGADOS" ? "D" : "-";
-  // KIT actas-vivas-paginas-v1 (FASE B): página en la traza de auditoría —
-  // «pag:2/2» leída · «pag:?» DESCONOCIDA (el hueco irá al primer libre).
-  const pag = c.pagina ? `${c.pagina.index}/${c.pagina.total}` : "?";
-  // KIT identificacion-codigo-v1 (Task 120): consenso del código + avisos de
-  // los cruces en la traza de auditoría (cod:crudo · av:A+B+C).
-  const cod = c.codigoUnico ? `,cod:${c.codigoUnico.crudo}` : "";
-  const av = c.avisos?.length ? `,av:${c.avisos.join("+")}` : "";
-  return (
-    `dep:${c.departamento?.codigo ?? "?"},mun:${c.municipio?.codigo ?? "?"},` +
-    `zon:${c.zona?.codigo ?? "?"},std:${c.puesto?.codigo ?? "?"},` +
-    `mesa:${c.mesa !== null ? String(c.mesa).padStart(3, "0") : "?"},` +
-    `pag:${pag},tipo:${tipo},nivel:${c.nivel}${cod}${av}`
-  );
-}
+// R7c (M6-fin): fmtClasif vive en pipeline-comun.ts (solo lo consumían los
+// 2 logs de auditoría — ahora compone la cola común trazaDesenlaceComun).
 
 /**
  * Emite progreso INTERPOLADO mientras una espera real del core está en vuelo
@@ -573,25 +552,37 @@ export class RealCoreBridge implements E14Bridge {
     parcial.fotoOriginal = fotoOriginal;
 
     // e64-qr T-2.1 — CAPA 0 QR también en cámara (kit FASE 2 / hermano C-1):
-    // el MISMO decodificador de masiva (import DINÁMICO — el bundle crítico
-    // del escaneo no engorda), señal ADITIVA — jamás afecta score/gate/OCR
-    // ni consume intento. Se lanza EN PARALELO al pipeline (el tier base
-    // resuelve en ~0.3-0.5 s — mucho antes del OCR) y se ESPETA donde el
-    // acta se construye. tiers "base" — ADAPTACIÓN DECLARADA: la cadena
-    // completa (~15-17 s sin-QR, bloques sync) rompería el timeout 15 s del
-    // flujo individual; el rescate pesado queda en masiva (timeout 120 s).
+    // el MISMO decodificador de masiva, señal ADITIVA — jamás afecta
+    // score/gate/OCR ni consume intento. Se lanza EN PARALELO al pipeline
+    // (el tier base resuelve en ~0.3-0.5 s — mucho antes del OCR) y se
+    // ESPETA donde el acta se construye. tiers "base" — ADAPTACIÓN DECLARADA:
+    // la cadena completa (~15-17 s sin-QR, bloques sync) rompería el timeout
+    // 15 s del flujo individual; el rescate pesado queda en masiva (timeout
+    // 120 s).
     // GUARD (D63-C): `origenActa` viaja SOLO en entradas de MASIVA — allí la
     // capa 0 del runner (cadena COMPLETA a nivel registro, no acta) manda y
     // la señal base-only del bridge sería redundante y doble-costo: OMITIDA.
     // El catch es el fallback silencioso del kit: sin la señal, el flujo de
     // cámara sigue intacto.
+    // R10 — M10-fin (fin de la ÚLTIMA dependencia invertida núcleo→masiva):
+    // el decodificador ya NO se importa aquí (antes: import DINÁMICO de
+    // masiva/identidad-qr — PENDIENTE heredado de R7b); llega INYECTADO en
+    // `opciones.decodificadorQrCam` (patrón R8 store-api — frontera
+    // bridge.ts/types.ts). El runner MASIVA lo inyecta SIEMPRE: filas con
+    // `origen=null` (duda honesta del detector D63-A) caen en esta rama hoy
+    // y su señal viaja al veto ya-enviada post-OCR del runner (H1) — la
+    // inyección de la MISMA función preserva ese comportamiento byte a byte;
+    // el cableado del flujo individual/CÁMARA vive en su repo anfitrión.
+    // Sin decodificador → null (la MISMA conducta del catch de abajo: sin
+    // señal, el flujo de cámara sigue intacto).
     const esMasiva = opciones.origenActa != null;
+    const decodificadorQrCam = opciones.decodificadorQrCam;
     const qrCamPromesa: Promise<ParcialPipeline["qrCam"]> = esMasiva
       ? Promise.resolve(undefined) // la capa 0 del runner manda en masiva
       : (async () => {
           try {
-            const { decodificarQrDeCapture } = await import("./masiva/identidad-qr");
-            return await decodificarQrDeCapture(fotoOriginal, { tiers: "base" });
+            if (!decodificadorQrCam) return null; // R10 — sin señal inyectada: flujo intacto
+            return await decodificadorQrCam(fotoOriginal, { tiers: "base" });
           } catch {
             return null; // sin-payload — el flujo de cámara sigue intacto
           }
@@ -907,9 +898,13 @@ export class RealCoreBridge implements E14Bridge {
     // esquinasDeActa — §4.4); SOLO fuera de SIM (assets de la demo sin
     // marcas calibradas — chips 8.2/7.0/4.3 intactos, MISMO guard del kit
     // identificacion-codigo-v1). <80×120 → null (n/d — jamás condena).
-    const esquinas = opciones.simular ? ESQUINAS_OK : await esquinasDeActa(fotoProcesada);
-    const ladoEsquina = esquinas ? ladoEsquinaFaltante(esquinas) : null;
-    const trazaEsq = opciones.simular ? "sim" : trazaEsquinas(esquinas);
+    // R7c (M6-fin): la medición vive en pipeline-comun (mismo criterio ×2 —
+    // pitfall §9.9); la diferencia del sitio (SIM → ESQUINAS_OK/traza sim)
+    // entra explícita como campo tipado.
+    const { esquinas, ladoEsquina, trazaEsq } = await medirEsquinasSitio({
+      fotoProcesada,
+      simular: opciones.simular === true,
+    });
     // GUARD-BORDE Rev. 2 (§3b): la verificación de completitud corre DESPUÉS
     // del paso 3 — fotoProcesada ya existe (la tinta al filo se mide SOBRE el
     // recorte, no sobre la foto cruda). Helper ÚNICO (D3/AC11). El análisis
@@ -925,10 +920,11 @@ export class RealCoreBridge implements E14Bridge {
     // escaneos: evaluarMarcoImpreso jamás devuelve null). El guard de fotos
     // mide tinta al filo del warp — un escaneo no tiene warp (identidad) y
     // su gate es el MARCO (D63-C). Menos trabajo muerto, misma decisión.
-    // EFECTO DECLARADO (plan §4): el escudo anti-fondo (fondo → techo 7.9,
-    // L1461) tampoco aplica a escaneos — es un guard del WARP (fondo/sombra
-    // incluida por el encuadre), sin premisa en identidad. El veredicto del
-    // escaneo lo gobiernan marco + lectura + marcadores (honestos).
+    // EFECTO DECLARADO (plan §4): el escudo anti-fondo (fondo → techo 7.9 —
+    // vive en gate.ts/resolverDesenlace) tampoco aplica a escaneos — es un
+    // guard del WARP (fondo/sombra incluida por el encuadre), sin premisa en
+    // identidad. El veredicto del escaneo lo gobiernan marco + lectura +
+    // marcadores (honestos).
     const verificacion: Promise<ResultadoCompletitud> | null =
       opciones.simular || origenActa === "escaneo"
         ? null
@@ -984,11 +980,9 @@ export class RealCoreBridge implements E14Bridge {
     // pasada OCR del crop invertido ×2. UNA sola vez, ANTES de
     // clasificarCabecera; el tiempo se suma a ms.ocr (es OCR). SIM: OMITIDO
     // (AC6 — cero llamadas a ocrBanda en SIM; guard opciones.simular).
-    if (!opciones.simular && tipoDeBanda(texto) === null) {
-      const tBanda = performance.now();
-      texto += "\n" + (await ocrBanda(fotoProcesada));
-      ms.ocr += performance.now() - tBanda;
-    }
+    // R7c (M6-fin): UNA implementación en pipeline-comun (×2 — pitfall §9.9);
+    // el guard SIM del sitio entra explícito.
+    texto = await bandaDirigidaSiFalta({ texto, fotoProcesada, simular: opciones.simular === true, ms });
     ms.total = performance.now() - inicio;
 
     // (motor/filtroActa calculados en el paso 3 — §D8.3: as-is → "canvas"/"original")
@@ -1009,33 +1003,15 @@ export class RealCoreBridge implements E14Bridge {
     // KIT e14-lectura-perdona-lazo-v1 (§4-B): la LECTURA perdona al lazo — un
     // fiducial faltante cuyo lado está demostrado dentro por el OCR es falso
     // positivo (margen corto/sombra). La señal de secciones NUNCA se perdona.
-    // En SIM esquinas=ESQUINAS_OK (L955) → helper false → recortada idéntica a
+    // En SIM esquinas=ESQUINAS_OK → helper false → recortada idéntica a
     // hoy (chips 8.2/7.0/4.3 intactos — §2 del kit).
-    const faltaSeccion = faltaSeccionInferior(texto, clasificacion.pagina);
-    const lazoPerdonado = lazoPerdonadoPorLectura(esquinas, texto, faltaSeccion);
-    const recortada = faltaSeccion || (ladoEsquina !== null && !lazoPerdonado);
-    const ocrLegible = ocrTextIsValid(texto);
-    // §D1 (SPEC-e14-score-ocr): señal de CONTENIDO del acta — alimenta el
-    // score (techo 4.9 sin señal) y el desenlace §D3 (rechazo BAJO).
-    const senalActa = senalDeContenido(texto, clasificacion);
-    // KIT e14-luz-sim-puntos-v1 (T-D): `senal` se sube aquí (antes vivía
-    // tras scoreDeCalidad) — es PURA (misma entrada → misma salida) y el
-    // piso-10 necesita las anclas dentro del scoreDeCalidad. El bloque C3
-    // de abajo queda idéntico leyendo esta misma const.
-    const senal = senalDeLectura(texto, clasificacion.parciales);
-    // KIT e14-luz-sim-puntos-v1 (T-D): LAS 4 condiciones de §4.1. Todas o
-    // ninguna (conservador — G3).
-    const pisoPerfecto =
-      senal.nivel === "FUERTE" &&
-      senal.anclas >= 8 &&
-      calidad.sharpnessHi >= 90 &&
-      calidad.contrastPapel >= 75;
-    let score = scoreDeCalidad(calidad, {
-      ocrLegible,
-      identificada: clasificacion.nivel === "AUTO",
-      conSenal: senalActa,
-      pisoPerfecto,
-    });
+    // R7c (M6-fin): la COMPOSICIÓN de señales vive UNA vez en pipeline-comun
+    // (caracterizarLectura — pitfall §9.9: era ×2 con las mismas fórmulas);
+    // el caller conserva las awaits del sitio (divipol/marcadores) y el
+    // scoreVisual = scoreBase ANTES de resolverDesenlace.
+    const { faltaSeccion, lazoPerdonado, recortada, ocrLegible, senalActa, senal, pisoPerfecto, scoreBase } =
+      caracterizarLectura({ texto, clasificacion, esquinas, ladoEsquina, calidad });
+    let score = scoreBase;
     // KIT e14-diagnostico-autoenvio-v1 (§3-A): score visual = bruto de
     // scoreDeCalidad ANTES de los caps del sitio (escudo-fondo/recortada/
     // incompleta/sin-votos) — el `final` es el que imprime el log.
@@ -1078,8 +1054,8 @@ export class RealCoreBridge implements E14Bridge {
     // El gate sigue HONESTO: falta una sección inferior o lectura débil/media
     // → «cortado» sigue condenando (la lectura perdona al marco, NO al
     // contenido faltante — plan §3/§4). "ceñido" (F3) nunca bloquea por
-    // construcción (≠ "cortado"). senal (L1368) y faltaSeccion (L1357) ya
-    // están calculadas aquí — costo cero.
+    // construcción (≠ "cortado"). senal y faltaSeccion ya están calculadas
+    // aquí (caracterizarLectura — pipeline-comun.ts) — costo cero.
     let completa = opciones.simular ? true : (verificacionResuelta?.completa ?? true);
     if (marcoEscaneo) {
       // e63d F0.2 · rev.2: el perdón (tabla §3-A) decide si el marco cortado
@@ -1096,7 +1072,9 @@ export class RealCoreBridge implements E14Bridge {
     // lectura perdona al marco impreso, pero NUNCA a la ausencia total de
     // fiduciales — evidencia física manda). En SIM esquinas=ESQUINAS_OK →
     // el veto es inalcanzable (guard explícito, chips 8.2/7.0/4.3 intactos).
-    if (!opciones.simular && cuatroEsquinasFaltan(esquinas)) {
+    // R7c (M6-fin): criterio único vetoCuatroEsquinas — la diferencia del
+    // sitio (SIM del escaneo vs recorte siempre real) entra como `aplica`.
+    if (vetoCuatroEsquinas({ esquinas, aplica: !opciones.simular })) {
       completa = false;
     }
     // GATE-MARCADORES (KIT e14-gate-v2, FASE G2) — marcador OBLIGATORIO de
@@ -1159,17 +1137,9 @@ export class RealCoreBridge implements E14Bridge {
     // KIT e14-esquinas-suaves-v1 (Q1): token `perdon=` añadido AL FINAL del
     // segmento (tokens NUEVOS solo al final — la línea `senal=` queda byte a
     // byte; perdón por PAR fiducial del lado — Q1).
-    const evidenciaBorde =
-      verificacionResuelta && verificacionResuelta.sospecha
-        ? ` borde=${verificacionResuelta.sospecha}` +
-          ` tintaFilo=${verificacionResuelta.tintaFilo}` +
-          ` franja=[${verificacionResuelta.densidades.map((d) => d.toFixed(1)).join(",")}]` +
-          ` fondo=${verificacionResuelta.fondo}` +
-          (verificacionResuelta.perdonLado ? ` perdon=${verificacionResuelta.perdonLado}` : "")
-        : "";
-    // FASE S (§S.1.5): crop= bbox real usado por calidadDeActa (px) — WxH;
-    // `full` si el fallback al frame completo se activó (diagnóstico en campo).
-    const cropLog = infoCrop.fallback ? "full" : `${infoCrop.w}x${infoCrop.h}`;
+    // R7c (M6-fin): el segmento vive UNA vez en pipeline-comun (evidencia-
+    // BordeDe — era ×2 con la misma fórmula; null → "" como hoy).
+    const evidenciaBorde = evidenciaBordeDe(verificacionResuelta);
     // KIT e14-diagnostico-autoenvio-v1 (C1/§6-B): techos capturados con las
     // MISMAS condiciones que ya aplicaron los caps — orden real de aplicación
     // (techo-fair/poor/sin-senal de scoreDeCalidad → escudo-fondo → recortada
@@ -1184,54 +1154,48 @@ export class RealCoreBridge implements E14Bridge {
     let diag: DiagnosticoActa | null = null;
     if (!opciones.simular) {
       try {
-        // R7b (M4): payload unificado en auditoria.ts — diferencias del sitio
-        // explícitas (actaId "" se parcha luego; gateMarco D63-C; decode/
-        // detect medidos). SIM nunca (§9.2). Observación PASIVA: si falla,
-        // el desenlace NO se toca (§9.7).
-        diag = construirDiagnosticoDelDesenlace({
-          actaId: "", // se parcha con el id REAL tras construirActa
-          intento: opciones.intento,
-          maxIntentos: opciones.maxIntentos,
-          status: desenlace.status,
-          rechazo: rechazoFinal,
+        // R7b (M4) + R7c (M6-fin): payload del desenlace UNA vez en
+        // pipeline-comun (construirDiagnosticoSitio) — las ~35 líneas de
+        // campos idénticos de los 2 call-sites viven allí; las diferencias
+        // de ESTE sitio entran explícitas (actaId "" se parcha luego;
+        // gateMarco D63-C; decode/detect medidos). SIM nunca (§9.2).
+        diag = construirDiagnosticoSitio({
+          desenlace,
+          rechazoFinal,
           scoreVisual,
           scoreFinal: score,
-          techos: techosDiag,
+          techosDiag,
           calidad,
+          texto,
           ocrLegible,
-          lecturaChars: texto.length,
-          senalLectura: { nivel: senal.nivel, anclas: senal.anclas },
+          senal,
           senalActa,
-          ocrValido: ocrTextIsValid(texto),
           completa,
-          // D63-C (T2.3): veredicto del marco impreso (null en fotos/SIM).
-          gateMarco: marcoEscaneo?.veredicto ?? null,
-          fondo: verificacionResuelta?.fondo ?? false,
           recortada,
-          ladoEsquina: ladoEsquina ?? null,
-          votos: {
-            densidadPct: marcadores.densidadVotosPct,
-            skipPag2: votosSkipPag2,
-            ok: marcadoresOk,
-          },
+          ladoEsquina,
+          marcadores,
+          marcadoresOk,
+          votosSkipPag2,
           procesadaVacia,
-          clasifNivel: desenlace.clasificacion?.nivel ?? "—",
           motor,
-          filtro: filtroActa,
-          crop: { w: infoCrop.w, h: infoCrop.h, fallback: infoCrop.fallback },
+          infoCrop,
           quad,
           quadOrigen,
-          msProceso: ms.proceso,
-          msProcesoBw: ms.procesoBw,
-          msProcesoOcr: ms.procesoOcr,
-          msCalidad: ms.calidad,
-          msOcr: ms.ocr,
-          msTotal: ms.total,
-          // D61 — decode/detect YA se medían (traza de consola) — ahora
-          // PERSISTEN. null honesto si la fase no corrió (video-grab sin
-          // archivo → decode=0; sinRecorte → detect=0) — jamás inventar.
-          decodeMs: ms.decode > 0 ? Math.round(ms.decode) : null,
-          detectMs: ms.detect > 0 ? Math.round(ms.detect) : null,
+          ms,
+          sitio: {
+            actaId: "", // se parcha con el id REAL tras construirActa
+            intento: opciones.intento,
+            maxIntentos: opciones.maxIntentos,
+            // D63-C (T2.3): veredicto del marco impreso (null en fotos/SIM).
+            gateMarco: marcoEscaneo?.veredicto ?? null,
+            fondo: verificacionResuelta?.fondo ?? false,
+            filtro: filtroActa,
+            // D61 — decode/detect YA se medían (traza de consola) — ahora
+            // PERSISTEN. null honesto si la fase no corrió (video-grab sin
+            // archivo → decode=0; sinRecorte → detect=0) — jamás inventar.
+            decodeMs: ms.decode > 0 ? Math.round(ms.decode) : null,
+            detectMs: ms.detect > 0 ? Math.round(ms.detect) : null,
+          },
         });
       } catch {
         diag = null;
@@ -1249,6 +1213,13 @@ export class RealCoreBridge implements E14Bridge {
     if (diag != null && probeMiniOrientacion != null) {
       diag.orientacionProbeMini = probeMiniOrientacion;
     }
+    // R7c (M6-fin): la COLA del log (del token votos= hasta ClasifDebil) se
+    // compone en pipeline-comun (trazaDesenlaceComun) — UNA implementación
+    // para ambos sitios: el orden de los tokens comunes (formato D51 —
+    // CONGELADO, solo añadir al final) queda garantizado por el compilador
+    // (los extras del sitio entran tipados: evidenciaSitio/extrasSim/
+    // extrasDeteccion). El head conserva los tokens propios del escaneo
+    // (decode/detect) — es la parte genuinamente distinta.
     logger.info(
       `[e14] pipeline ${opciones.fuente}/${"archivo" in entrada ? "file" : "video-grab"} ` +
         `total=${Math.round(ms.total)}ms ` +
@@ -1256,29 +1227,38 @@ export class RealCoreBridge implements E14Bridge {
         `proceso=${Math.round(ms.proceso)} calidad=${Math.round(ms.calidad)} ` +
         `ocr=${Math.round(ms.ocr)} motor=${motor} ocrValido=${ocrTextIsValid(texto)} ` +
         `cabeceraE14=${PATRON_CABECERA.test(texto)} completa=${completa} ` +
-        `senal=${senalActa} vacia=${procesadaVacia} votos=${votosSkipPag2 ? "skip-pag2" : `${marcadores.densidadVotosPct.toFixed(1)}%`}${marcadoresOk ? "" : " SIN_VOTOS"}${recortada ? " recortada=1" : ""}${ladoEsquina ? ` lado=${ladoEsquina}` : ""}${lazoPerdonado ? " lazo=perdonado" : ""} esquinas=${trazaEsq}${evidenciaAsis}${evidenciaBorde} ` +
-        // KIT e14-luz-sim-puntos-v1 (T-D): piso-10 aplicado (grep-able).
-        `quad=[${quad.map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(" ")}] piso10=${pisoPerfecto ? 1 : 0}${quadOrigen ? ` origen=${quadOrigen}` : ""} ` +
-        `score=${score} filtro=${filtroActa} ocrIn=${ocrIn} ` +
-        // KIT e14-motor-rapidocr-v1 (PROD-2 §4.2): token grep-able del motor
-        // de producción, junto al ocrIn= del PROD-1 (conf/det/rec del OCR
-        // principal — capturados antes de la banda).
-        `ocr=rapidocr conf=${confOcr != null ? confOcr.toFixed(2) : "?"} det=${Math.round(detOcr)}ms rec=${Math.round(recOcr)}ms ` +
-        // KIT e14-score-lectura-v1 (REBASE): señal de lectura v2 en la traza.
-        `lectura=${senal.nivel} anclas=${senal.anclas} piso=${score >= 8.5 && senal.nivel === "FUERTE"} ` +
-        `clasif={${fmtClasif(desenlace.clasificacion)}} ` +
-        `crop=${cropLog} ` +
-        `metricas={sharpness:${calidad.sharpness} brightness:${calidad.brightness} ` +
-        `contrast:${calidad.contrast} contEff:${contrasteEfectivoDe(calidad, ocrLegible)} ` +
-        `level:${calidad.level}})${evidenciaSim}${diag ? " diag=1" : ""}` +
-        // KIT e14-masiva-ux-v1 (T1.3): quién fabricó el quad EN la detección
-        // del pipeline + si corrió el reintento post-Sobel (campos AÑADIDOS
-        // al final — formato previo intacto).
-        `${quadOrigen ? ` detectOrigen=${quadOrigen}` : ""}${detectReintento ? " detectReintento=1" : ""}` +
-        // KIT e63f-autoenvio-v1 (F0): balde fino del no-AUTO — token ADITIVO
-        // AL FINAL (contrato D51). Ausente si AUTO o sin motivo de los
-        // listados (puesto-lugar/tipo/mesa-registro/ruta).
-        `${desenlace.clasificacion?.clasifDebil ? ` ClasifDebil=${desenlace.clasificacion.clasifDebil}` : ""}`,
+        `senal=${senalActa} vacia=${procesadaVacia} ` +
+        trazaDesenlaceComun({
+          votosSkipPag2,
+          densidadVotosPct: marcadores.densidadVotosPct,
+          marcadoresOk,
+          recortada,
+          ladoEsquina,
+          lazoPerdonado,
+          trazaEsq,
+          evidenciaSitio: `${evidenciaAsis}${evidenciaBorde}`,
+          quad,
+          quadOrigen,
+          pisoPerfecto,
+          score,
+          filtro: filtroActa,
+          ocrIn,
+          confOcr,
+          detOcr,
+          recOcr,
+          senal,
+          desenlace,
+          infoCrop,
+          calidad,
+          ocrLegible,
+          extrasSim: evidenciaSim,
+          // KIT e14-masiva-ux-v1 (T1.3): quién fabricó el quad EN la detección
+          // del pipeline + si corrió el reintento post-Sobel (campos AÑADIDOS
+          // al final — formato previo intacto).
+          extrasDeteccion:
+            `${quadOrigen ? ` detectOrigen=${quadOrigen}` : ""}${detectReintento ? " detectReintento=1" : ""}`,
+          diag,
+        }),
     );
 
     // KIT e14-diagnostico-autoenvio-v1 (C1): adjuntar el registro con el id
@@ -1467,8 +1447,10 @@ export class RealCoreBridge implements E14Bridge {
   }
 
   /** Pipeline §5 del RECORTE (sin decode/detección: la foto y el quad ya son
-   *  conocidos). Reusa los helpers del pipeline L2 (conRampa, scoreDeCalidad,
-   *  PATRON_CABECERA) y el mapeo §4.1 + gate §4.2 idénticos. */
+   *  conocidos). Reusa los helpers del pipeline L2 — conRampa (bridge),
+   *  PATRON_CABECERA (clasificador) y scoreDeCalidad (calidad.ts, vía
+   *  pipeline-comun.ts desde R7c M6-fin) — y el mapeo §4.1 + gate §4.2
+   *  idénticos. */
   private async pipelineRecorte(
     acta: Acta,
     fotoOriginal: string,
@@ -1622,11 +1604,9 @@ export class RealCoreBridge implements E14Bridge {
     emitir({ etapa: "OCR", progreso: 1 });
     // KIT consenso-frankfurt-v1 (FASE 4, §5): banda dirigida — MISMO helper
     // del escaneo (§4.4); el recorte no tiene SIM (siempre real).
-    if (tipoDeBanda(texto) === null) {
-      const tBanda = performance.now();
-      texto += "\n" + (await ocrBanda(fotoProcesada));
-      ms.ocr += performance.now() - tBanda;
-    }
+    // R7c (M6-fin): UNA implementación en pipeline-comun (×2 — pitfall §9.9);
+    // el recorte pasa simular: false (no hay SIM en esta ruta).
+    texto = await bandaDirigidaSiFalta({ texto, fotoProcesada, simular: false, ms });
     ms.total = performance.now() - inicio;
 
     const motor = resultado.precision?.engine ?? "canvas";
@@ -1648,9 +1628,12 @@ export class RealCoreBridge implements E14Bridge {
     // verificarCompletitud la consulta y perdona la sospecha geométrica
     // (§0-F2). UNA sola medición (helper único esquinasDeActa — §4.4).
     // <80×120 → null (n/d — jamás condena).
-    const esquinas = await esquinasDeActa(fotoProcesada);
-    const ladoEsquina = esquinas ? ladoEsquinaFaltante(esquinas) : null;
-    const trazaEsq = trazaEsquinas(esquinas);
+    // R7c (M6-fin): la medición vive en pipeline-comun (mismo criterio ×2);
+    // el recorte mide SIEMPRE real → simular: false (sin ESQUINAS_OK).
+    const { esquinas, ladoEsquina, trazaEsq } = await medirEsquinasSitio({
+      fotoProcesada,
+      simular: false,
+    });
     const verificacion = await verificarCompletitud(quad, fotoProcesada, esquinas);
     // e71 (P10) — VETO 4/4 FIDUCIALES (mismo criterio del escaneo — helper
     // ÚNICO cuatroEsquinasFaltan, pitfall §9.9): las 4 marcas ausentes →
@@ -1659,8 +1642,10 @@ export class RealCoreBridge implements E14Bridge {
     // escudo-manual (techo 7.9) vía vetoIncompleta/escudoManual de abajo;
     // diag.gate.completa SÍ reporta false (kit P10 — coherencia del
     // informe con la medición física).
+    // R7c (M6-fin): criterio único vetoCuatroEsquinas — el recorte siempre
+    // mide real → aplica: true (el escaneo pasa su guard SIM).
     const completa =
-      verificacion.completa && !cuatroEsquinasFaltan(esquinas);
+      verificacion.completa && !vetoCuatroEsquinas({ esquinas, aplica: true });
     // KIT e14-esquinas-suaves-v1 (Q2): ESCUDO-MANUAL — `!completa` en un recorte
     // MANUAL no rechaza: techo 7.9 (patrón del escudo D10). El operador VIO el
     // papel; a lo sumo su crop cortó un poco de impresión y lo decide mirando.
@@ -1686,9 +1671,19 @@ export class RealCoreBridge implements E14Bridge {
     // LECTURA perdona al lazo (falso positivo margen corto/sombra); la señal
     // de secciones NUNCA se perdona. Mismo criterio en AMBOS pipelines
     // (pitfall §9.9 del kit score-lectura — helper único).
-    const faltaSeccion = faltaSeccionInferior(texto, clasificacion.pagina);
-    const lazoPerdonado = lazoPerdonadoPorLectura(esquinas, texto, faltaSeccion);
-    const recortada = faltaSeccion || (ladoEsquina !== null && !lazoPerdonado);
+    // R7c (M6-fin): la COMPOSICIÓN de señales vive UNA vez en pipeline-comun
+    // (caracterizarLectura — pitfall §9.9: era ×2 con las mismas fórmulas).
+    // ADAPTACIÓN DECLARADA: el await de medirZonaVotos quedaba ENTRE las
+    // señales (recortada → ocrLegible); como TODO el bloque extraído es PURO
+    // y síncrono, ahora corre después — mismas salidas, las awaits del sitio
+    // (divipol/marcadores) conservan su orden relativo entre sí.
+    // (faltaSeccion no se desestructura aquí: el recorte no tiene perdón de
+    // marco — solo el escaneo lo consulta vía marcoPerdonadoPorLectura.)
+    const { lazoPerdonado, recortada, ocrLegible, senalActa, senal, pisoPerfecto, scoreBase } =
+      caracterizarLectura({ texto, clasificacion, esquinas, ladoEsquina, calidad });
+    // (el score BASE muta después con los caps — `score = desenlace.score`;
+    // scoreVisual queda capturado ANTES, misma convención del escaneo.)
+    let score = scoreBase;
     const marcadores = await medirZonaVotos(fotoProcesada);
     // KIT actas-vivas-paginas-v1 (FASE C): gate de votos SOLO P1 — la pág 2
     // (constancias) NO tiene zona de votos. Página desconocida → se mide
@@ -1696,32 +1691,10 @@ export class RealCoreBridge implements E14Bridge {
     // (R7a: el `marcadoresOk` que vivía aquí nace ahora DENTRO de
     // resolverDesenlace — gate.ts — y regresa como `desenlace.marcadoresOk`.)
     const votosSkipPag2 = clasificacion.pagina?.index === 2;
-    const ocrLegible = ocrTextIsValid(texto);
-    // §D1 (SPEC-e14-score-ocr): señal de contenido — mismo criterio §4.4
-    // (helper único, AMBOS pipelines con el MISMO criterio).
-    const senalActa = senalDeContenido(texto, clasificacion);
-    // KIT e14-luz-sim-puntos-v1 (T-D): `senal` se sube aquí (antes vivía
-    // tras scoreDeCalidad) — es PURA (misma entrada → misma salida) y el
-    // piso-10 necesita las anclas dentro del scoreDeCalidad. El bloque C3
-    // de abajo queda idéntico leyendo esta misma const.
-    const senal = senalDeLectura(texto, clasificacion.parciales);
-    // KIT e14-luz-sim-puntos-v1 (T-D): LAS 4 condiciones de §4.1. Todas o
-    // ninguna (conservador — G3).
-    const pisoPerfecto =
-      senal.nivel === "FUERTE" &&
-      senal.anclas >= 8 &&
-      calidad.sharpnessHi >= 90 &&
-      calidad.contrastPapel >= 75;
-    let score = scoreDeCalidad(calidad, {
-      ocrLegible,
-      identificada: clasificacion.nivel === "AUTO",
-      conSenal: senalActa,
-      pisoPerfecto,
-    });
     // KIT e14-diagnostico-autoenvio-v1 (§3-A): score visual ANTES de los caps
     // del sitio (misma convención que el escaneo). ORDEN del merge (kit
     // e14-diag-campos-aditivos-v1 §4-A.3): scoreDeCalidad → scoreVisual → C3.
-    const scoreVisual = score;
+    const scoreVisual = scoreBase;
     // R7a (M3) — DESENLACE unificado (mismo criterio del escaneo, pitfall
     // §9.9): C3 (piso/techo lectura) → caps del sitio (escudo-fondo D10 ·
     // escudo-manual Q2 · recortada) → gate (INCOMPLETA · SIN_VOTOS G2 ·
@@ -1759,17 +1732,9 @@ export class RealCoreBridge implements E14Bridge {
     // KIT e14-esquinas-suaves-v1 (Q1): token `perdon=` añadido AL FINAL del
     // segmento (tokens NUEVOS solo al final — líneas `senal=`/`level:`
     // intocables byte a byte).
-    const evidenciaBordeRecorte =
-      verificacion.sospecha
-        ? ` borde=${verificacion.sospecha}` +
-          ` tintaFilo=${verificacion.tintaFilo}` +
-          ` franja=[${verificacion.densidades.map((d) => d.toFixed(1)).join(",")}]` +
-          ` fondo=${verificacion.fondo}` +
-          (verificacion.perdonLado ? ` perdon=${verificacion.perdonLado}` : "")
-        : "";
-    // FASE S (§S.1.5): crop= bbox real usado por calidadDeActa (px) — WxH;
-    // `full` si el fallback al frame completo se activó (diagnóstico en campo).
-    const cropLog = infoCrop.fallback ? "full" : `${infoCrop.w}x${infoCrop.h}`;
+    // R7c (M6-fin): el segmento vive UNA vez en pipeline-comun (evidencia-
+    // BordeDe — era ×2 con la misma fórmula; aquí la verificación es no-null).
+    const evidenciaBordeRecorte = evidenciaBordeDe(verificacion);
     // KIT e14-diagnostico-autoenvio-v1 (C1/§6-B): techos con las MISMAS
     // condiciones que aplicaron los caps (orden real) — sitio recorte.
     // R7a (M3): la lista nace AHORA en resolverDesenlace (gate.ts) — mismas
@@ -1781,51 +1746,46 @@ export class RealCoreBridge implements E14Bridge {
     let diag: DiagnosticoActa | null = null;
     if (acta.fuente !== "SIMULACION") {
       try {
-        // R7b (M4): payload unificado en auditoria.ts — diferencias del sitio
-        // explícitas (actaId = acta.id; SIN gateMarco — la clave viaja AUSENTE
-        // como hoy; decode/detect null/null — esta ruta no los mide).
-        diag = construirDiagnosticoDelDesenlace({
-          actaId: acta.id, // el acta existe — identidad conservada (spread)
-          intento: acta.intento,
-          maxIntentos: acta.maxIntentos,
-          status: desenlace.status,
-          rechazo: rechazoFinal,
+        // R7b (M4) + R7c (M6-fin): payload del desenlace UNA vez en
+        // pipeline-comun (construirDiagnosticoSitio) — diferencias de ESTE
+        // sitio explícitas (actaId = acta.id — identidad conservada; SIN
+        // gateMarco — la clave viaja AUSENTE como hoy; decode/detect
+        // null/null — esta ruta no los mide).
+        diag = construirDiagnosticoSitio({
+          desenlace,
+          rechazoFinal,
           scoreVisual,
           scoreFinal: score,
-          techos: techosDiag,
+          techosDiag,
           calidad,
+          texto,
           ocrLegible,
-          lecturaChars: texto.length,
-          senalLectura: { nivel: senal.nivel, anclas: senal.anclas },
+          senal,
           senalActa,
-          ocrValido: ocrTextIsValid(texto),
           completa,
-          gateMarco: undefined, // el recorte NO traía la clave (ver auditoria.ts)
-          fondo: verificacion.fondo,
           recortada,
-          ladoEsquina: ladoEsquina ?? null,
-          votos: {
-            densidadPct: marcadores.densidadVotosPct,
-            skipPag2: votosSkipPag2,
-            ok: marcadoresOk,
-          },
+          ladoEsquina,
+          marcadores,
+          marcadoresOk,
+          votosSkipPag2,
           procesadaVacia,
-          clasifNivel: desenlace.clasificacion?.nivel ?? "—",
           motor,
-          filtro,
-          crop: { w: infoCrop.w, h: infoCrop.h, fallback: infoCrop.fallback },
+          infoCrop,
           quad,
           quadOrigen,
-          msProceso: ms.proceso,
-          msProcesoBw: ms.procesoBw,
-          msProcesoOcr: ms.procesoOcr,
-          msCalidad: ms.calidad,
-          msOcr: ms.ocr,
-          msTotal: ms.total,
-          // D61 — esta ruta (recorte manual del editor) NO mide decode/detect
-          // (su `ms` local no los trae) — null honesto, jamás inventar.
-          decodeMs: null,
-          detectMs: null,
+          ms,
+          sitio: {
+            actaId: acta.id, // el acta existe — identidad conservada (spread)
+            intento: acta.intento,
+            maxIntentos: acta.maxIntentos,
+            gateMarco: undefined, // el recorte NO traía la clave (ver auditoria.ts)
+            fondo: verificacion.fondo,
+            filtro,
+            // D61 — esta ruta (recorte manual del editor) NO mide decode/detect
+            // (su `ms` local no los trae) — null honesto, jamás inventar.
+            decodeMs: null,
+            detectMs: null,
+          },
         });
       } catch {
         diag = null;
@@ -1843,28 +1803,44 @@ export class RealCoreBridge implements E14Bridge {
     if (diag != null && probeMiniOrientacion != null) {
       diag.orientacionProbeMini = probeMiniOrientacion;
     }
+    // R7c (M6-fin): la COLA del log (del token votos= hasta ClasifDebil) se
+    // compone en pipeline-comun (trazaDesenlaceComun) — UNA implementación
+    // para ambos sitios (formato D51 CONGELADO). El head conserva los tokens
+    // propios del recorte (sin decode/detect). Los extras del sitio entran
+    // tipados: evidenciaSitio = evidencia-borde + manual + escudo-manual.
     logger.info(
       `[e14] recorte ${acta.fuente} total=${Math.round(ms.total)}ms ` +
         `(proceso=${Math.round(ms.proceso)} calidad=${Math.round(ms.calidad)} ` +
         `ocr=${Math.round(ms.ocr)} motor=${motor} ocrValido=${ocrTextIsValid(texto)} ` +
         `cabeceraE14=${PATRON_CABECERA.test(texto)} completa=${completa} ` +
-        `senal=${senalActa} vacia=${procesadaVacia} votos=${votosSkipPag2 ? "skip-pag2" : `${marcadores.densidadVotosPct.toFixed(1)}%`}${marcadoresOk ? "" : " SIN_VOTOS"}${recortada ? " recortada=1" : ""}${ladoEsquina ? ` lado=${ladoEsquina}` : ""}${lazoPerdonado ? " lazo=perdonado" : ""} esquinas=${trazaEsq}${evidenciaBordeRecorte}${manual ? " manual=1" : ""}${escudoManual ? " escudo-manual=1" : ""} ` +
-        // KIT e14-luz-sim-puntos-v1 (T-D): piso-10 aplicado (grep-able).
-        `quad=[${quad.map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(" ")}] piso10=${pisoPerfecto ? 1 : 0}${quadOrigen ? ` origen=${quadOrigen}` : ""} ` +
-        `score=${score} filtro=${filtro} ocrIn=${ocrIn} ` +
-        // KIT e14-motor-rapidocr-v1 (PROD-2 §4.2): token grep-able del motor.
-        `ocr=rapidocr conf=${confOcr != null ? confOcr.toFixed(2) : "?"} det=${Math.round(detOcr)}ms rec=${Math.round(recOcr)}ms ` +
-        // KIT e14-score-lectura-v1 (REBASE): señal de lectura v2 en la traza.
-        `lectura=${senal.nivel} anclas=${senal.anclas} piso=${score >= 8.5 && senal.nivel === "FUERTE"} ` +
-        `clasif={${fmtClasif(desenlace.clasificacion)}} ` +
-        `crop=${cropLog} ` +
-        `metricas={sharpness:${calidad.sharpness} brightness:${calidad.brightness} ` +
-        `contrast:${calidad.contrast} contEff:${contrasteEfectivoDe(calidad, ocrLegible)} ` +
-        `level:${calidad.level}})${diag ? " diag=1" : ""}` +
-        // KIT e63f-autoenvio-v1 (F0): balde fino del no-AUTO — token ADITIVO
-        // AL FINAL (contrato D51). Ausente si AUTO o sin motivo de los
-        // listados (puesto-lugar/tipo/mesa-registro/ruta).
-        `${desenlace.clasificacion?.clasifDebil ? ` ClasifDebil=${desenlace.clasificacion.clasifDebil}` : ""}`,
+        `senal=${senalActa} vacia=${procesadaVacia} ` +
+        trazaDesenlaceComun({
+          votosSkipPag2,
+          densidadVotosPct: marcadores.densidadVotosPct,
+          marcadoresOk,
+          recortada,
+          ladoEsquina,
+          lazoPerdonado,
+          trazaEsq,
+          evidenciaSitio: `${evidenciaBordeRecorte}${manual ? " manual=1" : ""}${escudoManual ? " escudo-manual=1" : ""}`,
+          quad,
+          quadOrigen,
+          pisoPerfecto,
+          score,
+          filtro,
+          ocrIn,
+          confOcr,
+          detOcr,
+          recOcr,
+          senal,
+          desenlace,
+          infoCrop,
+          calidad,
+          ocrLegible,
+          extrasSim: "", // el recorte no tiene SIM (siempre real)
+          extrasDeteccion: "", // esta ruta no corre detección
+          diag,
+        }),
     );
 
     // Acta ACTUALIZADA: identidad intacta (spread), campos reales nuevos y
