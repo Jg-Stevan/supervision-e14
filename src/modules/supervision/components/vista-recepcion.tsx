@@ -209,6 +209,13 @@ export function VistaRecepcion({
   useEffect(() => {
     let vivo = true;
     montadoRef.current = true;
+    // R9 — fix del warning react-hooks (antes L245): el cleanup NO debe leer
+    // `temporizadores.current` (el ref puede haber cambiado cuando corra).
+    // Copia LOCAL del Set al entrar al effect: la instancia del ref nunca se
+    // reasigna (solo se muta in place), así que la copia es la MISMA referencia
+    // viva y add/delete/clear siguen operando el set real. Accesibilidad y
+    // los 44px de toque intactos — cero cambio de comportamiento.
+    const temporizadoresActivos = temporizadores.current;
     // El sembrado del ancla estático corre 1 vez (idempotente) ANTES de
     // la primera lectura — la vista abre con la ingesta inicial visible.
     asegurarSemilla();
@@ -234,16 +241,16 @@ export function VistaRecepcion({
           siguiente.delete(entrada.id);
           return siguiente;
         });
-        temporizadores.current.delete(t);
+        temporizadoresActivos.delete(t);
       }, 1_700);
-      temporizadores.current.add(t);
+      temporizadoresActivos.add(t);
     });
     return () => {
       vivo = false;
       montadoRef.current = false;
       desuscribir();
-      for (const t of temporizadores.current) clearTimeout(t);
-      temporizadores.current.clear();
+      for (const t of temporizadoresActivos) clearTimeout(t);
+      temporizadoresActivos.clear();
     };
   }, []);
 

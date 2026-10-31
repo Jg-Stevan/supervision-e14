@@ -8,10 +8,15 @@
  *   y bandeja de cuarentena la muestran verbatim) — aquí se congela.
  * · `delegadosAcreditados` (n/16) y `ciudadDePuesto`: export canónico en
  *   domain/acta.ts — vivían en data/actas-mock.ts:58,271 y RE-definidas
- *   en components/actas/documento-e14.tsx:31-45 (el lado documento-e14 lo
- *   adopta R4; la referencia verbatim de abajo congela la paridad).
+ *   en components/actas/documento-e14.tsx:31-45.
+ *
+ * R9 (ola-3) — ADOPCIÓN COMPLETADA: documento-e14.tsx ya importa los
+ * canónicos (sin copia local). Los tests de paridad que R3 congeló a
+ * propósito mientras tanto se actualizan: ahora VERIFICAN la adopción
+ * (estructura del fuente: sin re-definición local + import del canónico).
  */
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 
 import { validarJoinDivipola } from "@/modules/supervision/data/validacion-d25";
 import {
@@ -82,24 +87,6 @@ describe("delegadosAcreditados — regla n/16 canónica (domain/acta.ts)", () =>
     expect(delegadosAcreditados(mesaCon("pendiente", "ok"))).toBe(8);
     expect(delegadosAcreditados(mesaCon("pendiente", "pendiente"))).toBe(0);
   });
-
-  /** Referencia verbatim de documento-e14.tsx:31-35 (adopción pendiente R4). */
-  const refDocumentoE14 = (mesa: Mesa): number => {
-    const ok =
-      (mesa.delegados.p1 === "ok" ? 1 : 0) + (mesa.delegados.p2 === "ok" ? 1 : 0);
-    return ok * 8;
-  };
-
-  test("paridad con la copia local de documento-e14 (R4 la adoptará)", () => {
-    const casos: Mesa[] = [
-      mesaCon("ok", "ok"),
-      mesaCon("ok", "pendiente"),
-      mesaCon("pendiente", "pendiente"),
-    ];
-    for (const mesa of casos) {
-      expect(delegadosAcreditados(mesa)).toBe(refDocumentoE14(mesa));
-    }
-  });
 });
 
 describe("ciudadDePuesto — etiqueta del encabezado canónica (domain/acta.ts)", () => {
@@ -128,25 +115,38 @@ describe("ciudadDePuesto — etiqueta del encabezado canónica (domain/acta.ts)"
     expect(ciudadDePuesto(puestoCon("02 - Roma"))).toBe("ROMA");
     expect(ciudadDePuesto(puestoCon("CONSULADO"))).toBe("CONSULADO");
   });
-
-  /** Referencia verbatim de documento-e14.tsx:38-40 (adopción pendiente R4). */
-  const refDocumentoE14 = (puesto: Puesto): string => {
-    const partes = puesto.puesto.split(" - ");
-    return (partes.length > 1 ? partes[1] : puesto.puesto).toUpperCase();
-  };
-
-  test("paridad con la copia local de documento-e14 (R4 la adoptará)", () => {
-    for (const nombre of ["02 - Roma - Consulado", "02 - Roma", "CONSULADO"]) {
-      expect(ciudadDePuesto(puestoCon(nombre))).toBe(
-        refDocumentoE14(puestoCon(nombre))
-      );
-    }
-  });
 });
 
 describe("re-export de actas-mock — misma función, cero duplicación", () => {
   test("el re-export es el MISMO código que el canónico del dominio", () => {
     expect(delegadosAcreditadosMock).toBe(delegadosAcreditados);
     expect(ciudadDePuestoMock).toBe(ciudadDePuesto);
+  });
+});
+
+// ─── R9 — verificación de la ADOPCIÓN en documento-e14.tsx ─────────────────
+
+/** Fuente del componente documento (ruta relativa a ESTE archivo de test,
+ * independiente del cwd del runner). */
+const RUTA_DOCUMENTO = join(
+  import.meta.dir,
+  "../../components/actas/documento-e14.tsx"
+);
+
+describe("documento-e14 — ADOPCIÓN de los canónicos (R9, antes paridad congelada)", () => {
+  test("SIN copia local de delegadosAcreditados/ciudadDePuesto", async () => {
+    const fuente = await Bun.file(RUTA_DOCUMENTO).text();
+    expect(fuente).not.toMatch(/function\s+delegadosAcreditados/);
+    expect(fuente).not.toMatch(/function\s+ciudadDePuesto/);
+  });
+
+  test("importa AMBOS canónicos desde domain/acta (regla única M13)", async () => {
+    const fuente = await Bun.file(RUTA_DOCUMENTO).text();
+    const importActa =
+      /import\s*\{[^}]*delegadosAcreditados[^}]*\}\s*from\s*"\.\.\/\.\.\/domain\/acta"/;
+    expect(fuente).toMatch(importActa);
+    expect(fuente).toMatch(
+      /import\s*\{[^}]*ciudadDePuesto[^}]*\}\s*from\s*"\.\.\/\.\.\/domain\/acta"/
+    );
   });
 });

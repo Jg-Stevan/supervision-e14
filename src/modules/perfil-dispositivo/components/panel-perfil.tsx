@@ -68,6 +68,12 @@ import {
   type ResolucionMotor,
 } from "@/modules/digitalizador/lib/e14/ocr/router-ocr";
 import type { PlanGama } from "@/modules/digitalizador/lib/e14/gama";
+// R9 (ola-3) — ADOPCIÓN de capa shared (R2, reporte 04 §B2 #8/#9):
+// · fmtDuracion — canónico en @/shared/format/tiempo (copia local borrada).
+// · colorDeTono — mapa tono→token canónico en @/shared/ui/tono (el ternario
+//   de KpiPerfil, antes aquí L85-92, era una de las 3 copias del mapa).
+import { fmtDuracion } from "@/shared/format/tiempo";
+import { colorDeTono, type Tono } from "@/shared/ui/tono";
 
 // ─── piezas locales (mismo lenguaje visual del kit) ────────────────────────
 
@@ -80,16 +86,10 @@ function KpiPerfil({
   titulo: string;
   valor: string;
   sub: string;
-  tono: "success" | "warning" | "danger" | "neutral";
+  tono: Tono;
 }) {
-  const color =
-    tono === "success"
-      ? "var(--success)"
-      : tono === "warning"
-        ? "var(--warning)"
-        : tono === "danger"
-          ? "var(--danger)"
-          : "var(--neutral-state)";
+  // R9 — mapa canónico shared/ui/tono (idéntico a VAR_TONO de kpi-card).
+  const color = colorDeTono(tono);
   return (
     <div
       className="rounded-[4px] border border-border border-t-2 bg-card px-4 py-3"
@@ -199,14 +199,8 @@ const OPCIONES_MOTOR: Array<{
   { valor: "ppocrv5", etiqueta: "PP-OCRv5", sub: "precisión · 100 % · ~487 MB pico" },
 ];
 
-/** Duración humana para el estado del castigo (min → h → d). */
-function fmtDuracion(ms: number): string {
-  const min = Math.round(ms / 60_000);
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 48) return `${h} h`;
-  return `${Math.round(h / 24)} d`;
-}
+// R9 — fmtDuracion adoptado de @/shared/format/tiempo (copia verbatim de
+// la que vivía aquí: L202-209 — misma salida min/h/d, test de paridad R2).
 
 /** Adapta el `PerfilRecursos` del kit a la estructura mínima que espera el
  *  router (`PerfilMinimo` — runtime/sync/async en la raíz). null = sin

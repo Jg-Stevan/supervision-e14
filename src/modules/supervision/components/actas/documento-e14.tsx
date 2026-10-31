@@ -1,5 +1,14 @@
 import { memo } from "react";
-import { crearRandomDeterministico } from "../../domain/acta";
+// R9 (ola-3) — ADOPCIÓN de los exports canónicos (M13/R3):
+// delegadosAcreditados y ciudadDePuesto viven en domain/acta.ts (regla
+// ÚNICA); las copias locales que había aquí (antes L31-45) se ELIMINAN.
+// Los tests de paridad que congelaban la duplicación ahora verifican la
+// adopción (data/__tests__/validacion-d25.test.ts).
+import {
+  ciudadDePuesto,
+  crearRandomDeterministico,
+  delegadosAcreditados,
+} from "../../domain/acta";
 import type { ActaMesa, FormularioTipo } from "../../domain/acta";
 import type { Mesa, Puesto } from "../../domain/types";
 
@@ -25,20 +34,6 @@ const SELLO = "#b3261e";
 
 const ANCHO = 794;
 const ALTO = 1123;
-
-/** Derivación n/16 (kit §2.3 «coherente con los delegados de la mesa»):
- * 2 partes ok → 16, 1 → 8, 0 → 0. */
-function delegadosAcreditados(mesa: Mesa): number {
-  const ok =
-    (mesa.delegados.p1 === "ok" ? 1 : 0) + (mesa.delegados.p2 === "ok" ? 1 : 0);
-  return ok * 8;
-}
-
-/** Ciudad del puesto ("02 - Roma" → "ROMA"). */
-function ciudadDePuesto(puesto: Puesto): string {
-  const partes = puesto.puesto.split(" - ");
-  return (partes.length > 1 ? partes[1] : puesto.puesto).toUpperCase();
-}
 
 const PARTIDOS = [
   "MOVIMIENTO UNIDAD",
