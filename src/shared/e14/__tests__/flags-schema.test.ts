@@ -7,6 +7,17 @@
  *   ahora DERIVA de la tabla (se compara por import directo con un
  *   localStorage falso).
  *
+ * HIGIENE OLA-3 — el window falso ya NO queda instalado en globalThis:
+ * se monta en beforeAll y se RESTAURA en afterAll (devuelve globalThis a
+ * su estado exacto previo). Antes quedaba permanente (body de módulo) y
+ * envenenaba suites posteriores del MISMO proceso bun (todos los *.test.ts
+ * corren en uno): la evaluación de módulo de store-e14 lee
+ * `window.navigator.onLine` (store-e14.ts:181-184) y con el window ajeno
+ * incompleto { localStorage } abortaba el file entero — lo que hoy mitiga
+ * el shim de caracterizacion.harness.ts:40-61 (R8). Con la restauración,
+ * ese shim queda INERTE (su `if (windowFalsoGlobal)` no entra) y puede
+ * retirarse al cierre de la ola.
+ *
  * INVARIANTE: nada que las whitelistas históricas ACEPTABAN se rechaza
  * ahora (mismo saneo por clave, mismos clamps). DELTA ADITIVO esperado
  * (la tabla es la UNIÓN): la puerta flags.json pasa a aceptar
@@ -14,7 +25,7 @@
  * `sondeoQrPresupuestoMs`/`sondeoQrCortocircuito`/`prescanQrCola`/
  * `qrBrujulaOrientacion` — fijado como expected-diff explícito.
  */
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import {
   CLAVES_FLAGS_JSON_HISTORICAS,
@@ -97,6 +108,29 @@ function refLeerOverrides(o: unknown): Partial<FlagsApp> {
 
 // ─── window + localStorage falsos (para la puerta real de politica.ts) ──────
 
+// SOLO durante este archivo: se instala en beforeAll y se restaura en
+// afterAll. NUNCA en el body de módulo — ahí el global quedaba permanente
+// y envenenaba suites posteriores del mismo proceso (ver cabecera).
+const windowDescriptorOriginal = Object.getOwnPropertyDescriptor(globalThis, "window");
+
+beforeAll(() => {
+  Object.defineProperty(globalThis, "window", {
+    value: { localStorage: localStorageFalso },
+    configurable: true,
+    writable: true,
+  });
+});
+
+afterAll(() => {
+  // Restauración EXACTA: si había window previo, vuelve tal cual (mismo
+  // descriptor); si no lo había (bun puro — el caso actual), se elimina.
+  if (windowDescriptorOriginal) {
+    Object.defineProperty(globalThis, "window", windowDescriptorOriginal);
+  } else {
+    delete (globalThis as { window?: unknown }).window;
+  }
+});
+
 const memoria = new Map<string, string>();
 const localStorageFalso = {
   getItem: (k: string): string | null => (memoria.has(k) ? (memoria.get(k) as string) : null),
@@ -104,11 +138,6 @@ const localStorageFalso = {
   removeItem: (k: string): void => void memoria.delete(k),
   clear: (): void => void memoria.clear(),
 };
-Object.defineProperty(globalThis, "window", {
-  value: { localStorage: localStorageFalso },
-  configurable: true,
-  writable: true,
-});
 
 function escribirOverrides(json: string): void {
   memoria.set(CLAVE_OVERRIDES, json);
