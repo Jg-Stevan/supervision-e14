@@ -181,6 +181,7 @@ export function PerfilProvider({ children }: { children: ReactNode }) {
       cancelIdleRef.current = null;
     };
     // Montaje único (guard por ref) — el ciclo de pases no depende de props.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- montaje único POR DISEÑO (guard montadoRef): detectar/programarBenchmark cambian de identidad cuando aterriza el benchmark y re-dispararían el cleanup en caliente (cancelaría un benchmark recién agendado por refrescar) — incluirlos SÍ cambia comportamiento.
   }, []);
 
   const refrescar = useCallback(() => {

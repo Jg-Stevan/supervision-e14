@@ -88,7 +88,7 @@ describe("paridad tiempoRelativo (supervision/components/tiempo.ts)", () => {
   });
 });
 
-describe("paridad fmtMs (InformeCorrida.tsx — adopción pendiente)", () => {
+describe("paridad fmtMs (shared/format/tiempo.ts — YA adoptada por InformeCorrida.tsx:34)", () => {
   const CASOS: Array<number | null | undefined> = [
     null,
     undefined,
