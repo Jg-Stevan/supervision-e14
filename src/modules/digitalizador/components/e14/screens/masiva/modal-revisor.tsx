@@ -21,9 +21,16 @@
 //   2 toques (mismo patrón VACIAR/REINICIAR de la bandeja) → parchea el
 //   acta abierta (status RECHAZADA + rechazo SUPERVISOR con el motivo) y
 //   pasa al siguiente acta del lote. Nada del runner/store se toca.
-// · Honestidad de datos (kit §1): score real, página real (o «- DE -»),
-//   identificador = código de barras agrupado por su gramática real
-//   (7100|KIT|TIPO|VER|PÁG|TOTAL) — jamás inventar campos.
+// · Honestidad de datos (kit §1): score real, página real (o «- DE -») —
+//   jamás inventar campos.
+// · Feedback del dueño (ronda 1): VER EN MONITOR vive en la CABECERA del
+//   panel (outline verde + monitor, solo con publicación aterrizada D27);
+//   al fondo del panel queda SOLO CERRAR; campos del panel = exactamente
+//   los del diseño (fuera Intento/Hash/IdEnlace); «Verificación de
+//   Identificador / Código» = el código impreso ENTRE LAS X del acta
+//   (7-23-10-19 — plancha del formulario E-14 exterior), NO el barcode;
+//   móvil: el modal COMPLETO hace scroll (navegable) y AJUSTAR = canvas a
+//   pantalla completa real (h-dvh).
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -39,6 +46,7 @@ import {
   Loader2,
   Maximize,
   Minimize,
+  Monitor,
   RotateCw,
   ShieldCheck,
   Undo2,
@@ -95,16 +103,14 @@ function scoreTexto(score: number): string {
   return Number.isInteger(score) ? String(score) : score.toFixed(1);
 }
 
-/** Identificador del acta: el código de barras REAL agrupado por su
- * gramática impresa (7100 | KIT(4) | TIPO(1) | VER(2) | PÁG(2) | TOTAL(2)).
- * Sin 15 dígitos → el crudo tal cual; vacío → null (la caja no se pinta). */
-function formatoIdentificador(codigo: string): string | null {
-  if (!codigo) return null;
-  if (/^\d{15}$/.test(codigo)) {
-    return `X  ${codigo.slice(0, 4)} · ${codigo.slice(4, 8)} · ${codigo.slice(8, 9)} · ${codigo.slice(9, 11)} · ${codigo.slice(11, 13)} · ${codigo.slice(13, 15)}  X`;
-  }
-  return `X  ${codigo}  X`;
-}
+/** «Verificación de Identificador / Código» (feedback del dueño): el código
+ * IMPRESO del formulario E-14 exterior — el que aparece ENTRE LAS X en el
+ * acta física («X 7-23-10-19 X», justo bajo el encabezado CONSULADO/PAÍS/
+ * ZONA/PUESTO/MESA/LUGAR). Es el código de plancha del formulario (constante
+ * verificada en las actas reales del CONSULADO 88 · PAÍS 335 Egipto · KIT
+ * 399 y en las 6 fotos del dueño) — NO es el código de barras (ese vive en
+ * su campo propio) y el pipeline no lo lee: se muestra tal cual va impreso. */
+const CODIGO_FORMA_ENTRE_XX = "7 - 23 - 10 - 19";
 
 /** Etiqueta del formulario (misma convención del adaptador D27 —
  * store-e14.ts): TRANSMISION → «TRANSMISIÓN», DELEGADOS → «CÓNSUL/
@@ -440,9 +446,6 @@ export function ModalRevisor({
       : c?.codigoUnico?.kit != null
         ? String(c.codigoUnico.kit)
         : "—";
-  const identificador = formatoIdentificador(
-    c?.codigoUnico?.crudo || acta.codigoBarras || "",
-  );
   const lugar = c?.puesto?.nombre ?? "";
   const etiquetaForm = etiquetaFormularioDe(acta);
   const enviadaAuto = Boolean(acta.enviadoAutomaticamente);
@@ -453,10 +456,19 @@ export function ModalRevisor({
       role="dialog"
       aria-modal="true"
       aria-label={`Revisión de acta ${acta.titulo}`}
-      className="fixed inset-0 z-50 flex h-dvh flex-col overflow-hidden bg-[#070b0a] lg:flex-row"
+      // Móvil navegable (feedback del dueño): el modal COMPLETO hace scroll
+      // (el panel del auditor queda alcanzable); en lg vuelve el layout de
+      // 2 columnas con scroll interno del panel.
+      className="fixed inset-0 z-50 flex h-dvh flex-col overflow-y-auto overscroll-contain bg-[#070b0a] lg:flex-row lg:overflow-hidden"
     >
       {/* ════════════════ CANVAS — VISOR DEL DOCUMENTO ════════════════ */}
-      <main className="grid-paper-bg relative flex h-[52vh] shrink-0 flex-col overflow-hidden bg-[#060a09] lg:h-auto lg:min-w-0 lg:flex-1">
+      {/* Canvas: 52vh en móvil — AJUSTAR (expandido) lo lleva a PANTALLA
+          COMPLETA REAL (h-dvh, feedback del dueño) con el panel oculto. */}
+      <main
+        className={`grid-paper-bg relative flex shrink-0 flex-col overflow-hidden bg-[#060a09] ${
+          expandido ? "h-dvh" : "h-[52vh]"
+        } lg:h-auto lg:min-w-0 lg:flex-1`}
+      >
         {/* ── Toolbar flotante de inspección ── */}
         <div className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 flex-wrap items-center justify-center gap-x-1 gap-y-1 rounded-md border border-[#21362e] bg-[#0d1613]/90 px-3 py-1.5 font-mono text-xs text-gray-300 shadow-2xl backdrop-blur">
           <button
@@ -601,7 +613,7 @@ export function ModalRevisor({
               disabled={!posNavegacion || posNavegacion.index <= 1}
               title="Imagen anterior del lote"
               aria-label="Imagen anterior del lote"
-              className="absolute left-4 top-1/2 z-10 flex h-14 w-9 -translate-y-1/2 items-center justify-center rounded border border-[#21362e] bg-[#0d1613]/80 text-gray-400 shadow-lg transition-colors hover:bg-[#12201c] hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30"
+              className="absolute left-4 top-1/2 z-10 flex h-16 w-11 -translate-y-1/2 items-center justify-center rounded border border-[#21362e] bg-[#0d1613]/80 text-gray-400 shadow-lg transition-colors hover:bg-[#12201c] hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={2.5} />
             </button>
@@ -613,7 +625,7 @@ export function ModalRevisor({
               }
               title="Imagen siguiente del lote"
               aria-label="Imagen siguiente del lote"
-              className="absolute right-4 top-1/2 z-10 flex h-14 w-9 -translate-y-1/2 items-center justify-center rounded border border-[#21362e] bg-[#0d1613]/80 text-gray-400 shadow-lg transition-colors hover:bg-[#12201c] hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30"
+              className="absolute right-4 top-1/2 z-10 flex h-16 w-11 -translate-y-1/2 items-center justify-center rounded border border-[#21362e] bg-[#0d1613]/80 text-gray-400 shadow-lg transition-colors hover:bg-[#12201c] hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
             </button>
@@ -805,34 +817,55 @@ export function ModalRevisor({
                 </>
               )}
             </div>
+            {/* VER EN MONITOR (feedback del dueño): en la CABECERA del panel,
+                outline verde + icono monitor — solo con la publicación D27
+                aterrizada (misma condición de siempre). */}
+            {publicacion?.estado === "publicada" && join && onVerEnMonitor && (
+              <button
+                type="button"
+                onClick={() =>
+                  onVerEnMonitor(join.idEnlace, join.mesa, join.tipo)
+                }
+                title="Abrir esta acta publicada en el monitor global"
+                className="flex shrink-0 items-center gap-1.5 rounded border border-emerald-500 bg-emerald-500/10 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-emerald-400 transition-colors hover:bg-emerald-500/20 active:scale-[0.98]"
+              >
+                <Monitor className="h-3.5 w-3.5" />
+                VER EN MONITOR
+              </button>
+            )}
+          </div>
+          {/* Estado del acta (píldora real) + sello del envío automático —
+              fila fina bajo la cabecera para que la cabecera quede EXACTA
+              como el diseño (✓ ENVÍO AUTOMÁTICO + VER EN MONITOR). */}
+          <div className="flex items-center justify-between gap-2 border-b border-[#16231e]/40 px-3.5 py-2">
             <span
               className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${pildora.clases}`}
             >
               {pildora.label}
             </span>
+            {enviadaAuto && (
+              <span className="truncate font-mono text-[9px] uppercase tracking-wider text-emerald-400/90">
+                ENVIADA AUTO · {acta.enviadoAutomaticamente}
+              </span>
+            )}
           </div>
           <div className="space-y-3 p-3.5 font-mono text-xs">
-            {enviadaAuto && (
-              <p className="text-center text-[10px] uppercase tracking-wider text-emerald-400/90">
-                ENVIADA AUTO · {acta.enviadoAutomaticamente}
-              </p>
-            )}
-            {/* VERIFICACIÓN DE IDENTIFICADOR / CÓDIGO */}
-            {identificador && (
-              <div>
-                <span className="mb-1 block text-center text-[10px] font-bold uppercase tracking-wide text-gray-400">
-                  Verificación de Identificador / Código
+            {/* VERIFICACIÓN DE IDENTIFICADOR / CÓDIGO — el código IMPRESO
+                ENTRE LAS X del acta física (feedback del dueño; NO el
+                código de barras, que va en su campo propio). */}
+            <div>
+              <span className="mb-1 block text-center text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                Verificación de Identificador / Código
+              </span>
+              <div
+                title="Código impreso del formulario E-14, entre las X del papel (el código de barras va en su campo propio)"
+                className="rounded border border-[#16231e] bg-[#060a09] px-2 py-1.5 text-center"
+              >
+                <span className="text-sm font-bold tracking-widest text-emerald-400">
+                  {`X  ${CODIGO_FORMA_ENTRE_XX}  X`}
                 </span>
-                <div
-                  title="Código único impreso: 7100 · KIT · TIPO (2=delegados, 3=transmisión) · VER · PÁG · TOTAL"
-                  className="rounded border border-[#16231e] bg-[#060a09] px-2 py-1.5 text-center"
-                >
-                  <span className="text-sm font-bold tracking-widest text-emerald-400">
-                    {identificador}
-                  </span>
-                </div>
               </div>
-            )}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <DatoPanel etiqueta="País" valor={pais} />
               <DatoPanel etiqueta="Zona" valor={zonaTxt} />
@@ -853,29 +886,13 @@ export function ModalRevisor({
                 valor={acta.codigoBarras || "—"}
               />
             </div>
-            <div className="grid grid-cols-2 gap-2 border-t border-[#16231e]/40 pt-2">
-              <DatoPanel
-                etiqueta="Intento"
-                valor={`${acta.intento} DE ${acta.maxIntentos}`}
-              />
-              <DatoPanel
-                etiqueta="Hash"
-                valor={
-                  !acta.hashSha256
-                    ? "—"
-                    : acta.hashSha256 === "EN COLA"
-                      ? "EN COLA"
-                      : `${acta.hashSha256.slice(0, 12)}…`
-                }
-              />
-            </div>
-            {join && (
-              <div className="border-t border-[#16231e]/40 pt-2">
-                <DatoPanel etiqueta="IdEnlace (D22)" valor={join.idEnlace} />
-              </div>
-            )}
           </div>
         </div>
+
+        {/* ── Publicación en el monitor (D27 — lógica intacta, recolocada:
+            feedback compacto bajo la tarjeta de datos; al fondo del panel
+            queda SOLO CERRAR, pedido del dueño). ── */}
+        <PublicacionChip publicacion={publicacion} />
 
         {/* ── Banner de rechazo (estado del acta) ── */}
         {acta.rechazo && (
@@ -972,23 +989,8 @@ export function ModalRevisor({
             </span>
           </div>
 
-          {/* ── Publicación en el monitor (D27) + VER EN MONITOR ── */}
-          <div className="space-y-2">
-            <PublicacionChip publicacion={publicacion} />
-            {publicacion?.estado === "publicada" && join && onVerEnMonitor && (
-              <button
-                type="button"
-                onClick={() =>
-                  onVerEnMonitor(join.idEnlace, join.mesa, join.tipo)
-                }
-                className="min-h-[44px] w-full rounded bg-emerald-500 px-4 font-mono text-[11px] font-black uppercase tracking-wider text-[#04120c] shadow-md shadow-emerald-500/25 transition hover:bg-emerald-400 active:scale-[0.98]"
-              >
-                VER EN MONITOR
-              </button>
-            )}
-          </div>
-
-          {/* ── Cerrar (visible siempre — el redesign no tiene scrim-clic) ── */}
+          {/* ── Cerrar (visible siempre — el redesign no tiene scrim-clic;
+              al fondo del panel queda SOLO este botón, pedido del dueño) ── */}
           <button
             type="button"
             onClick={onCerrar}

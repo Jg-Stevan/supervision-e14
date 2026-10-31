@@ -55,6 +55,10 @@ export interface EstadoVisorActa {
   mesaId: string | null;
   tipo: FormularioTipo;
   pagina: number;
+  /** KIT feedback-ronda-1 — aterrizaje desde VER EN MONITOR (masiva): el
+   *  visor abre LIMPIO — sin la información del acta en la cabecera (solo
+   *  el botón de cerrar) y sin el panel de acciones. Solo lectura. */
+  modoMonitor?: boolean;
 }
 
 interface EstadoDatos {
@@ -106,7 +110,11 @@ interface AccionesContexto {
   abrirVisor: (
     puestoId: string,
     mesaId: string,
-    opciones?: { tipo?: FormularioTipo; pagina?: number }
+    opciones?: {
+      tipo?: FormularioTipo;
+      pagina?: number;
+      modoMonitor?: boolean;
+    }
   ) => void;
   /** 👁 de la fila de puesto: primera mesa con acta (T3.4). */
   abrirVisorDePuesto: (puestoId: string) => void;
@@ -437,13 +445,18 @@ export function DatosProvider({ children }: { children: ReactNode }) {
     (
       puestoId: string,
       mesaId: string,
-      opciones?: { tipo?: FormularioTipo; pagina?: number }
+      opciones?: {
+        tipo?: FormularioTipo;
+        pagina?: number;
+        modoMonitor?: boolean;
+      }
     ) => {
       setVisorActa({
         puestoId,
         mesaId,
         tipo: opciones?.tipo ?? "TRANSMISION",
         pagina: opciones?.pagina ?? 1,
+        modoMonitor: opciones?.modoMonitor,
       });
     },
     []

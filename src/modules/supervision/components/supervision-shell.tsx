@@ -502,8 +502,13 @@ function ShellInterno() {
               onVerEnMonitor={(puestoId, mesaId, tipo) => {
                 // D27 — VER EN MONITOR: aterriza el acta publicada en el
                 // visor (cambia a MONITOR y abre el acta de esa mesa).
+                // KIT feedback-ronda-1: aterrizaje LIMPIO — solo el botón
+                // de cerrar, sin la información del acta ni acciones.
                 elegirVista("monitor");
-                abrirVisor(puestoId, mesaId, tipo ? { tipo } : undefined);
+                abrirVisor(puestoId, mesaId, {
+                  ...(tipo ? { tipo } : {}),
+                  modoMonitor: true,
+                });
               }}
             />
           )}

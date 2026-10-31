@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Info, X } from "lucide-react";
 import { cn } from "cn";
 import { useDatos, useDatosAcciones } from "../datos-provider";
 import { actaAprobada } from "../../domain/acta";
@@ -81,6 +81,11 @@ function VisorAbierto() {
     cambiarTipo,
     cambiarPagina,
   } = useDatosAcciones();
+  // KIT feedback-ronda-1 — MODO MONITOR: aterrizaje desde VER EN MONITOR
+  // (masiva): visor LIMPIO — cabecera SOLO con el botón de cerrar y SIN
+  // panel de acciones (solo lectura; las acciones viven en los flujos
+  // propios del monitor). El resto de los puntos de entrada no cambian.
+  const modoMonitor = visorActa?.modoMonitor === true;
 
   // Estado local de UI del canvas (vive SOLO con el modal abierto).
   // KIT visor-gestos-v1: la escala REAL vive dentro de VisorZoom — aquí solo
@@ -200,23 +205,40 @@ function VisorAbierto() {
             : "mx-auto h-[90vh] max-w-[1400px]"
         )}
       >
-        {puesto && (
-          <ActaHeader
-            puesto={puesto}
-            indiceMesa={Math.max(1, indiceMesa)}
-            totalMesas={totalMesas}
-            puedeAnterior={indiceMesa > 1}
-            puedeSiguiente={indiceMesa < totalMesas}
-            onMesaAnterior={() => navegarMesa(-1)}
-            onMesaSiguiente={() => navegarMesa(1)}
-            tipo={visorActa.tipo}
-            onCambiarTipo={cambiarTipo}
-            paginas={paginas}
-            paginaActiva={paginaActiva}
-            onCambiarPagina={cambiarPagina}
-            acta={actaActual}
-            onCerrar={cerrarVisor}
-          />
+        {modoMonitor ? (
+          /* MODO MONITOR — cabecera LIMPIA: SOLO el botón de cerrar
+             (feedback del dueño: la información del acta no se ve bien
+             al aterrizar desde VER EN MONITOR). */
+          <header className="flex items-center justify-end border-b border-(--border) bg-(--surface-lowest) px-4 py-2.5">
+            <button
+              type="button"
+              onClick={cerrarVisor}
+              aria-label="Cerrar visor de actas"
+              title="Cerrar (Escape)"
+              className="inline-flex size-9 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)"
+            >
+              <X className="size-5" aria-hidden />
+            </button>
+          </header>
+        ) : (
+          puesto && (
+            <ActaHeader
+              puesto={puesto}
+              indiceMesa={Math.max(1, indiceMesa)}
+              totalMesas={totalMesas}
+              puedeAnterior={indiceMesa > 1}
+              puedeSiguiente={indiceMesa < totalMesas}
+              onMesaAnterior={() => navegarMesa(-1)}
+              onMesaSiguiente={() => navegarMesa(1)}
+              tipo={visorActa.tipo}
+              onCambiarTipo={cambiarTipo}
+              paginas={paginas}
+              paginaActiva={paginaActiva}
+              onCambiarPagina={cambiarPagina}
+              acta={actaActual}
+              onCerrar={cerrarVisor}
+            />
+          )
         )}
 
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -403,8 +425,10 @@ function VisorAbierto() {
             )}
           </section>
 
-          {/* ── SIDEBAR DE ACCIONES ────────────────────────────────────── */}
-          <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-(--border) bg-(--card) p-5 lg:w-80 lg:border-t-0 lg:border-l lg:overflow-y-auto">
+          {/* ── SIDEBAR DE ACCIONES (oculto en MODO MONITOR — aterrizaje
+              limpio; las acciones viven en los flujos propios) ────────── */}
+          {!modoMonitor && (
+            <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-(--border) bg-(--card) p-5 lg:w-80 lg:border-t-0 lg:border-l lg:overflow-y-auto">
             <ActaAcciones
               accionEnCurso={accionActaEnCurso}
               onAprobar={aprobarActaVisor}
@@ -420,7 +444,8 @@ function VisorAbierto() {
                 Esta acción quedará registrada en la auditoría.
               </p>
             </footer>
-          </aside>
+            </aside>
+          )}
         </div>
       </div>
     </div>

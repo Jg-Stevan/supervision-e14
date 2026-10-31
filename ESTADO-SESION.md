@@ -53,7 +53,7 @@ más diseños (score bajo, otros flujos) — este primero y bien hecho.
 El repo original está en GitHub; el sandbox es clone de supervision-e14.
 **PUSH al repo SOLO cuando el dueño lo apruebe.**
 
-## 5. Feedback del dueño — RONDA 1 (2026-10-30, EN PROGRESO)
+## 5. Feedback del dueño — RONDA 1 (2026-10-30, ✅ IMPLEMENTADA Y VERIFICADA)
 
 Petición textual: «lo de ver en el monitor está muy bien, solo que no se ve
 bien la información del acta; deja solo el botón de cerrar; y cambia como está
@@ -80,6 +80,20 @@ aprobada por evidencia (2 capturas del dueño en `upload/`):
 5. **«ampliar» no ampliaba en celular**: `expandido` solo ocultaba el aside
    (que ya estaba fuera de pantalla) — el canvas seguía en 52vh. Fix:
    `expandido` → canvas `h-dvh` en móvil (pantalla completa real).
+
+### Verificación E2E (agent-browser — evidencia en tool-results/r1-*.png)
+
+- Desktop 1366×900: panel EXACTO al diseño (`X 7 - 23 - 10 - 19 X`, sin
+  Intento/Hash/IdEnlace), VER EN MONITOR en cabecera (publicada → r1-04),
+  abajo SOLO CERRAR, chip PUBLICADA bajo la tarjeta.
+- VER EN MONITOR → aterrizaje LIMPIO: cabecera solo con ✕ y sin panel de
+  acciones (r1-12) — el resto de los flujos del visor de supervisión
+  (tablas del monitor → r1-13) conservan cabecera completa + acciones.
+- Móvil 375×812: modal completo scrollable (panel + CERRAR alcanzables,
+  r1-08/09), AJUSTAR = pantalla completa real del acta (r1-10, re-fit
+  automático 66→186 %), zoom ± OK (r1-11), chevrons 44px.
+- RECHAZAR a 2 toques con motivo obligatorio OK (r1-14/15).
+- lint 0 errores · tsc sin errores nuevos · dev.log limpio.
 
 ## 6. Cómo verificar (SIEMPRE)
 
