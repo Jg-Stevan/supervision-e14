@@ -1,0 +1,127 @@
+From 2ea4b7ca8ac3f2f670c9faaaa527305e0ee9dd12 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Fri, 30 Oct 2026 23:11:09 +0000
+Subject: [PATCH 2/8] =?UTF-8?q?chore(sandbox):=20adaptaciones=20del=20ento?=
+ =?UTF-8?q?rno=20de=20preview=20(fuentes=20de=20sistema,=20script=20dev=20?=
+ =?UTF-8?q?con=20puerto=20fijo)=20=E2=80=94=20NO=20para=20merge?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .gitignore         | 27 ++++++++++++++-------------
+ package.json       |  6 ++++--
+ src/app/layout.tsx | 23 +++++++----------------
+ 3 files changed, 25 insertions(+), 31 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 69abc4a..3d67daa 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,7 +1,7 @@
+ # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+ 
+ # dependencies
+-/node_modules
++node_modules
+ /.pnp
+ .pnp.*
+ .yarn/*
+@@ -36,18 +36,19 @@ yarn-error.log*
+ # vercel
+ .vercel
+ 
++
+ # typescript
+ *.tsbuildinfo
+ next-env.d.ts
+-download/
+-
+-# D39 — higiene de repo: artefactos del entorno AI / sandbox (jamás producto)
+-# NOTA: docs/capturas-*/ SÍ se conservan — son evidencia citada por los REPORTEs.
+-/skills/
+-/tool-results/
+-/dev.log
+-__pycache__/
+-*.pyc
+-.zscripts/
+-mini-services/
+-/agent-ctx/
++local-*
++.claude
++.z-ai-config
++*.log
++dev.log
++dev.out.log
++test
++prompt
++
++server.log
++# Skills directory
++/skills/
+\ No newline at end of file
+diff --git a/package.json b/package.json
+index 6f04890..99a7e2f 100644
+--- a/package.json
++++ b/package.json
+@@ -3,11 +3,13 @@
+   "version": "0.1.0",
+   "private": true,
+   "scripts": {
+-    "dev": "next dev",
++    "dev": "next dev -p 3000 2>&1 | tee dev.log",
+     "prebuild": "bun scripts/build-capa0-worker.mjs",
+     "build": "next build",
+     "start": "next start",
+-    "lint": "eslint"
++    "lint": "eslint",
++    "db:push": "prisma db push --accept-data-loss",
++    "db:generate": "prisma generate"
+   },
+   "dependencies": {
+     "@jg-stevan/scanner-core": "^0.4.0",
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index dc64219..0035bfd 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -1,19 +1,13 @@
+ import type { Metadata } from "next";
+-import { Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
+ import { Toaster } from "@/components/ui/sonner";
+ import "./globals.css";
+ 
+-const hankenGrotesk = Hanken_Grotesk({
+-  subsets: ["latin"],
+-  weight: ["600", "700"],
+-  variable: "--font-hanken",
+-});
+-
+-const jetbrainsMono = JetBrains_Mono({
+-  subsets: ["latin"],
+-  weight: ["400", "500", "600"],
+-  variable: "--font-jetbrains",
+-});
++// FONTS: el layout original usa next/font/google (Hanken Grotesk +
++// JetBrains Mono). En este entorno de preview no hay acceso a Google
++// Fonts, así que las variables --font-hanken / --font-jetbrains se
++// declaran con fallbacks de sistema EQUIVALENTES en globals.css
++// (mismos nombres de variable — cero cambios en los consumidores).
++// Al volver al repo real, restaurar el import de next/font/google.
+ 
+ export const metadata: Metadata = {
+   title: "Sistema de Monitoreo Electoral E-14",
+@@ -24,10 +18,7 @@ export default function RootLayout({
+   children,
+ }: Readonly<{ children: React.ReactNode }>) {
+   return (
+-    <html
+-      lang="es"
+-      className={`${hankenGrotesk.variable} ${jetbrainsMono.variable} antialiased`}
+-    >
++    <html lang="es" className="antialiased">
+       <body className="min-h-screen bg-background font-sans">
+         {children}
+         <Toaster theme="dark" position="bottom-right" />
+-- 
+2.47.3
+

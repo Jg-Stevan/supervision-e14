@@ -1,0 +1,75 @@
+From 67c2f71bc1061283b086fee0f558bb993f86e5c3 Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Sat, 31 Oct 2026 00:42:06 +0000
+Subject: [PATCH 8/8] feedback(ronda-2): VER EN MONITOR fijo, barcode real del
+ escaneo y tarjeta de datos con desplazador interno
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- VER EN MONITOR: condición por JOIN del acta (persistida) en vez del
+  registro en memoria de la publicación — el botón NO desaparece tras
+  darle click ni tras recargar; solo se oculta en cuarentena D25.
+- CÓDIGO DE BARRAS: muestra el 1D REAL leído al acta escaneada
+  (clasificacion.codigoUnico.crudo, 15 dígitos) con respaldo del
+  manifiesto D24; fuera el tracking del sistema (*E14-SEN-…*).
+- Tarjeta de datos: shrink-0 (jamás se comprime como ítem flex) +
+  desplazador interno (max-h-45dvh + scroll fino) para ventanas
+  medianas/pequeñas — la info del acta siempre alcanzable; panel
+  compactado gap-4/space-y-4.
+- Caption del visor de supervision: barcode sin asteriscos Code 39.
+---
+ .../e14/screens/masiva/modal-revisor.tsx      | 23 ++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/modules/digitalizador/components/e14/screens/masiva/modal-revisor.tsx b/src/modules/digitalizador/components/e14/screens/masiva/modal-revisor.tsx
+index 9cce974..ff218f6 100644
+--- a/src/modules/digitalizador/components/e14/screens/masiva/modal-revisor.tsx
++++ b/src/modules/digitalizador/components/e14/screens/masiva/modal-revisor.tsx
+@@ -84,6 +84,9 @@ import {
+ import { pildoraEstadoActa } from "./helpers";
+ import { PublicacionChip } from "./publicacion-chip";
+ import type { PropsMasivaView } from "./orquestador";
++// Manifiesto de actas reales (D24 — memoizado en módulo): respaldo del
++// barcode IMPRESO en el papel cuando el pipeline no decodificó el 1D.
++import { cargarActasReales } from "@/modules/supervision/data/actas-reales/actas-reales";
+ 
+ /** Rectángulo de recorte en % del área de la foto (0–100 — mapea a píxeles
+  * naturales al aplicar; el drag llega saneado y el clamp lo respalda). */
+@@ -459,6 +462,24 @@ export function ModalRevisor({
+   const enviadaAuto = Boolean(acta.enviadoAutomaticamente);
+   const rechazadaYa = acta.status === "RECHAZADA";
+ 
++  // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — ronda 2):
++  //    el 1D REAL leído al papel por el pipeline (clasificación AUTO →
++  //    codigoUnico.crudo — los 15 dígitos decodificados del escaneo,
++  //    gramática codigoUnicoE14). Respaldo honesto: el manifiesto de actas
++  //    reales (barcodeImpreso verbatim del formulario). NUNCA el código de
++  //    tracking del sistema (acta.codigoBarras «*E14-SEN-…*» — ese NO está
++  //    impreso en el acta).
++  const tipoFormulario = (acta.clasificacion?.tipo ?? acta.tipo) as
++    | "TRANSMISION"
++    | "DELEGADOS";
++  const barcodeEscaneado =
++    c?.codigoUnico?.crudo ??
++    (join
++      ? cargarActasReales().actas[`${join.idEnlace}::${join.mesa}`]
++          ?.barcodesImpresos[tipoFormulario]
++      : undefined) ??
++    "";
++
+   return (
+     <div
+       role="dialog"
+@@ -909,7 +930,7 @@ export function ModalRevisor({
+               <DatoPanel etiqueta="Kit" valor={kit} />
+               <DatoPanel
+                 etiqueta="Código de Barras"
+-                valor={(acta.codigoBarras ?? "").replace(/\*/g, "") || "—"}
++                valor={barcodeEscaneado || "—"}
+               />
+             </div>
+           </div>
+-- 
+2.47.3
+
