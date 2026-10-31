@@ -1,0 +1,698 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * KIT e14-metricas-corrida-v1 (D34) — INFORME DE CARGA MASIVA (pedido
+     5→ * literal del dueño: «un informe de cómo se está comportando la carga
+     6→ * masiva, cuánto está tardando, en qué está tardando para tener datos
+     7→ * reales y poder diagnosticar bien los fallos»).
+     8→ *
+     9→ * · Datos: metricas.ts (IDB e14-masiva-metricas-v1 + espejo RAM de la
+    10→ *   corrida viva). Sobrevive recargas y el REINICIAR ENVÍOS (D33 —
+    11→ *   comparar corridas ES el punto).
+    12→ * · Vista: corrida seleccionada (default: la VIVA o la última cerrada) —
+    13→ *   clic en el historial para mirar una anterior.
+    14→ * · Honesto: etapa sin dato no aparece (jamás inventar); acta sin
+    15→ *   pipeline (ERROR temprano) pinta totalMs «—».
+    16→ * · Cero ruido cuando no hay corridas: el panel NO se renderiza.
+    17→ */
+    18→
+    19→import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+    20→import {
+    21→  corridaVivaEstado,
+    22→  exportarInformeMetricas,
+    23→  listarCorridasMetricas,
+    24→  limpiarMetricas,
+    25→  metricasDeCorrida,
+    26→  suscribirseMetricas,
+    27→  type CorridaMetrica,
+    28→  type MetricaActa,
+    29→} from "@/modules/digitalizador/lib/e14/masiva/metricas";
+    30→// R6 — adopción de la capa shared (Ola 0, reporte 04 §B2 #9): fmtMs y hhmm
+    31→// viven en @/shared/format/tiempo — COPIAS VERBATIM de ESTE archivo
+    32→// (fmtMs:81-88 · hh:mm de fmtFechaRelativa:92-93). Mismo output byte a
+    33→// byte; el test de paridad de shared lo fija.
+    34→import { fmtMs, hhmm } from "@/shared/format/tiempo";
+    35→
+    36→// KIT e14-etapas-preocr-v1 (D43) — las etapas OCULTAS suben a las barras:
+    37→// preOcr (runner: capa-0 QR + origen + deskew + master), proceso (warp ×2 +
+    38→// realce del bridge), orientacionProbe (mini-OCR de rotación) y calidad
+    39→// (Laplaciano). Orden de pipeline — el pre-OCR era invisible hasta hoy.
+    40→type EtapaKey =
+    41→  | "preOcrMs"
+    42→  | "decodeMs"
+    43→  | "detectMs"
+    44→  | "procesoMs"
+    45→  | "orientacionProbeMs"
+    46→  | "calidadMs"
+    47→  | "ocrMs"
+    48→  | "persistMs"
+    49→  | "envioMs";
+    50→
+    51→/** Etapas de TRABAJO en orden de presentación (la espera de cola y el
+    52→ *  sondeo —ingesta, paralelo al pipeline— van aparte como info). */
+    53→const ETAPAS_TRABAJO: { key: EtapaKey; label: string }[] = [
+    54→  { key: "preOcrMs", label: "PRE-OCR" },
+    55→  { key: "decodeMs", label: "DECODE" },
+    56→  { key: "detectMs", label: "DETECCIÓN" },
+    57→  { key: "procesoMs", label: "WARP+REALCE" },
+    58→  { key: "orientacionProbeMs", label: "ORIENTACIÓN" },
+    59→  { key: "calidadMs", label: "CALIDAD" },
+    60→  { key: "ocrMs", label: "OCR" },
+    61→  { key: "persistMs", label: "PERSISTENCIA" },
+    62→  { key: "envioMs", label: "ENVÍO" },
+    63→];
+    64→
+    65→// KIT e14-tiempos-v2 (D44-R1) — particiones del muro PRE-OCR (sub-barras
+    66→// indentadas bajo su barra madre): NO son etapas — son segmentos del MISMO
+    67→// muro (qr+origen+deskew+master ≤ preOcrMs). Su % es del PROPIO muro.
+    68→type PreOcrSubKey = "preOcrQrMs" | "preOcrOrigenMs" | "preOcrDeskewMs" | "preOcrMasterMs";
+    69→const PRE_OCR_SUBS: { key: PreOcrSubKey; label: string }[] = [
+    70→  { key: "preOcrQrMs", label: "QR CAPA-0" },
+    71→  { key: "preOcrOrigenMs", label: "ORIGEN" },
+    72→  { key: "preOcrDeskewMs", label: "DESKEW" },
+    73→  { key: "preOcrMasterMs", label: "MASTER" },
+    74→];
+    75→
+    76→// KIT e14-medicion-faltante-v1 (D45) — particiones del muro PROCESO (los 2
+    77→// warps SERIALIZADOS por el core): sub-barras indentadas bajo su barra madre.
+    78→// La 2.ª pared acumula la cola de la 1.ª — el coste propio del segundo warp
+    79→// es la DIFERENCIA entre ambas paredes.
+    80→type ProcesoSubKey = "procesoBwMs" | "procesoOcrMs";
+    81→const PROCESO_SUBS: { key: ProcesoSubKey; label: string }[] = [
+    82→  { key: "procesoBwMs", label: "WARP BW" },
+    83→  { key: "procesoOcrMs", label: "WARP LECTURA" },
+    84→];
+    85→
+    86→// R6 — fmtMs adoptado de @/shared/format/tiempo (copia verbatim de aquí).
+    87→
+    88→function fmtFechaRelativa(ms: number): string {
+    89→  const d = new Date(ms);
+    90→  // R6 — las partes "HH:MM" son el patrón ×3 homeado como hhmm() en
+    91→  // @/shared/format/tiempo (idéntico output: String().padStart(2, "0")).
+    92→  return `${d.toLocaleDateString()} ${hhmm(d)}`;
+    93→}
+    94→
+    95→function percentil(sorted: number[], p: number): number | null {
+    96→  if (!sorted.length) return null;
+    97→  const i = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+    98→  return sorted[i];
+    99→}
+   100→
+   101→const COLOR_DESENLACE: Record<string, string> = {
+   102→  ENVIADA: "text-[#10b981] border-[#10b981]/40 bg-[#10b981]/10",
+   103→  OPTIMA: "text-[#10b981] border-[#10b981]/40 bg-[#10b981]/10",
+   104→  ADVERTENCIA: "text-amber-400 border-amber-400/40 bg-amber-400/10",
+   105→  RECHAZADA: "text-rose-400 border-rose-400/40 bg-rose-400/10",
+   106→  DUPLICADA: "text-sky-400 border-sky-400/40 bg-sky-400/10",
+   107→  ERROR: "text-rose-400 border-rose-500/50 bg-rose-500/15",
+   108→};
+   109→
+   110→function ChipDesenlace({ d }: { d: string }) {
+   111→  const c = COLOR_DESENLACE[d] ?? "text-slate-300 border-slate-700 bg-slate-800/50";
+   112→  return (
+   113→    <span className={`px-1.5 py-0.5 rounded-md border font-mono text-[9px] font-bold uppercase tracking-wider ${c}`}>
+   114→      {d}
+   115→    </span>
+   116→  );
+   117→}
+   118→
+   119→export default function InformeCorrida() {
+   120→  const [corridas, setCorridas] = useState<CorridaMetrica[]>([]);
+   121→  const [seleccionada, setSeleccionada] = useState<string | null>(null);
+   122→  const [actas, setActas] = useState<MetricaActa[]>([]);
+   123→  const [abierto, setAbierto] = useState(true);
+   124→  const [escobaArmada, setEscobaArmada] = useState(false);
+   125→  const [tick, setTick] = useState(0); // re-render del reloj EN CURSO
+   126→
+   127→  const viva = corridaVivaEstado();
+   128→
+   129→  const recargar = useCallback(async () => {
+   130→    const cs = await listarCorridasMetricas();
+   131→    setCorridas(cs);
+   132→    // Default de vista: la VIVA (si hay) o la más reciente cerrada.
+   133→    const objetivo = viva.corridaId ?? seleccionada ?? cs[0]?.id ?? null;
+   134→    if (objetivo) {
+   135→      if (objetivo === viva.corridaId) {
+   136→        setSeleccionada(objetivo);
+   137→        setActas([...viva.actas]);
+   138→      } else {
+   139→        setSeleccionada(objetivo);
+   140→        setActas(await metricasDeCorrida(objetivo));
+   141→      }
+   142→    } else {
+   143→      setSeleccionada(null);
+   144→      setActas([]);
+   145→    }
+   146→  }, [viva.corridaId, seleccionada]);
+   147→
+   148→  // Carga inicial + suscripción al canal de métricas (updates en vivo).
+   149→  useEffect(() => {
+   150→    void recargar();
+   151→    const off = suscribirseMetricas(() => {
+   152→      // Corrida viva → espejo RAM al instante; cerrada → relectura IDB.
+   153→      const lv = corridaVivaEstado();
+   154→      if (lv.corridaId) {
+   155→        setSeleccionada(lv.corridaId);
+   156→        setActas([...lv.actas]);
+   157→        void listarCorridasMetricas().then(setCorridas);
+   158→      } else {
+   159→        void recargar();
+   160→      }
+   161→    });
+   162→    return off;
+   163→  }, []);
+   164→
+   165→  // Desarme de la escoba (mismo patrón 2 toques de VACIAR/REINICIAR).
+   166→  useEffect(() => {
+   167→    if (!escobaArmada) return;
+   168→    const t = window.setTimeout(() => setEscobaArmada(false), 3000);
+   169→    return () => window.clearTimeout(t);
+   170→  }, [escobaArmada]);
+   171→
+   172→  // Reloj de la corrida EN CURSO (1 s — barato, solo mientras viva).
+   173→  useEffect(() => {
+   174→    if (!viva.corridaId) return;
+   175→    const t = window.setInterval(() => setTick((n) => n + 1), 1000);
+   176→    return () => window.clearInterval(t);
+   177→  }, [viva.corridaId]);
+   178→
+   179→  const seleccionadaInfo = useMemo(
+   180→    () => corridas.find((c) => c.id === seleccionada) ?? null,
+   181→    [corridas, seleccionada],
+   182→  );
+   183→
+   184→  const agg = useMemo(() => {
+   185→    const porDesenlace = new Map<string, number>();
+   186→    for (const a of actas) porDesenlace.set(a.desenlace, (porDesenlace.get(a.desenlace) ?? 0) + 1);
+   187→
+   188→    const sumas = new Map<EtapaKey, number>();
+   189→    // KIT e14-tiempos-v2 (D44) — sub-desglose del muro + trazas del despacho:
+   190→    const preOcrSubSum = new Map<PreOcrSubKey, number>();
+   191→    // KIT e14-medicion-faltante-v1 (D45) — subs del muro PROCESO + los 3
+   192→    // faltantes del informe real (gap / publicación / dedup sin-match):
+   193→    const procesoSubSum = new Map<ProcesoSubKey, number>();
+   194→    let gapN = 0; // actas con residual medido
+   195→    let gapPeor: number | null = null; // peor residual (valor absoluto)
+   196→    let gapSobreUmbral = 0; // actas con gap > 50 ms (el "sin dueño" real)
+   197→    let envioRoundSum = 0; // roundtrip REAL de la publicación al monitor
+   198→    let envioRoundN = 0;
+   199→    let envioBloqueadas = 0;
+   200→    let dedupSinMatch = 0; // actas dedup:"sin-match"
+   201→    let dedupDetalleN = 0; // de ellas, con diagnóstico de comparación
+   202→    let dedupMejorDist: number | null = null; // mejor distancia vista (global)
+   203→    let dedupCandidatasSum = 0; // candidatas totales comparadas (vivas + índice)
+   204→    let qrHeredadas = 0; // capa-0 heredó qrPrevio (palanca ① — cobertura)
+   205→    let conPreOcr = 0; // actas con muro medido (denominador honesto)
+   206→    let reintentoActas = 0; // muro RE-ARMADO ≥ 1 vez (watchdog/rescate)
+   207→    const intervalos: { ini: number; fin: number }[] = []; // [tsInicio, tsFin]
+   208→    let trabajoTotal = 0;
+   209→    let sondeoSum = 0;
+   210→    let sondeoN = 0;
+   211→    let thumbSum = 0;
+   212→    let thumbN = 0;
+   213→    let esperaSum = 0;
+   214→    let esperaN = 0;
+   215→    const totales: number[] = [];
+   216→    const ocrs: number[] = [];
+   217→    for (const a of actas) {
+   218→      for (const [k, v] of Object.entries(a.etapas)) {
+   219→        if (k === "sondeoQrMs") {
+   220→          sondeoSum += v;
+   221→          sondeoN += 1;
+   222→          continue; // ingesta paralela — NO compite por el trabajo del pipeline
+   223→        }
+   224→        if (k === "thumbMs") {
+   225→          thumbSum += v;
+   226→          thumbN += 1;
+   227→          continue; // D35 — cosmético post-pipeline: línea propia, no barra
+   228→        }
+   229→        // D44-R1 — particiones del muro PRE-OCR: línea propia bajo la barra
+   230→        // madre (jamás suman al trabajo — sería DOBLE contabilidad del muro).
+   231→        if (k !== "preOcrMs" && k.startsWith("preOcr")) {
+   232→          const sk = k as PreOcrSubKey;
+   233→          preOcrSubSum.set(sk, (preOcrSubSum.get(sk) ?? 0) + v);
+   234→          continue;
+   235→        }
+   236→        // D45 — particiones del muro PROCESO (2 warps): ídem — línea propia.
+   237→        if (k !== "procesoMs" && k.startsWith("proceso")) {
+   238→          const sk = k as ProcesoSubKey;
+   239→          procesoSubSum.set(sk, (procesoSubSum.get(sk) ?? 0) + v);
+   240→          continue;
+   241→        }
+   242→        sumas.set(k as EtapaKey, (sumas.get(k as EtapaKey) ?? 0) + v);
+   243→        trabajoTotal += v;
+   244→      }
+   245→      // D45 — gap sin dueño / publicación del envío / dedup sin-match:
+   246→      if (typeof a.gapMs === "number") {
+   247→        gapN += 1;
+   248→        if (gapPeor === null || Math.abs(a.gapMs) > Math.abs(gapPeor)) gapPeor = a.gapMs;
+   249→        if (a.gapMs > 50) gapSobreUmbral += 1;
+   250→      }
+   251→      if (typeof a.envioRoundMs === "number") {
+   252→        envioRoundSum += a.envioRoundMs;
+   253→        envioRoundN += 1;
+   254→        if (a.envioEstado === "bloqueada") envioBloqueadas += 1;
+   255→      }
+   256→      if (a.dedup === "sin-match") {
+   257→        dedupSinMatch += 1;
+   258→        const dd = a.dedupDetalle;
+   259→        if (dd) {
+   260→          dedupDetalleN += 1;
+   261→          dedupCandidatasSum += dd.candidatas + dd.indice;
+   262→          if (
+   263→            typeof dd.mejorDistancia === "number" &&
+   264→            (dedupMejorDist === null || dd.mejorDistancia < dedupMejorDist)
+   265→          ) {
+   266→            dedupMejorDist = dd.mejorDistancia;
+   267→          }
+   268→        }
+   269→      }
+   270→      // D44 — trazas por acta (herencia / re-arms / solape):
+   271→      if (a.etapas.preOcrMs != null) conPreOcr += 1;
+   272→      if (a.qrHeredado === true) qrHeredadas += 1;
+   273→      if ((a.reintentosPreOcr ?? 0) > 0) reintentoActas += 1;
+   274→      if (typeof a.tsInicio === "number") intervalos.push({ ini: a.tsInicio, fin: a.tsFin });
+   275→      if (a.esperaMs != null) {
+   276→        esperaSum += a.esperaMs;
+   277→        esperaN += 1;
+   278→      }
+   279→      if (a.totalMs != null) totales.push(a.totalMs);
+   280→      if (a.etapas.ocrMs != null && a.etapas.ocrMs > 0) ocrs.push(a.etapas.ocrMs);
+   281→    }
+   282→    totales.sort((a, b) => a - b);
+   283→    ocrs.sort((a, b) => a - b);
+   284→    const lentas = [...actas]
+   285→      .sort((a, b) => (b.totalMs ?? -1) - (a.totalMs ?? -1))
+   286→      .slice(0, 5);
+   287→    const fallos = actas.filter((a) => a.desenlace === "ERROR");
+   288→    // D44-R3 — SOLAPE REAL (prueba D31 del pool): barrido de eventos sobre
+   289→    // [tsInicio, tsFin]. En empate cierran primero (sin fantasma de 1 ms).
+   290→    let maxSimultaneas = 0;
+   291→    let solapadas = 0;
+   292→    if (intervalos.length > 1) {
+   293→      const eventos: { t: number; d: number }[] = [];
+   294→      for (const iv of intervalos) eventos.push({ t: iv.ini, d: 1 }, { t: iv.fin, d: -1 });
+   295→      eventos.sort((x, y) => x.t - y.t || x.d - y.d);
+   296→      let cur = 0;
+   297→      for (const ev of eventos) {
+   298→        cur += ev.d;
+   299→        if (cur > maxSimultaneas) maxSimultaneas = cur;
+   300→      }
+   301→      const enSolape = new Set<number>();
+   302→      for (let i = 0; i < intervalos.length; i += 1) {
+   303→        for (let j = i + 1; j < intervalos.length; j += 1) {
+   304→          if (intervalos[i].ini < intervalos[j].fin && intervalos[j].ini < intervalos[i].fin) {
+   305→            enSolape.add(i);
+   306→            enSolape.add(j);
+   307→          }
+   308→        }
+   309→      }
+   310→      solapadas = enSolape.size;
+   311→    }
+   312→    return {
+   313→      porDesenlace,
+   314→      sumas,
+   315→      preOcrSubSum,
+   316→      // D45 — subs del proceso + los 3 faltantes:
+   317→      procesoSubSum,
+   318→      gapN,
+   319→      gapPeor,
+   320→      gapSobreUmbral,
+   321→      envioRoundSum,
+   322→      envioRoundN,
+   323→      envioBloqueadas,
+   324→      dedupSinMatch,
+   325→      dedupDetalleN,
+   326→      dedupMejorDist,
+   327→      dedupCandidatasSum,
+   328→      qrHeredadas,
+   329→      conPreOcr,
+   330→      reintentoActas,
+   331→      maxSimultaneas,
+   332→      solapadas,
+   333→      nConTs: intervalos.length,
+   334→      trabajoTotal,
+   335→      sondeoSum,
+   336→      sondeoN,
+   337→      thumbSum,
+   338→      thumbN,
+   339→      esperaSum,
+   340→      esperaN,
+   341→      p50Total: percentil(totales, 50),
+   342→      p95Total: percentil(totales, 95),
+   343→      p50Ocr: percentil(ocrs, 50),
+   344→      p95Ocr: percentil(ocrs, 95),
+   345→      lentas,
+   346→      fallos,
+   347→    };
+   348→  }, [actas]);
+   349→
+   350→  const wallCorrida = seleccionadaInfo
+   351→    ? (seleccionadaInfo.fin ?? Date.now()) - seleccionadaInfo.inicio
+   352→    : null;
+   353→  const enCurso = seleccionadaInfo?.fin == null;
+   354→  void tick; // reloj — el valor solo dispara el re-render
+   355→
+   356→  if (!corridas.length) return null; // cero ruido sin datos
+   357→
+   358→  const exportar = () => {
+   359→    void exportarInformeMetricas().then((json) => {
+   360→      const blob = new Blob([json], { type: "application/json" });
+   361→      const url = URL.createObjectURL(blob);
+   362→      const a = document.createElement("a");
+   363→      a.href = url;
+   364→      a.download = `informe-masiva-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+   365→      a.click();
+   366→      URL.revokeObjectURL(url);
+   367→    });
+   368→  };
+   369→
+   370→  return (
+   371→    <section
+   372→      aria-label="Informe de carga masiva"
+   373→      className="rounded-2xl border border-slate-800 bg-[#0c1219]"
+   374→    >
+   375→      {/* ——— cabecera ——— */}
+   376→      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-slate-800">
+   377→        <button
+   378→          type="button"
+   379→          onClick={() => setAbierto((v) => !v)}
+   380→          aria-expanded={abierto}
+   381→          aria-label={abierto ? "Colapsar informe" : "Expandir informe"}
+   382→          className="min-h-[44px] px-2 -ml-2 rounded-xl font-mono text-[11px] font-black uppercase tracking-wider text-white flex items-center gap-2 hover:bg-white/5 transition cursor-pointer"
+   383→        >
+   384→          <span className={`text-[#10b981] transition-transform ${abierto ? "rotate-90" : ""}`}>▶</span>
+   385→          INFORME DE CARGA
+   386→        </button>
+   387→        <span
+   388→          className={`px-2 py-0.5 rounded-md border font-mono text-[10px] font-bold uppercase tracking-wider ${
+   389→            enCurso
+   390→              ? "border-[#10b981]/50 text-[#10b981] bg-[#10b981]/10"
+   391→              : "border-slate-700 text-slate-300 bg-slate-800/40"
+   392→          }`}
+   393→          role="status"
+   394→        >
+   395→          {enCurso && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse mr-1.5 align-middle" />}
+   396→          {/* D45 — el motivo de cierre viaja: "drenada" | "pausa" |
+   397→              "recarga-o-abandono" — el fin=null sin dueño ya no existe. */}
+   398→          {enCurso
+   399→            ? `EN CURSO · ${fmtMs(wallCorrida)}`
+   400→            : `COMPLETADA${seleccionadaInfo?.motivoCierre ? ` · cierre: ${seleccionadaInfo.motivoCierre}` : ""} · ${fmtMs(wallCorrida)}`}
+   401→        </span>
+   402→        <span className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+   403→          {seleccionadaInfo ? fmtFechaRelativa(seleccionadaInfo.inicio) : ""}
+   404→        </span>
+   405→
+   406→        <div className="ml-auto flex items-center gap-2">
+   407→          <button
+   408→            type="button"
+   409→            onClick={exportar}
+   410→            aria-label="Exportar informe JSON"
+   411→            title="Descarga el informe completo (corridas + actas) en JSON"
+   412→            className="min-h-[44px] px-3 rounded-xl border border-slate-800 bg-[#10161f] text-slate-300 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-slate-600 hover:text-white transition cursor-pointer"
+   413→          >
+   414→            EXPORTAR JSON
+   415→          </button>
+   416→          <button
+   417→            type="button"
+   418→            onClick={() => {
+   419→              if (!escobaArmada) {
+   420→                setEscobaArmada(true);
+   421→                return;
+   422→              }
+   423→              setEscobaArmada(false);
+   424→              void limpiarMetricas().then(() => recargar());
+   425→            }}
+   426→            aria-label={escobaArmada ? "Confirmar borrar todo el historial de métricas" : "Borrar historial de métricas"}
+   427→            title="Borra TODO el historial de métricas (las actas enviadas NO se tocan)"
+   428→            className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
+   429→              escobaArmada
+   430→                ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
+   431→                : "border-slate-800 bg-[#10161f] text-slate-500 hover:border-slate-600 hover:text-white"
+   432→            }`}
+   433→          >
+   434→            {escobaArmada ? "¿SEGURO?" : "LIMPIAR"}
+   435→          </button>
+   436→        </div>
+   437→      </div>
+   438→
+   439→      {abierto && (
+   440→        <div className="px-4 py-3 flex flex-col gap-4">
+   441→          {/* ——— KPIs ——— */}
+   442→          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+   443→            <Kpi label="ACTAS" valor={String(actas.length)} />
+   444→            {/* D43 — «TRABAJO ACTAS»: la suma ahora incluye preOcrMs (runner) —
+   445→             *  llamarlo «pipeline» sería mentir (el pre-OCR es ANTES del bridge). */}
+   446→            <Kpi label="TRABAJO ACTAS" valor={fmtMs(agg.trabajoTotal)} />
+   447→            <Kpi label="OCR P50 / P95" valor={`${fmtMs(agg.p50Ocr)} / ${fmtMs(agg.p95Ocr)}`} />
+   448→            <Kpi
+   449→              label="DESENLACES"
+   450→              valor={[...agg.porDesenlace.entries()].map(([d, n]) => `${d} ${n}`).join(" · ") || "—"}
+   451→              small
+   452→            />
+   453→          </div>
+   454→
+   455→          {/* ——— etapas (barras del presupuesto del pipeline) ——— */}
+   456→          <div className="flex flex-col gap-1.5">
+   457→            <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+   458→              ¿EN QUÉ SE VA EL TIEMPO? — sumas de la corrida (trabajo {fmtMs(agg.trabajoTotal)} — incluye PRE-OCR del runner, que NO está dentro de totalMs)
+   459→            </p>
+   460→            {ETAPAS_TRABAJO.filter(({ key }) => (agg.sumas.get(key) ?? 0) > 0).map(({ key, label }) => {
+   461→              const ms = agg.sumas.get(key) ?? 0;
+   462→              const pct = agg.trabajoTotal > 0 ? Math.round((ms / agg.trabajoTotal) * 100) : 0;
+   463→              const preOcrSuma = agg.sumas.get("preOcrMs") ?? 0;
+   464→              return (
+   465→                <Fragment key={key}>
+   466→                  <div className="flex items-center gap-2" role="row">
+   467→                    <span className="w-28 shrink-0 font-mono text-[10px] uppercase tracking-wider text-slate-400">{label}</span>
+   468→                    <div className="flex-1 h-3.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+   469→                      <div
+   470→                        className="h-full rounded-md bg-[#10b981]/70"
+   471→                        style={{ width: `${Math.max(2, pct)}%` }}
+   472→                        aria-hidden
+   473→                      />
+   474→                    </div>
+   475→                    <span className="w-40 shrink-0 text-right font-mono text-[10px] text-slate-300" role="cell">
+   476→                      {fmtMs(ms)} · {pct}%
+   477→                    </span>
+   478→                  </div>
+   479→                  {/* KIT e14-tiempos-v2 (D44-R1) — sub-desglose del muro PRE-OCR:
+   480→                      particiones del MISMO muro → % del PROPIO muro, no del trabajo. */}
+   481→                  {key === "preOcrMs" &&
+   482→                    PRE_OCR_SUBS.filter(({ key: sk }) => (agg.preOcrSubSum.get(sk) ?? 0) > 0).map(
+   483→                      ({ key: sk, label: slabel }) => {
+   484→                        const sMs = agg.preOcrSubSum.get(sk) ?? 0;
+   485→                        const sPct = preOcrSuma > 0 ? Math.round((sMs / preOcrSuma) * 100) : 0;
+   486→                        return (
+   487→                          <div key={sk} className="flex items-center gap-2 pl-5" role="row">
+   488→                            <span className="w-24 shrink-0 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+   489→                              └ {slabel}
+   490→                            </span>
+   491→                            <div className="flex-1 h-2.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+   492→                              <div
+   493→                                className="h-full rounded-md bg-[#10b981]/30"
+   494→                                style={{ width: `${Math.max(2, sPct)}%` }}
+   495→                                aria-hidden
+   496→                              />
+   497→                            </div>
+   498→                            <span className="w-40 shrink-0 text-right font-mono text-[9px] text-slate-500" role="cell">
+   499→                              {fmtMs(sMs)} · {sPct}% del PRE-OCR
+   500→                            </span>
+   501→                          </div>
+   502→                        );
+   503→                      },
+   504→                    )}
+   505→                  {/* KIT e14-medicion-faltante-v1 (D45) — sub-desglose del muro
+   506→                      PROCESO (2 warps serializados): ídem — % del PROPIO muro. */}
+   507→                  {key === "procesoMs" &&
+   508→                    PROCESO_SUBS.filter(({ key: sk }) => (agg.procesoSubSum.get(sk) ?? 0) > 0).map(
+   509→                      ({ key: sk, label: slabel }) => {
+   510→                        const sMs = agg.procesoSubSum.get(sk) ?? 0;
+   511→                        const sPct = ms > 0 ? Math.round((sMs / ms) * 100) : 0;
+   512→                        return (
+   513→                          <div key={sk} className="flex items-center gap-2 pl-5" role="row">
+   514→                            <span className="w-24 shrink-0 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+   515→                              └ {slabel}
+   516→                            </span>
+   517→                            <div className="flex-1 h-2.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+   518→                              <div
+   519→                                className="h-full rounded-md bg-[#10b981]/30"
+   520→                                style={{ width: `${Math.max(2, sPct)}%` }}
+   521→                                aria-hidden
+   522→                              />
+   523→                            </div>
+   524→                            <span className="w-40 shrink-0 text-right font-mono text-[9px] text-slate-500" role="cell">
+   525→                              {fmtMs(sMs)} · {sPct}% del WARP+REALCE
+   526→                            </span>
+   527→                          </div>
+   528→                        );
+   529→                      },
+   530→                    )}
+   531→                </Fragment>
+   532→              );
+   533→            })}
+   534→            {agg.sondeoN > 0 && (
+   535→              <p className="font-mono text-[10px] text-slate-500 mt-0.5">
+   536→                + SONDEO QR (ingesta, paralelo al pipeline): {fmtMs(agg.sondeoSum)} en {agg.sondeoN} acta(s)
+   537→              </p>
+   538→            )}
+   539→            {agg.esperaN > 0 && (
+   540→              <p className="font-mono text-[10px] text-slate-500">
+   541→                + ESPERA EN COLA: {fmtMs(agg.esperaSum)} en {agg.esperaN} acta(s) (no es trabajo — es turno)
+   542→              </p>
+   543→            )}
+   544→            {agg.thumbN > 0 && (
+   545→              <p className="font-mono text-[10px] text-slate-500">
+   546→                + THUMBS DE BANDEJA (post-pipeline): {fmtMs(agg.thumbSum)} en {agg.thumbN} acta(s)
+   547→              </p>
+   548→            )}
+   549→            {/* KIT e14-tiempos-v2 (D44) — trazas de los 4 ROJOS: herencia (①),
+   550→                re-arms (④) y solape real (③ — prueba D31 del pool). */}
+   551→            {agg.conPreOcr > 0 && (
+   552→              <p className="font-mono text-[10px] text-slate-500">
+   553→                + QR HEREDADO (capa-0 sin ladder — sondeo/prescan): {agg.qrHeredadas} de {agg.conPreOcr} acta(s) · el resto pagó ladder
+   554→              </p>
+   555→            )}
+   556→            {agg.reintentoActas > 0 && (
+   557→              <p className="font-mono text-[10px] text-slate-500">
+   558→                + PRE-OCR RE-ARMADO (watchdog/rescate): {agg.reintentoActas} acta(s) — su PRE-OCR es la SUMA de pasadas
+   559→              </p>
+   560→            )}
+   561→            {agg.nConTs > 1 && (
+   562→              <p className="font-mono text-[10px] text-slate-500">
+   563→                + SOLAPE REAL (tsInicio→tsFin): máx {agg.maxSimultaneas} acta(s) en vuelo a la vez · {agg.solapadas} compartieron turno
+   564→              </p>
+   565→            )}
+   566→            {/* KIT e14-medicion-faltante-v1 (D45) — los 3 faltantes del
+   567→                informe real: GAP sin dueño · PUBLICACIÓN (roundtrip real) ·
+   568→                DEDUP sin-match (por qué no matcheó). */}
+   569→            {agg.gapN > 0 && (
+   570→              <p className={`font-mono text-[10px] ${agg.gapSobreUmbral > 0 ? "text-amber-400" : "text-slate-500"}`}>
+   571→                + GAP SIN DUEÑO (muro − totalMs − preOcr − thumb − persist − envío): {agg.gapSobreUmbral} de {agg.gapN} acta(s) &gt; 50 ms · peor {fmtMs(agg.gapPeor)}
+   572→              </p>
+   573→            )}
+   574→            {agg.envioRoundN > 0 && (
+   575→              <p className="font-mono text-[10px] text-slate-500">
+   576→                + PUBLICACIÓN AL MONITOR (roundtrip real — envioMs de D61 solo media el dispatch): media {fmtMs(Math.round(agg.envioRoundSum / agg.envioRoundN))} en {agg.envioRoundN} acta(s){agg.envioBloqueadas > 0 ? ` · ${agg.envioBloqueadas} BLOQUEADA(S)` : ""}
+   577→              </p>
+   578→            )}
+   579→            {agg.dedupSinMatch > 0 && (
+   580→              <p className="font-mono text-[10px] text-slate-500">
+   581→                + DEDUP SIN-MATCH: {agg.dedupSinMatch} acta(s){agg.dedupDetalleN > 0 ? ` · candidatas comparadas ${Math.round(agg.dedupCandidatasSum / agg.dedupDetalleN)}/acta · mejor distancia ${agg.dedupMejorDist ?? "—"} (umbral 6)` : " · sin diagnóstico de comparación (dhash omitido por gama o falló)"}
+   582→              </p>
+   583→            )}
+   584→            {agg.trabajoTotal === 0 && (
+   585→              <p className="font-mono text-[10px] text-slate-500">Sin etapas de trabajo registradas aún.</p>
+   586→            )}
+   587→          </div>
+   588→
+   589→          {/* ——— actas más lentas ——— */}
+   590→          {agg.lentas.length > 0 && (
+   591→            <div className="flex flex-col gap-1.5">
+   592→              <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+   593→                ACTAS MÁS LENTAS (top {agg.lentas.length} — las demás van en el export)
+   594→              </p>
+   595→              <ul className="flex flex-col gap-1 max-h-56 overflow-y-auto pr-1">
+   596→                {agg.lentas.map((a) => (
+   597→                  <li
+   598→                    key={a.id}
+   599→                    className="flex items-center gap-2 rounded-lg border border-slate-800 bg-[#10161f] px-2.5 py-1.5"
+   600→                  >
+   601→                    <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-slate-200" title={a.nombre}>
+   602→                      {a.nombre}
+   603→                    </span>
+   604→                    {a.copia && (
+   605→                      <span className="px-1.5 py-0.5 rounded-md border border-sky-400/40 text-sky-400 bg-sky-400/10 font-mono text-[9px] font-bold uppercase">
+   606→                        COPIA
+   607→                      </span>
+   608→                    )}
+   609→                    <span className="shrink-0 font-mono text-[11px] font-bold text-white">{fmtMs(a.totalMs)}</span>
+   610→                    {a.cuello && (
+   611→                      <span className="shrink-0 px-1.5 py-0.5 rounded-md border border-amber-400/40 text-amber-400 bg-amber-400/10 font-mono text-[9px] font-bold uppercase tracking-wider">
+   612→                        {a.cuello}
+   613→                      </span>
+   614→                    )}
+   615→                    <span className="shrink-0 font-mono text-[10px] text-slate-400">{a.score != null ? a.score.toFixed(1) : "—"}</span>
+   616→                    <ChipDesenlace d={a.desenlace} />
+   617→                  </li>
+   618→                ))}
+   619→              </ul>
+   620→            </div>
+   621→          )}
+   622→
+   623→          {/* ——— fallos ——— */}
+   624→          {agg.fallos.length > 0 && (
+   625→            <div className="flex flex-col gap-1.5">
+   626→              <p className="font-mono text-[10px] uppercase tracking-wider text-rose-400">
+   627→                FALLOS ({agg.fallos.length})
+   628→              </p>
+   629→              <ul className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+   630→                {agg.fallos.map((a) => (
+   631→                  <li
+   632→                    key={a.id}
+   633→                    className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-2.5 py-1.5"
+   634→                  >
+   635→                    <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-slate-200" title={a.nombre}>
+   636→                      {a.nombre}
+   637→                    </span>
+   638→                    <span className="shrink-0 font-mono text-[10px] text-rose-300">{a.error ?? "—"}</span>
+   639→                  </li>
+   640→                ))}
+   641→              </ul>
+   642→            </div>
+   643→          )}
+   644→
+   645→          {/* ——— historial de corridas ——— */}
+   646→          {corridas.length > 1 && (
+   647→            <div className="flex flex-col gap-1.5">
+   648→              <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+   649→                HISTORIAL ({corridas.length} corridas — p50 pipeline {fmtMs(agg.p50Total)} · p95 {fmtMs(agg.p95Total)} de la vista actual)
+   650→              </p>
+   651→              <ul className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+   652→                {corridas.slice(0, 10).map((c) => {
+   653→                  const activa = c.id === seleccionada;
+   654→                  return (
+   655→                    <li key={c.id}>
+   656→                      <button
+   657→                        type="button"
+   658→                        onClick={() => {
+   659→                          setSeleccionada(c.id);
+   660→                          void metricasDeCorrida(c.id).then(setActas);
+   661→                        }}
+   662→                        aria-label={`Ver corrida de ${fmtFechaRelativa(c.inicio)}`}
+   663→                        className={`w-full flex items-center gap-2 rounded-lg border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider transition cursor-pointer text-left ${
+   664→                          activa
+   665→                            ? "border-[#10b981]/60 text-white bg-[#10b981]/10"
+   666→                            : "border-slate-800 text-slate-400 bg-[#10161f] hover:border-slate-600 hover:text-white"
+   667→                        }`}
+   668→                      >
+   669→                        <span className="flex-1">{fmtFechaRelativa(c.inicio)}</span>
+   670→                        <span>{c.nActas} ACTAS</span>
+   671→                        <span>{fmtMs((c.fin ?? Date.now()) - c.inicio)}</span>
+   672→                        {c.fin == null && (
+   673→                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" aria-hidden />
+   674→                        )}
+   675→                      </button>
+   676→                    </li>
+   677→                  );
+   678→                })}
+   679→              </ul>
+   680→            </div>
+   681→          )}
+   682→        </div>
+   683→      )}
+   684→    </section>
+   685→  );
+   686→}
+   687→
+   688→function Kpi({ label, valor, small }: { label: string; valor: string; small?: boolean }) {
+   689→  return (
+   690→    <div className="rounded-xl border border-slate-800 bg-[#10161f] px-3 py-2">
+   691→      <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{label}</p>
+   692→      <p className={`font-mono font-bold text-white truncate ${small ? "text-[10px]" : "text-sm"}`} title={valor}>
+   693→        {valor}
+   694→      </p>
+   695→    </div>
+   696→  );
+   697→}
+   698→
