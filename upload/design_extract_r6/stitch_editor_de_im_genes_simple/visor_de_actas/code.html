@@ -1,0 +1,434 @@
+<!DOCTYPE html><html class="h-full bg-[#070b0a]" lang="es"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Supervisión de Actas Electorales - Auditoría y Escrutinio</title>
+<!-- Tailwind CSS v3 CDN with forms & container queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Custom Configuration -->
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              emerald: '#00e676',
+              mint: '#10b981',
+              darkbg: '#070b0a',
+              panel: '#0c1210',
+              panelAlt: '#0a0f0d',
+              border: '#16231e',
+              borderLight: '#21362e',
+              amber: '#f59e0b',
+              redAlert: '#ef4444'
+            }
+          },
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+            sans: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom Styles for Scrollbars and Canvas Viewport -->
+<style data-purpose="custom-styling">
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090e0c;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1c2b25;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #2a4037;
+    }
+    .grid-paper-bg {
+      background-size: 20px 20px;
+      background-image: 
+        radial-gradient(circle, rgba(16, 185, 129, 0.05) 1px, transparent 1px);
+    }
+  </style>
+</head>
+<body class="h-full w-full overflow-hidden text-gray-200 font-sans flex flex-col bg-[#070b0a] select-none">
+<!-- BEGIN: TopTechnicalNavigation -->
+<header class="h-14 border-b border-brand-border bg-brand-panel flex items-center justify-between px-4 shrink-0 z-20" data-purpose="primary-navbar">
+<!-- Left Hierarchy & Session Badges -->
+<div class="flex items-center space-x-3">
+<!-- Breadcrumb Hierarchical Path -->
+<nav class="flex items-center text-xs font-mono font-medium text-emerald-400/90 tracking-wider">
+<span class="hover:text-emerald-300 cursor-pointer">EGIPTO (335)</span>
+<span class="mx-1.5 text-gray-500 font-sans">&gt;</span>
+<span class="hover:text-emerald-300 cursor-pointer">ZONA 5</span>
+<span class="mx-1.5 text-gray-500 font-sans">&gt;</span>
+<span class="text-emerald-200">02 - EL CAIRO - CONSULADO</span>
+</nav>
+
+<!-- Mesa Selector & ID Badge -->
+<div class="flex items-center space-x-2">
+<div class="relative flex items-center font-mono">
+  <div class="flex items-center bg-[#0e1714] border border-brand-border hover:border-emerald-500/50 rounded transition-colors shadow-sm">
+    <button class="px-1.5 py-1 text-gray-400 hover:text-emerald-400 hover:bg-white/5 transition-colors rounded-l flex items-center justify-center" title="Mesa anterior">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+    </button>
+    <button class="flex items-center gap-1.5 px-2 py-1 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors focus:outline-none">
+      <span class="tracking-wider">MESA 001</span>
+      <span class="text-[10px] text-gray-500 font-normal">(1/12)</span>
+      <svg class="w-3 h-3 text-gray-400 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+    </button>
+    <button class="px-1.5 py-1 text-gray-400 hover:text-emerald-400 hover:bg-white/5 transition-colors rounded-r flex items-center justify-center" title="Mesa siguiente">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+    </button>
+  </div>
+  
+</div>
+<div class="bg-[#0e1714] border border-brand-border rounded px-2 py-0.5 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
+
+</div>
+
+</div>
+</div>
+<!-- Center/Right Status Navigation Pills & Close Action -->
+<div class="flex items-center space-x-2">
+<!-- Delegados Button / Tag -->
+<div class="relative flex items-center">
+<button class="flex items-center gap-2 bg-[#0e1714] border border-emerald-500/60 hover:border-emerald-400 text-emerald-300 text-xs font-mono px-3 py-1 rounded transition-colors shadow-sm focus:outline-none">
+<svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+<span class="text-gray-400 text-[10px] uppercase tracking-wider">ORIGEN:</span>
+<span class="font-bold text-emerald-300">TRANSMISIÓN</span>
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+<svg class="w-3 h-3 text-gray-400 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+</button>
+
+</div>
+<!-- Transmisión Pill -->
+
+<!-- Página 1 (Active Checked) -->
+<div class="relative flex items-center font-mono">
+  <button class="flex items-center gap-1.5 bg-[#0e1714] border border-brand-border hover:border-emerald-500/50 text-emerald-300 text-xs px-2.5 py-1 rounded transition-colors shadow-sm focus:outline-none">
+    <span class="text-gray-400 text-[10px] uppercase tracking-wider">PÁGINA:</span>
+    <span class="font-bold text-emerald-300">1 de 2</span>
+    <svg class="w-3 h-3 text-gray-400 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+  </button>
+  
+</div>
+<!-- Página 2 -->
+
+<!-- Close Workspace Button -->
+<div class="pl-2 border-l border-brand-border ml-1">
+<button class="text-gray-400 hover:text-white p-1 rounded hover:bg-white/5 transition-colors" title="Cerrar vista de auditoría">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+</div>
+</header>
+<!-- END: TopTechnicalNavigation -->
+<!-- BEGIN: MainBodyWorkspace -->
+<div class="flex-1 flex overflow-hidden relative" data-purpose="workspace-container">
+<!-- Central Stage: Ballot Document Canvas Viewer -->
+<main class="flex-1 flex flex-col relative bg-[#060a09] grid-paper-bg overflow-hidden" data-purpose="document-viewer-canvas">
+<!-- Floating Inspection Toolbar -->
+<div class="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center bg-[#0d1613]/90 backdrop-blur border border-brand-borderLight px-3 py-1.5 rounded-md shadow-2xl text-xs font-mono text-gray-300 space-x-3">
+<!-- Zoom Out -->
+<button class="hover:text-emerald-400 transition-colors p-1" title="Reducir zoom">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<span class="font-bold text-gray-200 min-w-[36px] text-center">42%</span>
+<!-- Zoom In -->
+<button class="hover:text-emerald-400 transition-colors p-1" title="Aumentar zoom">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<span class="h-3 w-[1px] bg-brand-borderLight"></span>
+<!-- Fit to Width / Frame -->
+<button class="hover:text-emerald-400 transition-colors p-1" title="Ajustar al ancho">
+
+</button>
+<!-- Rotate Document -->
+<button class="hover:text-emerald-400 transition-colors p-1" title="Rotar 90 grados">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<!-- Contrast / Invert Toggle Filter -->
+<button class="text-emerald-400 hover:text-emerald-300 transition-colors p-1" title="Modo alto contraste B/N">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M12 3v18m0-18a9 9 0 000 18m0-18a9 9 0 010 18" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<!-- Fullscreen Mode -->
+<button class="hover:text-emerald-400 transition-colors p-1" title="Pantalla completa">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<span class="h-3 w-[1px] bg-brand-borderLight"></span><div class="flex items-center gap-1.5 bg-[#10231b] border border-emerald-500/70 text-emerald-300 px-2 py-0.5 rounded text-[11px] font-bold tracking-wider"><svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="">SCORE: 10/10</span></div></div>
+<!-- Lateral Navigation Chevron: Left (Previous Page) -->
+<button class="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-9 h-14 bg-[#0d1613]/80 hover:bg-[#12201c] border border-brand-borderLight rounded flex items-center justify-center text-gray-400 hover:text-emerald-400 shadow-lg transition-colors" title="Página anterior">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path>
+</svg>
+</button>
+<!-- Lateral Navigation Chevron: Right (Next Page) -->
+<button class="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-9 h-14 bg-[#0d1613]/80 hover:bg-[#12201c] border border-brand-borderLight rounded flex items-center justify-center text-gray-400 hover:text-emerald-400 shadow-lg transition-colors" title="Página siguiente">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path>
+</svg>
+</button>
+<!-- Document Display Scrollable Viewport -->
+<div class="flex-1 w-full overflow-y-auto overflow-x-hidden flex items-start justify-center pt-16 pb-20 px-4">
+<!-- Rendered High-Contrast Ballot Certificate (Formulario E-14) -->
+<article class="w-[360px] bg-black text-white border-2 border-white/80 shadow-[0_0_30px_rgba(0,0,0,0.8)] font-mono text-[9px] leading-tight select-none mb-4" data-purpose="scanned-ballot-mockup">
+<!-- Header Official Stamp Area -->
+<div class="border-b-2 border-white p-2 text-center relative">
+<div class="text-[11px] font-black tracking-widest uppercase">ACTA DE ESCRUTINIO DE JURADOS</div>
+<div class="text-[10px] font-bold mt-0.5 tracking-wider uppercase">CÓNSUL / EMBAJADOR</div>
+<div class="text-[7.5px] tracking-tight uppercase text-gray-300 mt-0.5">ELECCIÓN PRESIDENCIAL Y VICEPRESIDENCIAL</div>
+<div class="grid grid-cols-2 text-left mt-2 pt-1 border-t border-dashed border-white text-[7.5px] uppercase">
+<div class="">CONSULADO 88 - CONSULADOS</div>
+<div class="text-right">PAÍS 335 - EGIPTO</div>
+<div class="">ZONA 05 - PUESTO 02 MESA 001</div>
+<div class="text-right">LUGAR: El Cairo - Consulado</div>
+</div>
+<!-- Barcode & Tracking Identifier -->
+<div class="mt-2 pt-1 border-t border-white flex justify-between items-center font-bold tracking-widest text-[9px]">
+<span class="">X</span>
+<span class="tracking-[4px] text-[10px]">7-23-10-19</span>
+<span class="">X</span>
+</div>
+</div>
+<!-- Table: Nivelación de la Mesa (Total Counts) -->
+<div class="border-b-2 border-white">
+<div class="bg-white text-black font-black text-center py-0.5 text-[8.5px] uppercase tracking-wider">
+              NIVELACIÓN DE LA MESA
+            </div>
+<div class="grid grid-cols-12 border-b border-white">
+<div class="col-span-8 p-1 uppercase text-[7.5px] flex items-center font-semibold border-r border-white">
+                TOTAL VOTANTES FORMULARIO E-11
+              </div>
+<div class="col-span-4 p-1 text-center font-black tracking-widest flex items-center justify-around text-xs">
+<span class="">·</span><span class="">1</span><span class="">7</span>
+</div>
+</div>
+<div class="grid grid-cols-12 border-b border-white">
+<div class="col-span-8 p-1 uppercase text-[7.5px] flex items-center font-semibold border-r border-white">
+                TOTAL VOTOS EN LA URNA
+              </div>
+<div class="col-span-4 p-1 text-center font-black tracking-widest flex items-center justify-around text-xs">
+<span class="">·</span><span class="">1</span><span class="">7</span>
+</div>
+</div>
+<div class="grid grid-cols-12">
+<div class="col-span-8 p-1 uppercase text-[7.5px] flex items-center font-semibold border-r border-white">
+                TOTAL VOTOS INCINERADOS
+              </div>
+<div class="col-span-4 p-1 text-center font-black tracking-widest flex items-center justify-around text-xs">
+<span class="">·</span><span class="">-</span><span class="">-</span>
+</div>
+</div>
+</div>
+<!-- Presidential Candidates Table Header -->
+<div class="grid grid-cols-12 border-b-2 border-white bg-white text-black font-bold text-center text-[7.5px] uppercase">
+<div class="col-span-3 py-0.5 border-r border-black">CANDIDATO</div>
+<div class="col-span-6 py-0.5 border-r border-black">AGRUPACIÓN</div>
+<div class="col-span-3 py-0.5">VOTACIÓN</div>
+</div>
+<!-- Candidate 1 Row -->
+<div class="grid grid-cols-12 border-b-2 border-white min-h-[78px] items-stretch">
+<div class="col-span-3 p-1 border-r border-white flex flex-col items-center justify-center">
+<span class="font-black text-sm mb-1">1</span>
+<div class="w-12 h-10 border border-white flex items-center justify-center bg-gray-900 text-[6px] text-center font-sans font-bold">
+                FOTO CANDIDATO
+              </div>
+</div>
+<div class="col-span-6 p-1.5 border-r border-white flex flex-col justify-between text-[7px] uppercase">
+<div class="font-black tracking-wide border-b border-dashed border-white pb-0.5">
+                PACTO HISTÓRICO
+              </div>
+<div class="font-bold text-[7.5px] mt-1">
+                GUSTAVO PETRO<br>
+<span class="text-gray-300 font-normal text-[6.5px]">FRANCIA MÁRQUEZ</span>
+</div>
+</div>
+<div class="col-span-3 p-1 flex items-center justify-around font-black text-sm tracking-widest">
+<span class="">·</span><span class="">·</span><span class="">9</span>
+</div>
+</div>
+<!-- Candidate 2 Row -->
+<div class="grid grid-cols-12 border-b-2 border-white min-h-[78px] items-stretch">
+<div class="col-span-3 p-1 border-r border-white flex flex-col items-center justify-center">
+<span class="font-black text-sm mb-1">2</span>
+<div class="w-12 h-10 border border-white flex items-center justify-center bg-gray-900 text-[6px] text-center font-sans font-bold">
+                FOTO CANDIDATO
+              </div>
+</div>
+<div class="col-span-6 p-1.5 border-r border-white flex flex-col justify-between text-[7px] uppercase">
+<div class="font-black tracking-wide border-b border-dashed border-white pb-0.5">
+                LIGA DE GOBERNANTES
+              </div>
+<div class="font-bold text-[7.5px] mt-1">
+                RODOLFO HERNÁNDEZ<br>
+<span class="text-gray-300 font-normal text-[6.5px]">MARELEN CASTILLO</span>
+</div>
+</div>
+<div class="col-span-3 p-1 flex items-center justify-around font-black text-sm tracking-widest">
+<span class="">·</span><span class="">·</span><span class="">7</span>
+</div>
+</div>
+<!-- Auxiliary Vote Rows: Blanco, Nulos, No Marcados -->
+<div class="border-b border-white">
+<div class="grid grid-cols-12 border-b border-white">
+<div class="col-span-9 p-1 border-r border-white uppercase text-[7.5px] font-semibold">
+                VOTOS EN BLANCO
+              </div>
+<div class="col-span-3 p-1 text-center font-black flex items-center justify-around text-xs">
+<span class="">·</span><span class="">·</span><span class="">1</span>
+</div>
+</div>
+<div class="grid grid-cols-12 border-b border-white">
+<div class="col-span-9 p-1 border-r border-white uppercase text-[7.5px] font-semibold">
+                VOTOS NULOS
+              </div>
+<div class="col-span-3 p-1 text-center font-black flex items-center justify-around text-xs">
+<span class="">·</span><span class="">·</span><span class="">-</span>
+</div>
+</div>
+<div class="grid grid-cols-12 border-b-2 border-white">
+<div class="col-span-9 p-1 border-r border-white uppercase text-[7.5px] font-semibold">
+                VOTOS NO MARCADOS
+              </div>
+<div class="col-span-3 p-1 text-center font-black flex items-center justify-around text-xs">
+<span class="">·</span><span class="">·</span><span class="">-</span>
+</div>
+</div>
+<!-- Grand Total Row -->
+<div class="grid grid-cols-12 bg-white text-black font-black">
+<div class="col-span-9 p-1.5 uppercase text-[7.5px] border-r border-black flex items-center leading-tight">
+                SUMA TOTAL (CANDIDATOS + EN BLANCO + NULOS + NO MARCADOS)
+              </div>
+<div class="col-span-3 p-1 text-center font-black flex items-center justify-around text-sm">
+<span class="">·</span><span class="">1</span><span class="">7</span>
+</div>
+</div>
+</div>
+</article>
+</div>
+<!-- Fixed Bottom Metadata Overlay Strip -->
+<div class="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex items-center justify-center pointer-events-auto"><button class="flex items-center gap-2 bg-[#0d1613]/90 hover:bg-[#12201c] border border-brand-borderLight hover:border-emerald-500/60 text-emerald-300 hover:text-white px-3.5 py-1.5 rounded shadow-xl text-xs font-mono font-bold tracking-wider uppercase transition-colors backdrop-blur"><svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg><span class="">VER ORIGINAL</span></button></div><footer class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-[94%] max-w-4xl bg-[#0b1310]/95 backdrop-blur border border-brand-borderLight rounded px-4 py-2 text-center font-mono shadow-2xl flex items-center justify-center space-x-3 text-[11px]" data-purpose="document-metadata-footer">
+<span class="inline-block w-2 h-2 rounded-full border border-emerald-400 bg-emerald-500/30"></span>
+<div class="text-gray-300 tracking-wide font-medium flex items-center gap-1.5 flex-wrap justify-center">
+
+
+<span class="">CÓNSUL/EMBAJADOR</span>
+<span class="">·</span>
+<span class="">PÁG 1/2</span>
+<span class="text-gray-600">|</span>
+
+<span class="">·</span>
+<span class="text-gray-400 font-normal">PAÍS 335 - EGIPTO</span>
+
+
+
+
+
+<span class="text-gray-400 font-normal">MESA 001</span>
+<span class="">·</span>
+<span class="text-gray-400 font-normal">EL CAIRO - CONSULADO</span>
+
+
+</div>
+</footer>
+</main>
+<!-- BEGIN: RightSidebarAuditorPanel -->
+<aside class="w-[380px] bg-brand-panel border-l border-brand-border flex flex-col justify-between shrink-0 p-5 overflow-y-auto" data-purpose="supervisor-auditor-panel">
+<!-- Top Actions & Validation Controls -->
+<div class="space-y-6">
+<!-- Header: Acciones del Supervisor -->
+<div>
+<div class="flex items-center gap-2 text-xs font-mono font-bold text-gray-400 tracking-wider uppercase mb-3">
+<svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="">ACCIONES DEL SUPERVISOR</span>
+</div>
+<!-- Primary Confirmation Button: Aprobar -->
+
+<!-- Secondary Action: Confirmar Rescaneo -->
+<button class="w-full bg-[#1b0d0e] hover:bg-[#281315] border border-red-900/60 text-red-400 hover:text-red-300 font-bold text-xs py-2.5 px-4 rounded flex items-center justify-center gap-2 transition-colors uppercase tracking-wider">
+<svg class="w-3.5 h-3.5 stroke-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+<span class="">Reportar anomalia<br></span>
+</button>
+</div>
+<!-- Section: Observaciones -->
+<div>
+<div class="flex items-center justify-between mb-2">
+<label class="text-xs font-mono font-bold text-gray-400 tracking-wider uppercase" for="observaciones-input">
+              OBSERVACIONES
+            </label>
+<span class="text-[10px] font-mono text-gray-500 uppercase tracking-tight">OPCIONAL SI es invalida</span>
+</div>
+<textarea class="w-full bg-[#080d0b] border border-brand-border rounded p-3 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-sans resize-none transition-colors" id="observaciones-input" placeholder="Ingrese el motivo de la decisión..." rows="4"></textarea>
+</div><div class="pt-2 border-t border-brand-border/40 mt-2"><div class="flex items-center gap-2 text-[10px] font-mono text-gray-500 tracking-wider"><svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">ESTA ACCIÓN QUEDARÁ REGISTRADA EN LA AUDITORÍA.</span></div></div>
+<!-- Section: Historial y Trazabilidad -->
+<div>
+<div class="flex items-center justify-between mb-3 border-b border-brand-border pb-1.5">
+<span class="text-xs font-mono font-bold text-emerald-400/90 tracking-wider uppercase flex items-center gap-1.5">
+<span class="">HISTORIAL Y TRAZABILIDAD</span>
+</span>
+<span class="text-[10px] font-mono text-gray-500 tracking-wider">SESIÓN ACTIVA</span>
+</div>
+<!-- Vertical Timeline Nodes -->
+<div class="relative pl-6 space-y-5 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-brand-borderLight text-xs">
+<!-- Node 1: Completed Transmission -->
+<div class="relative">
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-[#0c1210]"></span>
+<div class="text-[11px] font-mono text-gray-400">14:38 LOCAL</div>
+<div class="font-bold text-gray-200 uppercase tracking-tight mt-0.5">PUBLICADO</div>
+
+</div>
+<!-- Node 2: Queued in Processing Queue -->
+<div class="relative">
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-4 ring-[#0c1210]"></span>
+<div class="text-[11px] font-mono text-amber-400/90">14:36 LOCAL</div>
+<div class="font-bold text-gray-200 uppercase tracking-tight mt-0.5">RECIBIDO EN COLA</div>
+<div class="text-gray-400 text-[11px] mt-0.5">Enviado desde sesión <span class="font-mono text-emerald-400 font-medium">#GDC-F</span></div>
+</div>
+<!-- Node 3: Pending Creation -->
+<div class="relative">
+<span class="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-gray-500 ring-4 ring-[#0c1210]"></span>
+<div class="text-[11px] font-mono text-gray-500">14:18 LOCAL / 16:18 PAIS</div>
+<div class="font-bold text-gray-300 uppercase tracking-tight mt-0.5">PENDIENTE</div>
+<div class="text-gray-500 text-[11px] mt-0.5">Cierre del puesto de votación</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Legal Compliance and Audit Notice Footer -->
+
+</aside>
+<!-- END: RightSidebarAuditorPanel -->
+</div>
+<!-- END: MainBodyWorkspace -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</body></html>
