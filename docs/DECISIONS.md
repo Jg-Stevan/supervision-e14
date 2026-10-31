@@ -371,8 +371,15 @@ Ajuste aplicado (opción ofrecida por el kit):
 - **D6 SUPERSEDEDO (no borrado):** los KPIs iniciales dejan de ser los
   literales 20/5/1/4/10 y se DERIVAN del catálogo sembrado. La
   INVARIANTE de D6 se MANTIENE: `total = completo + crítico + pendiente
-  + no_iniciado` EXACTO en carga (949 = 231+44+199+475 en el seed
+  + no_iniciado` EXACTO en carga (949 = 233+44+198+474 en el seed
   vigente; la suma sigue exacta tras las transiciones de vida).
+  NOTA (higiene Ola-3): estos literales NO son eternos — dependen del
+  estado de las anclas forzadas del seed (Roma D21 §ancla, El Cairo D26,
+  Barcelona-Girona D44); un cambio legítimo de anclas/seeds los mueve y
+  el dueño los actualiza a conciencia. El canónico VIVO del golden es el
+  test `src/modules/supervision/data/__tests__/mock-determinismo.test.ts`
+  ("GOLDEN del seed vigente: 949 = 233 + 44 + 198 + 474") — este
+  documento es referencia histórica, no fuente de verdad.
 - **Ancla demo intacta (§2.3):** el puesto `88_495_010_02` Roma -
   Consulado (ITALIA, código real 495 — el catálogo manda sobre el 499
   del demo) conserva CRÍTICO, 8 mesas, mesas 001-003 EXACTAS del

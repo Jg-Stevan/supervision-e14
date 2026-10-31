@@ -414,7 +414,7 @@ export function aprobarActaMock(
  * La observación es obligatoria (T5.2); el kit no la imprime en el evento. */
 export function confirmarRescanActaMock(
   actaId: string,
-   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- firma paritaria con la API real (mock-repository.ts:988 la pasa): T5.2 la observación es OBLIGATORIA pero el kit NO la imprime en el evento (T5.4) — retirarla rompería al consumidor y usarla cambiaría los textos exactos del mock.
   _observacion: string
 ): ActaMesa | null {
   const hallada = actaEnCache(actaId);
