@@ -23,12 +23,10 @@ import {
 // histórico se FUSIONA con el ledger: sobrevive vaciar() y recargas
 // (REVERSA de D-e65-8 → D-e65b-1). R8 — split del store: la carga/fusión
 // del índice y el crecimiento del ledger viven en dedup-indice.ts; aquí
-// quedan los consumers directos del ciclo de vida y del índice-payload del
-// sondeo (indiceEnviadasPorPayload — KIT e73 §C).
+// quedan los consumers directos del ciclo de vida (R8b — la decisión
+// COLA_PERSISTENTE del sondeo también vive allí: enviadaLedgerPorPayload).
 import {
   borrarHistorico,
-  // KIT e73-sondeo-qr-precoz-v1 (§C) — índice histórico por payload del sondeo
-  indiceEnviadasPorPayload,
   // D33 — reiniciar-envios: reset del índice de sesión por payload
   resetearIndicePayload,
   type EntradaHistorica,
@@ -182,10 +180,11 @@ export {
 import { resetearPayloadsSesion } from "./dedup-payloads";
 
 // ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1/C-2/C-3): MODO PRUEBAS ───
-// El kill switch (COLA_PERSISTENTE) y su contrato completo viven AHORA en
-// dedup-indice.ts (R8 — split del store: la decisión de alimentarse del
-// ledger es del índice; el store consume el mismo export).
-import { COLA_PERSISTENTE } from "./dedup-indice";
+// R8b — DESCONEXIÓN COMPLETA del kill switch: COLA_PERSISTENTE es PRIVADA
+// del ledger (dedup-indice.ts) y el store JAMÁS brancha sobre ella — consume
+// sus gestos de ciclo de vida (prepararSesionModoPruebas /
+// higieneModoPruebasVaciar / enviadaLedgerPorPayload). Misma higiene, mismo
+// orden, mismos catch — cero comportamiento nuevo.
 
 // ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS: MOVIDO a
 // dedup-indice.ts (R8 — split del store, rol «ledger/índice»). La API
@@ -196,7 +195,10 @@ export {
   registrarEnviadaHistorico,
 } from "./dedup-indice";
 import {
+  enviadaLedgerPorPayload,
+  higieneModoPruebasVaciar,
   indiceEnviadasDe,
+  prepararSesionModoPruebas,
   registrarEnviadaHistorico,
   resetearIndiceEnviadas,
 } from "./dedup-indice";
@@ -535,45 +537,45 @@ async function cadenaDedup(
         // (b) Histórico — índice por payload (§C) → YA-ENVIADA via "payload"
         // EXISTENTE (cero churn D57), dedup default "ya-enviada" (el guard
         // wave3 C.2 de escritores YA-ENVIADA queda satisfecho).
-        // COLA_PERSISTENTE=false (modo pruebas e64p C-3): el ledger NO
-        // alimenta los Maps de dedup — el índice por payload tampoco.
-        if (COLA_PERSISTENTE) {
-          try {
-            const hitSondeo = (await indiceEnviadasPorPayload(true)).get(payloadSondeo);
-            if (hitSondeo) {
-              // Telemetría del sondeo sobre el registro ANTES de la marca —
-              // marcarYaEnviada la ARRASTRA con su spread ...registro (el
-              // write ancla de marcarYaEnviada queda byte a byte). Write
-              // extra SOLO en hits (desviación M-e73-3 del REPORTE).
-              try {
-                const regPre = await leerRegistro(entrada.id);
-                await guardarRegistro({
-                  ...regPre,
-                  sondeoQrMs: sondeo.ms,
-                  sondeoQrTier: sondeo.tier ?? undefined,
-                });
-              } catch {
-                /* conservador — la marca sigue sin telemetría (jamás inventar) */
-              }
-              if (
-                await marcarYaEnviada(
-                  entrada.id,
-                  hitSondeo.id,
-                  "payload",
-                  undefined,
-                  undefined,
-                  payloadSondeo,
-                )
-              ) {
-                logger.info(`[e14] sondeo-qr fila=${entrada.id} → YA-ENVIADA payload`);
-                continue;
-              }
-              // guard falló (ya no es PENDIENTE / registro ilegible) → cae
-              // al comportamiento de siempre (el conservador manda — RL-e65-3).
+        // R8b — desconexión COLA_PERSISTENTE: la decisión (modo pruebas e64p
+        // C-3 — el ledger NO alimenta el índice por payload) vive en el
+        // LEDGER (enviadaLedgerPorPayload — dedup-indice); null honesto =
+        // sin hit / ledger caído (conservador — el caller sigue a dhash).
+        try {
+          const hitSondeo = await enviadaLedgerPorPayload(payloadSondeo);
+          if (hitSondeo) {
+            // Telemetría del sondeo sobre el registro ANTES de la marca —
+            // marcarYaEnviada la ARRASTRA con su spread ...registro (el
+            // write ancla de marcarYaEnviada queda byte a byte). Write
+            // extra SOLO en hits (desviación M-e73-3 del REPORTE).
+            try {
+              const regPre = await leerRegistro(entrada.id);
+              await guardarRegistro({
+                ...regPre,
+                sondeoQrMs: sondeo.ms,
+                sondeoQrTier: sondeo.tier ?? undefined,
+              });
+            } catch {
+              /* conservador — la marca sigue sin telemetría (jamás inventar) */
             }
-          } catch {
-            /* índice caído → conservador: sigue a dhash (RL-e65b-3) */
+            if (
+              await marcarYaEnviada(
+                entrada.id,
+                hitSondeo.id,
+                "payload",
+                undefined,
+                undefined,
+                payloadSondeo,
+              )
+            ) {
+              logger.info(`[e14] sondeo-qr fila=${entrada.id} → YA-ENVIADA payload`);
+              continue;
+            }
+            // guard falló (ya no es PENDIENTE / registro ilegible) → cae
+            // al comportamiento de siempre (el conservador manda — RL-e65-3).
           }
+        } catch {
+          /* índice caído → conservador: sigue a dhash (RL-e65b-3) */
         }
         // (c) Sin match → registrar como original futura (primer ganador
         // gana; filas ≠ PENDIENTE excluidas) + seguir a dhash (capa íntegra).
@@ -950,25 +952,16 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
 
   cargarFilas: async () => {
     try {
-      // e64p (C-1 — MODO PRUEBAS): la cola arranca VACÍA — cero restauración
-      // (sin filas fantasma ni Maps reconstruidos). Higiene: la persistencia
-      // vieja muere AQUÍ (cola IDB + ledger del histórico) para que la pasada
-      // siguiente sea de cero (QA doble pasada del kit). Con
-      // COLA_PERSISTENTE=true este bloque entero no existe y el comportamiento
-      // es el de siempre (restauración completa — reversibilidad).
-      if (!COLA_PERSISTENTE) {
-        try {
-          await vaciarCola();
-        } catch {
-          /* la cola muere igual en la bandeja (IDB caída — kit §3) */
-        }
-        try {
-          await borrarHistorico();
-        } catch {
-          /* conservador — el ledger se re-borra en el próximo vaciar/carga */
-        }
-        resetearPayloadsSesion(); // e64p C-1 — el mapa de payload de la sesión muere aquí
-        resetearIndiceEnviadas();
+      // e64p (C-1 — MODO PRUEBAS): la decisión vive en el LEDGER (dedup-
+      // indice — desconexión completa R8b). prepararSesionModoPruebas
+      // devuelve true SOLO con el kill switch del dueño en false: la cola
+      // arranca VACÍA — cero restauración (sin filas fantasma ni Maps
+      // reconstruidos) y la persistencia vieja muere AQUÍ (cola IDB + ledger
+      // del histórico — higiene) para que la pasada siguiente sea de cero
+      // (QA doble pasada del kit). Con COLA_PERSISTENTE=true (producción) es
+      // no-op y el comportamiento es el de siempre (restauración completa —
+      // reversibilidad).
+      if (await prepararSesionModoPruebas()) {
         set({ filas: [], colaDisponible: true, avisoCola: null });
         return;
       }
@@ -1365,19 +1358,12 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     // re-subir los 46). `borrarHistorico()` existe pero JAMÁS se cablea aquí
     // (RL-e65b-5). La cola es el taller; el envío es el hecho.
     // e64p (C-2 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ciclo de vida
-    // COMPLETO muere aquí (reversa declarada del RL-e65b-5 SOLO en modo
-    // pruebas): el mapa de payload de la sesión (capa 0 QR — hoy sobrevivía
-    // a vaciar en la misma sesión) + ledger del histórico + índice → limpiar
-    // y re-subir el MISMO lote procesa completo de cero (QA del kit). En
-    // producción (true) este bloque no existe y D-e65b-1 queda byte a byte.
-    if (!COLA_PERSISTENTE) {
-      resetearPayloadsSesion();
-      try {
-        await borrarHistorico();
-      } catch {
-        /* conservador — el índice ya no lo verá en esta sesión */
-      }
-    }
+    // COMPLETO muere aquí — la higiene vive en el LEDGER (desconexión R8b:
+    // mapa de payload de la sesión + ledger del histórico; reversa declarada
+    // del RL-e65b-5 SOLO en modo pruebas). En producción (true) es no-op byte
+    // a byte: D-e65b-1 intacta — VACIAR respeta el ledger (RL-e65b-5). La
+    // cola es el taller; el envío es el hecho.
+    await higieneModoPruebasVaciar();
     resetearIndiceEnviadas();
     set({ filas: [], progreso: null, origenAbierto: null, avisoCola: null });
   },
