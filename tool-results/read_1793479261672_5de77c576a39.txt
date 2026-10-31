@@ -1,0 +1,1031 @@
+     1→/**
+     2→ * Implementación mock de SupervisionRepository.
+     3→ *
+     4→ * KIT SUP-5 (T3 / D21): los puestos YA NO son un array demo de 20 — la
+     5→ * fuente es el catálogo DIVIPOLA exterior real (`cargarCatalogoDivipola()`,
+     6→ * 949 puestos / 67 países / 3.670 mesas). El estado (Global/Mesas/
+     7→ * Delegados/Transmisión) se SIEMBRA por hash determinístico del `idEnlace`
+     8→ * divipola (mismo seed → mismos KPIs siempre; nada aleatorio en render,
+     9→ * §0-9) con la MISMA distribución de estados que el mock anterior
+    10→ * (CRÍTICO ~5% · COMPLETO ~25% · PENDIENTE ~20% · NO_INICIADO ~50%).
+    11→ *
+    12→ * D6 queda SUPERSEDEDO: los KPIs iniciales dejan de ser los literales
+    13→ * 20/5/1/4/10 y se DERIVAN del catálogo sembrado, con la invariante
+    14→ * intacta: `total = completo + crítico + pendiente + no_iniciado` exacto.
+    15→ *
+    16→ * ANCLA DEMO (§2.3): el puesto `88_495_010_02` Roma - Consulado (ITALIA,
+    17→ * 8 mesas — el catálogo manda sobre el 499 del demo viejo) conserva su
+    18→ * estado demo completo: CRÍTICO, mesas 001-003 EXACTAS del mockup,
+    19→ * acta `#A92-F` con historial 14:00/14:18/14:20 y P2 con advertencia.
+    20→ * Los IDs internos quedan re-anclados al `idEnlace` real.
+    21→ *
+    22→ * C1 — SIN EFECTO DE IMPORT: importar este módulo no carga nada ni puede
+    23→ * lanzar. Los datos se siembran en `initSupervisionDatos()` (explícito e
+    24→ * idempotente); las lecturas del repo la invocan perezosamente
+    25→ * (`asegurarDatos()`) para no requerir cambios en el consumidor actual
+    26→ * (datos-provider, zona R4 — adopción explícita pendiente). Si la
+    27→ * validación ESTRUCTURAL del catálogo falla, el repo arranca VACÍO y el
+    28→ * motivo `BLOQUEADA: …` vuelve como Result — jamás un white-screen.
+    29→ *
+    30→ * Kit SUP-3: mesas determinísticas por puesto (cantidad EXACTA =
+    31→ * totalMesas del catálogo), pcts derivados de las mesas (D16), interfaz
+    32→ * async con latencia simulada ~400 ms (D12), mutaciones de T4 y
+    33→ * transición de vida de T3 (D13). Kit SUP-4: actas por contrato (§0-9).
+    34→ * Sin backend, sin persistencia: el estado vive en memoria del módulo.
+    35→ */
+    36→
+    37→import type {
+    38→  Anomalia,
+    39→  EstadoGlobal,
+    40→  FiltrosPuestos,
+    41→  Mesa,
+    42→  Notificacion,
+    43→  Puesto,
+    44→  ResumenGlobal,
+    45→} from "../domain/types";
+    46→import type { PuestoDivipola } from "../domain/divipola";
+    47→import { zonaParaUI } from "../domain/divipola";
+    48→import {
+    49→  CIERRE_LOCAL_MIN,
+    50→  tramoDeMinutos,
+    51→  UMBRAL_CRITICO_MIN,
+    52→} from "../domain/tiempo-cierre";
+    53→import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
+    54→import { consultarActaRuntime } from "./actas-runtime";
+    55→import { ID_ENLACE_ROMA, cargarCatalogoDivipola } from "./divipola-adapter";
+    56→import { crearRandomDeterministico } from "../domain/acta";
+    57→import { diaDeNombrePuesto } from "../domain/jornada";
+    58→import type { SupervisionRepository } from "./supervision-repository";
+    59→import {
+    60→  aprobarActaMock,
+    61→  confirmarRescanActaMock,
+    62→  obtenerActa,
+    63→} from "./actas-mock";
+    64→
+    65→/** ANCLA DE PRÁCTICA (SUP-6 §2.3 / D26): El Cairo - Consulado (EGIPTO) —
+    66→ * la mesa 001 sirve el acta real del digitalizador (kit actas-reales-v1). */
+    67→export const ID_ENLACE_CAIRO = "88_335_005_02";
+    68→
+    69→/** ANCLA DE PRÁCTICA #2 (actas-reales-v2 / D44): Barcelona - Girona
+    70→ * (ESPAÑA) — la mesa 001 sirve el acta real CÓNSUL/EMBAJADOR del
+    71→ * digitalizador. Su seed natural cae PENDIENTE (mesa 001 NO_INICIADO →
+    72→ * sin acta → ancla inalcanzable); mismo mecanismo del ancla El Cairo
+    73→ * (D26): se FUERZA a COMPLETO. */
+    74→export const ID_ENLACE_BARCELONA = "88_355_003_08";
+    75→
+    76→/** Supervisor de la sesión (header del mockup). */
+    77→export const SUPERVISOR = {
+    78→  nombre: "SUPERVISOR",
+    79→  id: "ADM-9482",
+    80→} as const;
+    81→
+    82→/** Latencia simulada del mock (D12): el contrato es async desde hoy. */
+    83→const LATENCIA_MS = 400;
+    84→/** Latencia simulada de REINSPECCIONAR (T4): ~2.5 s de spinner. */
+    85→const LATENCIA_REINSPECCION_MS = 2500;
+    86→/** Intervalo del ticker de sincronización (T3). */
+    87→export const TICKER_SEGUNDOS = 5;
+    88→/** Cada cuántos segundos del ticker aplica UNA transición de vida (T3). */
+    89→export const TRANSICION_CADA_SEGUNDOS = 45;
+    90→
+    91→function esperar(ms: number): Promise<void> {
+    92→  return new Promise((resolve) => setTimeout(resolve, ms));
+    93→}
+    94→
+    95→/** Con latencia simulada (sin romper el determinismo de los datos). */
+    96→async function conLatencia<T>(valor: T, ms = LATENCIA_MS): Promise<T> {
+    97→  await esperar(ms);
+    98→  return valor;
+    99→}
+   100→
+   101→// ─── Catálogo DIVIPOLA → Puesto (kit SUP-5 §3-T3) ───────────────────────────
+   102→
+   103→/**
+   104→ * Distribución de estados SEMBRADA (misma proporción que el mock de 20:
+   105→ * 5 COMPLETO / 1 CRÍTICO / 4 PENDIENTE / 10 NO_INICIADO). El ancla Roma
+   106→ * se FUERZA a CRÍTICO aparte (§2.3).
+   107→ */
+   108→function estadoPorSeed(random: number): EstadoGlobal {
+   109→  if (random < 0.05) return "CRITICO"; // ~1 de cada 20 (como hoy)
+   110→  if (random < 0.3) return "COMPLETO"; // ~25%
+   111→  if (random < 0.5) return "PENDIENTE"; // ~20%
+   112→  return "NO_INICIADO"; // ~50%
+   113→}
+   114→
+   115→/**
+   116→ * Regla del dueño (feedback de la matriz): un puesto con MÁS DE 3 HORAS
+   117→ * transcurridas desde el cierre de sus mesas (4:00 p. m. hora local) que
+   118→ * AÚN no completa la digitalización pasa a estado CRÍTICO automático —
+   119→ * «para saber cuáles puestos están quedados en la digitalización de las
+   120→ * actas». Los COMPLETO no se tocan (ya terminaron; quedan al fondo de la
+   121→ * matriz) y un CRÍTICO sembrado nunca se degrada. Umbral alineado con el
+   122→ * tramo «> 3 hrs» del dominio (UMBRAL_CRITICO_MIN, inclusivo — un puesto
+   123→ * que MUESTRA «> 3 hrs» en rojo no puede tener badge NO_INICIADO).
+   124→ *
+   125→ * La derivación es POSTERIOR al draw de estado (D43): no consume draws,
+   126→ * así que las secuencias determinísticas de mesas/actas quedan intactas.
+   127→ */
+   128→function derivarEstadoPorUmbral(
+   129→  sembrado: EstadoGlobal,
+   130→  minutosDesdeCierre: number
+   131→): EstadoGlobal {
+   132→  if (sembrado === "COMPLETO") return "COMPLETO";
+   133→  if (minutosDesdeCierre >= UMBRAL_CRITICO_MIN) return "CRITICO";
+   134→  return sembrado;
+   135→}
+   136→
+   137→const CIERRES_COL_MIN = [9 * 60, 10 * 60, 11 * 60, 12 * 60, 13 * 60];
+   138→
+   139→/**
+   140→ * TIEMPO transcurrido desde el cierre (pedido del dueño): la columna
+   141→ * «Tiempo» es el tiempo desde el cierre de 4:00 p. m. HORA LOCAL del
+   142→ * país del puesto de digitalización (regla del kit monitor-jornada-v1:
+   143→ * «cierre 4:00 p. m. hora local»); > 3 hrs es crítico. Distribución del
+   144→ * demo moldeada por tramos (30% / 25% / 20% / 25%) — mapea UN draw
+   145→ * uniforme a un minuto concreto dentro del tramo.
+   146→ */
+   147→function transcurridoPorSeed(r: number): number {
+   148→  if (r < 0.3) return Math.floor((r / 0.3) * 59); // < 1 hr: 0-58 min
+   149→  if (r < 0.55) return 60 + Math.floor(((r - 0.3) / 0.25) * 59); // 1-2 hrs
+   150→  if (r < 0.75) return 120 + Math.floor(((r - 0.55) / 0.2) * 59); // 2-3 hrs
+   151→  return 180 + Math.floor(((r - 0.75) / 0.25) * 175); // > 3 hrs: 180-354
+   152→}
+   153→
+   154→/** "19:08" → "7:08 PM" (formato del mockup). */
+   155→function relojDeMinutos(minutos: number): string {
+   156→  const m = ((minutos % 1440) + 1440) % 1440;
+   157→  const h24 = Math.floor(m / 60);
+   158→  const mm = String(m % 60).padStart(2, "0");
+   159→  const sufijo = h24 >= 12 ? "PM" : "AM";
+   160→  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+   161→  return `${h12}:${mm} ${sufijo}`;
+   162→}
+   163→
+   164→/**
+   165→ * Horarios creíbles + determinísticos por seed (el demo no conoce
+   166→ * zonas horarias reales; la coherencia EXACTA solo la exige el kit para
+   167→ * el ancla Roma — §4.9).
+   168→ *
+   169→ * Pedido del dueño (semántica de las columnas de tiempo):
+   170→ * - «Hora actual» = hora del PAÍS del puesto de digitalización — queda
+   171→ *   coherente por construcción: 16:00 local (cierre) + transcurrido.
+   172→ * - «Tiempo» = transcurrido desde el cierre de 4:00 p. m. LOCAL, con la
+   173→ *   etiqueta del tramo canónico (domain/tiempo-cierre).
+   174→ *
+   175→ * D43 — el horario consume EXACTAMENTE 3 draws como antes (cierre COL,
+   176→ * transcurrido, jitter quemado) para NO desplazar la posición del draw
+   177→ * de estado en la secuencia determinística: los estados sembrados y los
+   178→ * KPIs del demo quedan idénticos.
+   179→ */
+   180→function horarioPorSeed(random: () => number): {
+   181→  cierre: string;
+   182→  local: string;
+   183→  diferencia: string;
+   184→  minutosDesdeCierre: number;
+   185→} {
+   186→  // 1) Cierre en hora de Colombia (16:00 local convertido al huso).
+   187→  const cierre = CIERRES_COL_MIN[Math.floor(random() * CIERRES_COL_MIN.length)];
+   188→  // 2) Transcurrido desde el cierre local 4:00 p. m. (0–354 min).
+   189→  const transcurrido = transcurridoPorSeed(random());
+   190→  // 3) Tercer draw CONSERVADO (antes: jitter de minutos) — se quema para
+   191→  //    mantener la secuencia de seeds estable (estados/KPIs inalterados).
+   192→  void random();
+   193→  const local = CIERRE_LOCAL_MIN + transcurrido;
+   194→  const tramo = tramoDeMinutos(transcurrido);
+   195→  return {
+   196→    cierre: relojDeMinutos(cierre),
+   197→    local: relojDeMinutos(local),
+   198→    diferencia: tramo.etiqueta,
+   199→    minutosDesdeCierre: transcurrido,
+   200→  };
+   201→}
+   202→
+   203→/** Valores EXACTOS del horario del ancla Roma (mockup original). 7:08 PM
+   204→ * local − 4:00 PM de cierre = 188 min → tramo «> 3 hrs» (coherente con
+   205→ * su estadoGlobal CRÍTICO). */
+   206→const HORARIO_ROMA = {
+   207→  cierre: "9:00 AM",
+   208→  local: "7:08 PM",
+   209→  diferencia: "> 3 hrs",
+   210→  minutosDesdeCierre: 188,
+   211→} as const;
+   212→
+   213→/** Registro canónico → fila de la tabla (`Puesto`). El `id` ES el
+   214→ * `idEnlace` divipola (D22): re-ancla mesas, actas, anomalías y el join
+   215→ * futuro con el digitalizador. Códigos reales del catálogo, sin
+   216→ * transformar (§2.3). KIT monitor-jornada-v1: el día de la jornada se
+   217→ * DERIVA del nombre real del catálogo (prefijo LUNES…SABADO; puestos
+   218→ * base sin prefijo = DOMINGO — jornada de cierre, 2.181 mesas). */
+   219→function puestoDeRegistro(registro: PuestoDivipola): Puesto {
+   220→  const esAncla = registro.idEnlace === ID_ENLACE_ROMA;
+   221→  // D26: ancla de práctica El Cairo — se FUERZA a COMPLETO (mismo
+   222→  // mecanismo del ancla Roma → CRÍTICO). Su seed natural cae en
+   223→  // NO_INICIADO (4a llamada del seed > 0.5 — rango NO_INICIADO; el kit
+   224→  // lo anota como 0.9872): sin fuerza el ancla es inalcanzable.
+   225→  const esAnclaCairo = registro.idEnlace === ID_ENLACE_CAIRO;
+   226→  // D44: ancla de práctica #2 Barcelona - Girona — misma historia: seed
+   227→  // natural PENDIENTE (mesa 001 NO_INICIADO) → se FUERZA a COMPLETO para
+   228→  // que la acta real CÓNSUL/EMBAJADOR del digitalizador sea servible.
+   229→  const esAnclaBarcelona = registro.idEnlace === ID_ENLACE_BARCELONA;
+   230→  const random = crearRandomDeterministico(`divipola::puesto::${registro.idEnlace}`);
+   231→  const horario = esAncla ? HORARIO_ROMA : horarioPorSeed(random);
+   232→  // D43 — el 4.º draw SOLO se consume en puestos sin ancla (igual que
+   233→  // antes); la derivación por umbral (>3 hrs → CRÍTICO) es posterior y no
+   234→  // consume draws, así que la secuencia determinística queda intacta.
+   235→  const estadoSembrado: EstadoGlobal = esAncla
+   236→    ? "CRITICO"
+   237→    : esAnclaCairo || esAnclaBarcelona
+   238→      ? "COMPLETO"
+   239→      : estadoPorSeed(random());
+   240→  return {
+   241→    id: registro.idEnlace,
+   242→    codigoPais: registro.codigoMunicipio,
+   243→    pais: registro.nombreMunicipio,
+   244→    zonaId: registro.codigoZona,
+   245→    zona: zonaParaUI(registro.codigoZona),
+   246→    puesto: `${registro.codigoPuesto} - ${registro.nombre}`,
+   247→    numeroMesas: registro.totalMesas,
+   248→    horaCierreColombia: horario.cierre,
+   249→    horaActualLocal: horario.local,
+   250→    minutosDesdeCierre: horario.minutosDesdeCierre,
+   251→    diferenciaTiempo: horario.diferencia,
+   252→    // Los pcts se recalculan al inicializar (derivación de mesas, D16).
+   253→    pctDelegado: 0,
+   254→    pctTransmision: 0,
+   255→    estadoGlobal: derivarEstadoPorUmbral(
+   256→      estadoSembrado,
+   257→      horario.minutosDesdeCierre
+   258→    ),
+   259→    diaJornada: diaDeNombrePuesto(registro.nombre),
+   260→  };
+   261→}
+   262→
+   263→/** Puestos = catálogo DIVIPOLA exterior real (949 — §2.4). Se siembran
+   264→ * en `initSupervisionDatos()` — C1: importar el módulo NO carga nada. */
+   265→let PUESTOS: Puesto[] = [];
+   266→
+   267→// ─── Generación determinística de mesas (T2 / D13) ──────────────────────────
+   268→
+   269→function ok(): Mesa["delegados"]["p1"] {
+   270→  return "ok";
+   271→}
+   272→function pend(): Mesa["delegados"]["p1"] {
+   273→  return "pendiente";
+   274→}
+   275→
+   276→/** Mesas 001-003 EXACTAS del mockup original (SUP-1 §2.4) — NO SE TOCAN:
+   277→ * hoy pertenecen al ANCLA Roma (`88_495_010_02`, kit SUP-5 §2.3). */
+   278→const MESAS_ITALIA_MOCKUP: Mesa[] = [
+   279→  {
+   280→    id: "001",
+   281→    delegados: { p1: "ok", p2: "ok" },
+   282→    transmision: {
+   283→      p1: { estado: "ok" },
+   284→      p2: { estado: "ok", alerta: "Rescaneo" },
+   285→    },
+   286→    estadoMesa: "INCOMPLETO",
+   287→    ultimaCarga: "Hace 12 min",
+   288→    accionSugerida: "reinspeccionar",
+   289→  },
+   290→  {
+   291→    id: "002",
+   292→    delegados: { p1: "ok", p2: "ok" },
+   293→    transmision: {
+   294→      p1: { estado: "pendiente" },
+   295→      p2: { estado: "pendiente" },
+   296→    },
+   297→    estadoMesa: "EN_PROCESO",
+   298→    ultimaCarga: "Hace 45 min",
+   299→    accionSugerida: "notificar",
+   300→  },
+   301→  {
+   302→    id: "003",
+   303→    delegados: { p1: "pendiente", p2: "pendiente" },
+   304→    transmision: {
+   305→      p1: { estado: "pendiente" },
+   306→      p2: { estado: "pendiente" },
+   307→    },
+   308→    estadoMesa: "NO_INICIADO",
+   309→    ultimaCarga: null,
+   310→    accionSugerida: "notificar",
+   311→  },
+   312→];
+   313→
+   314→/**
+   315→ * Mesas por puesto, DETERMINÍSTICAS (sin random por render — arrays
+   316→ * fijos). Recetas del kit T2 (SUP-3), ahora sobre el catálogo real:
+   317→ * - COMPLETO → todas COMPLETO, ok, sin alertas, carga reciente.
+   318→ * - PENDIENTE → mezcla EN_PROCESO/NO_INICIADO, pendientes en partes.
+   319→ * - CRÍTICO → mayormente NO_INICIADO/INCOMPLETO, alerta "Rescaneo"
+   320→ *   presente (el ANCLA Roma: 3 exactas del mockup + 004-008 generadas;
+   321→ *   los demás críticos del catálogo: receta propia coherente).
+   322→ * - NO_INICIADO → todas NO_INICIADO, sin carga ("—").
+   323→ */
+   324→function generarMesasPuesto(puesto: Puesto): Mesa[] {
+   325→  const n = puesto.numeroMesas;
+   326→  const numero = (i: number) => String(i + 1).padStart(3, "0");
+   327→  const carga = (min: number) => `Hace ${min} min`;
+   328→
+   329→  if (puesto.estadoGlobal === "COMPLETO") {
+   330→    return Array.from({ length: n }, (_, i) => ({
+   331→      id: numero(i),
+   332→      delegados: { p1: ok(), p2: ok() },
+   333→      transmision: { p1: { estado: "ok" }, p2: { estado: "ok" } },
+   334→      estadoMesa: "COMPLETO",
+   335→      ultimaCarga: carga(5 + i * 3),
+   336→      accionSugerida: "notificar",
+   337→    })) as Mesa[];
+   338→  }
+   339→
+   340→  if (puesto.estadoGlobal === "NO_INICIADO") {
+   341→    return Array.from({ length: n }, (_, i) => ({
+   342→      id: numero(i),
+   343→      delegados: { p1: pend(), p2: pend() },
+   344→      transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   345→      estadoMesa: "NO_INICIADO",
+   346→      ultimaCarga: null,
+   347→      accionSugerida: "notificar",
+   348→    })) as Mesa[];
+   349→  }
+   350→
+   351→  // ANCLA Roma (CRÍTICO): 3 exactas del mockup + las restantes generadas
+   352→  // coherentes con CRÍTICO (mayoría NO_INICIADO, Rescaneo presente).
+   353→  if (puesto.id === ID_ENLACE_ROMA) {
+   354→    const restantes = Math.max(0, n - MESAS_ITALIA_MOCKUP.length);
+   355→    const generadas: Mesa[] = Array.from({ length: restantes }, (_, i) => {
+   356→      const indice = MESAS_ITALIA_MOCKUP.length + i;
+   357→      // 004 → INCOMPLETO con Rescaneo (coherente con CRÍTICO y con la
+   358→      // anomalía sembrada); 005 → EN_PROCESO; 006+ → NO_INICIADO.
+   359→      if (i === 0) {
+   360→        return {
+   361→          id: numero(indice),
+   362→          delegados: { p1: ok(), p2: ok() },
+   363→          transmision: {
+   364→            p1: { estado: "ok" },
+   365→            p2: { estado: "ok", alerta: "Rescaneo" },
+   366→          },
+   367→          estadoMesa: "INCOMPLETO",
+   368→          ultimaCarga: carga(21),
+   369→          accionSugerida: "reinspeccionar",
+   370→        } as Mesa;
+   371→      }
+   372→      if (i === 1) {
+   373→        return {
+   374→          id: numero(indice),
+   375→          delegados: { p1: ok(), p2: pend() },
+   376→          transmision: {
+   377→            p1: { estado: "ok" },
+   378→            p2: { estado: "pendiente" },
+   379→          },
+   380→          estadoMesa: "EN_PROCESO",
+   381→          ultimaCarga: carga(52),
+   382→          accionSugerida: "notificar",
+   383→        } as Mesa;
+   384→      }
+   385→      return {
+   386→        id: numero(indice),
+   387→        delegados: { p1: pend(), p2: pend() },
+   388→        transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   389→        estadoMesa: "NO_INICIADO",
+   390→        ultimaCarga: null,
+   391→        accionSugerida: "notificar",
+   392→      } as Mesa;
+   393→    });
+   394→    return [...MESAS_ITALIA_MOCKUP.map((m) => ({ ...m })), ...generadas];
+   395→  }
+   396→
+   397→  // CRÍTICO (resto del catálogo): la mesa 001 INCOMPLETO con alerta
+   398→  // "Rescaneo" (reinspeccionable, coherente con anomalías del tipo), la
+   399→  // 002 EN_PROCESO si hay más mesas y el resto NO_INICIADO.
+   400→  if (puesto.estadoGlobal === "CRITICO") {
+   401→    const mesas: Mesa[] = [];
+   402→    for (let i = 0; i < n; i++) {
+   403→      if (i === 0) {
+   404→        mesas.push({
+   405→          id: numero(i),
+   406→          delegados: { p1: ok(), p2: ok() },
+   407→          transmision: {
+   408→            p1: { estado: "ok" },
+   409→            p2: { estado: "ok", alerta: "Rescaneo" },
+   410→          },
+   411→          estadoMesa: "INCOMPLETO",
+   412→          ultimaCarga: carga(18),
+   413→          accionSugerida: "reinspeccionar",
+   414→        });
+   415→      } else if (i === 1) {
+   416→        mesas.push({
+   417→          id: numero(i),
+   418→          delegados: { p1: ok(), p2: pend() },
+   419→          transmision: { p1: { estado: "ok" }, p2: { estado: "pendiente" } },
+   420→          estadoMesa: "EN_PROCESO",
+   421→          ultimaCarga: carga(41),
+   422→          accionSugerida: "notificar",
+   423→        });
+   424→      } else {
+   425→        mesas.push({
+   426→          id: numero(i),
+   427→          delegados: { p1: pend(), p2: pend() },
+   428→          transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   429→          estadoMesa: "NO_INICIADO",
+   430→          ultimaCarga: null,
+   431→          accionSugerida: "notificar",
+   432→        });
+   433→      }
+   434→    }
+   435→    return mesas;
+   436→  }
+   437→
+   438→  // PENDIENTE: mezcla EN_PROCESO / NO_INICIADO (receta del kit).
+   439→  // - Con varias mesas: la ÚLTIMA es EN_PROCESO (delegados completos,
+   440→  //   transmisión a medias → candidato de transición de vida), el resto
+   441→  //   NO_INICIADO. Con 1 mesa: la mesa única es EN_PROCESO con partes a
+   442→  //   medias.
+   443→  const mesas: Mesa[] = [];
+   444→  for (let i = 0; i < n; i++) {
+   445→    const esUltima = i === n - 1;
+   446→    const indice = i;
+   447→    if (esUltima) {
+   448→      mesas.push({
+   449→        id: numero(indice),
+   450→        delegados: { p1: ok(), p2: ok() },
+   451→        transmision: { p1: { estado: "ok" }, p2: { estado: "pendiente" } },
+   452→        estadoMesa: "EN_PROCESO",
+   453→        ultimaCarga: carga(47),
+   454→        accionSugerida: "notificar",
+   455→      });
+   456→    } else {
+   457→      mesas.push({
+   458→        id: numero(indice),
+   459→        delegados: { p1: pend(), p2: pend() },
+   460→        transmision: { p1: { estado: "pendiente" }, p2: { estado: "pendiente" } },
+   461→        estadoMesa: "NO_INICIADO",
+   462→        ultimaCarga: null,
+   463→        accionSugerida: "notificar",
+   464→      });
+   465→    }
+   466→  }
+   467→  return mesas;
+   468→}
+   469→
+   470→/** Estado de mesa derivado de sus partes (regla única, D13). */
+   471→function estadoMesaDePartes(mesa: Mesa): Mesa["estadoMesa"] {
+   472→  if (
+   473→    mesa.transmision.p1.alerta ||
+   474→    mesa.transmision.p2.alerta
+   475→  ) {
+   476→    return "INCOMPLETO";
+   477→  }
+   478→  const partesOk =
+   479→    (mesa.delegados.p1 === "ok" ? 1 : 0) +
+   480→    (mesa.delegados.p2 === "ok" ? 1 : 0) +
+   481→    (mesa.transmision.p1.estado === "ok" ? 1 : 0) +
+   482→    (mesa.transmision.p2.estado === "ok" ? 1 : 0);
+   483→  if (partesOk === 4) return "COMPLETO";
+   484→  if (partesOk === 0) return "NO_INICIADO";
+   485→  return "EN_PROCESO";
+   486→}
+   487→
+   488→/** Recalcula estadoMesa + accionSugerida de una mesa (in place). */
+   489→function refrescarMesa(mesa: Mesa): void {
+   490→  mesa.estadoMesa = estadoMesaDePartes(mesa);
+   491→  mesa.accionSugerida = mesa.estadoMesa === "INCOMPLETO" ? "reinspeccionar" : "notificar";
+   492→}
+   493→
+   494→/** pcts derivables de las mesas (≈ % de partes ok, kit T2). */
+   495→function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
+   496→  const total = mesas.length * 2;
+   497→  if (total === 0) return { delegado: 0, transmision: 0 };
+   498→  const delegOk = mesas.reduce(
+   499→    (s, m) =>
+   500→      s + (m.delegados.p1 === "ok" ? 1 : 0) + (m.delegados.p2 === "ok" ? 1 : 0),
+   501→    0
+   502→  );
+   503→  const transOk = mesas.reduce(
+   504→    (s, m) =>
+   505→      s +
+   506→      (m.transmision.p1.estado === "ok" ? 1 : 0) +
+   507→      (m.transmision.p2.estado === "ok" ? 1 : 0),
+   508→    0
+   509→  );
+   510→  return {
+   511→    delegado: Math.round((delegOk / total) * 100),
+   512→    transmision: Math.round((transOk / total) * 100),
+   513→  };
+   514→}
+   515→
+   516→/** Estado global derivado: COMPLETO si TODAS las mesas lo están; si no, se
+   517→ * conserva el estado actual (el kit solo define transición → COMPLETO). */
+   518→function estadoGlobalTrasMesas(actual: Puesto["estadoGlobal"], mesas: Mesa[]): Puesto["estadoGlobal"] {
+   519→  const todasCompletas = mesas.length > 0 && mesas.every((m) => m.estadoMesa === "COMPLETO");
+   520→  return todasCompletas ? "COMPLETO" : actual;
+   521→}
+   522→
+   523→// ─── Estado mutable del mock (en memoria — sin persistencia, §0-5) ─────────
+   524→
+   525→const MESAS_POR_PUESTO: Record<string, Mesa[]> = {};
+   526→let NOTIFICACIONES: Notificacion[] = [];
+   527→let ANOMALIAS: Anomalia[] = [];
+   528→
+   529→/** Etiqueta de puesto para textos ("ITALIA — 02 - Roma - Consulado"). */
+   530→function etiquetaDePuesto(puesto: Puesto): string {
+   531→  return `${puesto.pais} — ${puesto.puesto}`;
+   532→}
+   533→
+   534→/**
+   535→ * Búsqueda DETERMINÍSTICA de un puesto real de un país con una mesa dada
+   536→ * en un estado útil (re-anclaje de las semillas de notificaciones y
+   537→ * anomalías al catálogo real — kit SUP-5 §3-T3.5). Prioridad de estados
+   538→ * coherentes con la semilla; fallback: cualquier mesa con transmisión;
+   539→ * fallback final: el primer puesto del país.
+   540→ */
+   541→function buscarPuestoDePais(
+   542→  pais: string,
+   543→  mesaIndice: number
+   544→): { puesto: Puesto; mesa: Mesa } | null {
+   545→  const delPais = PUESTOS.filter((p) => p.pais === pais);
+   546→  const candidatos = delPais
+   547→    .map((puesto) => ({ puesto, mesa: MESAS_POR_PUESTO[puesto.id]?.[mesaIndice] }))
+   548→    .filter(({ mesa }) => Boolean(mesa));
+   549→  const prioridad: Mesa["estadoMesa"][] = ["INCOMPLETO", "EN_PROCESO", "COMPLETO"];
+   550→  for (const estado of prioridad) {
+   551→    const hallado = candidatos.find(({ mesa }) => mesa.estadoMesa === estado);
+   552→    if (hallado) return hallado;
+   553→  }
+   554→  const conTransmision = candidatos.find(({ mesa }) => mesa.estadoMesa !== "NO_INICIADO");
+   555→  if (conTransmision) return conTransmision;
+   556→  return candidatos.length > 0 ? candidatos[0] : null;
+   557→}
+   558→
+   559→export type ResultadoInitSupervision =
+   560→  | { ok: true; puestos: number; paises: number; mesas: number }
+   561→  | { ok: false; motivo: string };
+   562→
+   563→let RESULTADO_INIT: ResultadoInitSupervision | null = null;
+   564→
+   565→/**
+   566→ * C1 — inicialización EXPLÍCITA de los datos de supervisión (sustituye al
+   567→ * efecto de import que había hoy): carga el catálogo (Result — nunca
+   568→ * lanza), siembra puestos + mesas + semillas de notificaciones/anomalías
+   569→ * y deja el repo servible. IDEMPOTENTE (memoizada — la prep es una sola
+   570→ * vez, D12).
+   571→ *
+   572→ * Contrato del fallo: si la validación ESTRUCTURAL del catálogo falla, el
+   573→ * repo arranca VACÍO (0 puestos: la UI muestra el monitor sin filas,
+   574→ * jamás un white-screen) y el motivo `BLOQUEADA: …` vuelve por aquí. Los
+   575→ * conteos del kit (949/67/3.670) NO bloquean (C1): una desviación solo
+   576→ * advierte en consola — el guard vive en data/__tests__.
+   577→ *
+   578→ * ADOPCIÓN PENDIENTE (R4): el punto de consumo actual
+   579→ * (components/datos-provider.tsx) no la llama aún — las lecturas del
+   580→ * repo inicializan perezosamente (`asegurarDatos()`) para no exigir
+   581→ * cambios en R4. Llamarla en el mount haría explícito el momento de
+   582→ * carga y el manejo del motivo BLOQUEADA.
+   583→ */
+   584→export function initSupervisionDatos(): ResultadoInitSupervision {
+   585→  if (RESULTADO_INIT) return RESULTADO_INIT;
+   586→
+   587→  const catalogo = cargarCatalogoDivipola();
+   588→  if (!catalogo.ok) {
+   589→    RESULTADO_INIT = { ok: false, motivo: catalogo.motivo };
+   590→    return RESULTADO_INIT;
+   591→  }
+   592→
+   593→  PUESTOS = catalogo.catalogo.map(puestoDeRegistro);
+   594→
+   595→  for (const puesto of PUESTOS) {
+   596→    const mesas = generarMesasPuesto(puesto);
+   597→    MESAS_POR_PUESTO[puesto.id] = mesas;
+   598→    // T2: los pcts del puesto deben ser DERIVABLES de sus mesas — se
+   599→    // corrigen al inicializar (D16 documenta los valores que cambian).
+   600→    const pcts = pctsDeMesas(mesas);
+   601→    puesto.pctDelegado = pcts.delegado;
+   602→    puesto.pctTransmision = pcts.transmision;
+   603→  }
+   604→
+   605→  // Época de la sesión congelada: las fechas relativas de las semillas
+   606→  // son estables entre renders (igual que el AHORA de módulo anterior).
+   607→  const AHORA = Date.now();
+   608→  const MIN = 60_000;
+   609→
+   610→  const anclaRoma = PUESTOS.find((p) => p.id === ID_ENLACE_ROMA) ?? PUESTOS[0];
+   611→  if (anclaRoma) {
+   612→    // España/México/Países Bajos: puestos REALES del catálogo para las
+   613→    // semillas (determinístico — §0-9). INGLATERRA existe en el catálogo
+   614→    // (Londres); su anomalía es de puesto (sin mesa).
+   615→    const semillaEspana = buscarPuestoDePais("ESPAÑA", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+   616→    const semillaMexico = buscarPuestoDePais("MEXICO", 1) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+   617→    const semillaPaisesBajos = buscarPuestoDePais("PAISES BAJOS", 0) ?? { puesto: anclaRoma, mesa: MESAS_POR_PUESTO[anclaRoma.id][0] };
+   618→    const semillaInglaterra =
+   619→      PUESTOS.find((p) => p.pais === "INGLATERRA") ?? anclaRoma;
+   620→    const mesaEnCursoMexico =
+   621→      MESAS_POR_PUESTO[semillaMexico.puesto.id]?.find((m) => m.estadoMesa === "EN_PROCESO") ??
+   622→      semillaMexico.mesa;
+   623→
+   624→    /** Semillas T5 (7): coherentes con los datos (Roma rescaneo, España
+   625→     * retraso…), ya re-ancladas a los códigos reales del catálogo.
+   626→     * 3 no leídas → badge inicial 3. */
+   627→    NOTIFICACIONES = [
+   628→      { id: "notif-1", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 001 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 12 * MIN, leida: false },
+   629→      { id: "notif-2", tipo: "retraso", texto: `Retraso en transmisión — ${etiquetaDePuesto(semillaEspana.puesto)}`, fecha: AHORA - 38 * MIN, leida: false },
+   630→      { id: "notif-3", tipo: "transmision", texto: `Transmisión en curso — Mesa ${mesaEnCursoMexico.id} (${etiquetaDePuesto(semillaMexico.puesto)})`, fecha: AHORA - 47 * MIN, leida: false },
+   631→      { id: "notif-4", tipo: "sistema", texto: `Sincronización completada: ${PUESTOS.length} puestos al día`, fecha: AHORA - 65 * MIN, leida: true },
+   632→      { id: "notif-5", tipo: "rescaneo", texto: `Rescaneo requerido en Mesa 004 (${etiquetaDePuesto(anclaRoma)})`, fecha: AHORA - 21 * MIN, leida: false },
+   633→      { id: "notif-6", tipo: "sistema", texto: "Respaldo de datos del consolidado completado", fecha: AHORA - 5 * 60 * MIN, leida: true },
+   634→      { id: "notif-7", tipo: "transmision", texto: `Transmisión restablecida — ${etiquetaDePuesto(semillaPaisesBajos.puesto)}`, fecha: AHORA - 26 * 60 * MIN, leida: true },
+   635→    ];
+   636→
+   637→    /** Semillas T6: 5 ABIERTAS (badge dinámico real del mockup) + 2 revisadas
+   638→     * de histórico (para el filtro por estado) — re-ancladas al catálogo. */
+   639→    ANOMALIAS = [
+   640→      { id: "anom-1", tipo: "Rescaneo", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "001", severidad: "critica", fecha: AHORA - 12 * MIN, revisada: false },
+   641→      { id: "anom-2", tipo: "Mesa incompleta", puestoId: anclaRoma.id, puesto: etiquetaDePuesto(anclaRoma), mesaId: "004", severidad: "alta", fecha: AHORA - 21 * MIN, revisada: false },
+   642→      { id: "anom-3", tipo: "Transmisión caída", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), mesaId: semillaEspana.mesa.id, severidad: "alta", fecha: AHORA - 38 * MIN, revisada: false },
+   643→      { id: "anom-4", tipo: "Desfase de hora", puestoId: semillaEspana.puesto.id, puesto: etiquetaDePuesto(semillaEspana.puesto), severidad: "media", fecha: AHORA - 52 * MIN, revisada: false },
+   644→      { id: "anom-5", tipo: "Mesa incompleta", puestoId: semillaMexico.puesto.id, puesto: etiquetaDePuesto(semillaMexico.puesto), mesaId: semillaMexico.mesa.id, severidad: "media", fecha: AHORA - 2 * 60 * MIN, revisada: false },
+   645→      { id: "anom-6", tipo: "Rescaneo", puestoId: semillaPaisesBajos.puesto.id, puesto: etiquetaDePuesto(semillaPaisesBajos.puesto), mesaId: semillaPaisesBajos.mesa.id, severidad: "media", fecha: AHORA - 26 * 60 * MIN, revisada: true },
+   646→      { id: "anom-7", tipo: "Desfase de hora", puestoId: semillaInglaterra.id, puesto: etiquetaDePuesto(semillaInglaterra), severidad: "media", fecha: AHORA - 8 * 60 * MIN, revisada: true },
+   647→    ];
+   648→  }
+   649→
+   650→  const mesasSembradas = Object.values(MESAS_POR_PUESTO).reduce(
+   651→    (suma, mesas) => suma + mesas.length,
+   652→    0
+   653→  );
+   654→  RESULTADO_INIT = {
+   655→    ok: true,
+   656→    puestos: PUESTOS.length,
+   657→    paises: new Set(PUESTOS.map((p) => p.pais)).size,
+   658→    mesas: mesasSembradas,
+   659→  };
+   660→  return RESULTADO_INIT;
+   661→}
+   662→
+   663→/** C1 — inicialización PEREZOSA por compatibilidad: los métodos del repo
+   664→ * siembran al primer uso si nadie llamó `initSupervisionDatos()` aún
+   665→ * (datos-provider no lo hace — adopción explícita pendiente de R4). */
+   666→function asegurarDatos(): void {
+   667→  if (!RESULTADO_INIT) initSupervisionDatos();
+   668→}
+   669→
+   670→let contadorNotificaciones = 0;
+   671→
+   672→function crearNotificacion(tipo: Notificacion["tipo"], texto: string): Notificacion {
+   673→  contadorNotificaciones += 1;
+   674→  return {
+   675→    id: `notif-nueva-${contadorNotificaciones}`,
+   676→    tipo,
+   677→    texto,
+   678→    fecha: Date.now(),
+   679→    leida: false,
+   680→  };
+   681→}
+   682→
+   683→function puestoPorId(puestoId: string): Puesto | undefined {
+   684→  return PUESTOS.find((p) => p.id === puestoId);
+   685→}
+   686→
+   687→function refrescarPuesto(puesto: Puesto): void {
+   688→  const mesas = MESAS_POR_PUESTO[puesto.id] ?? [];
+   689→  const pcts = pctsDeMesas(mesas);
+   690→  puesto.pctDelegado = pcts.delegado;
+   691→  puesto.pctTransmision = pcts.transmision;
+   692→  puesto.estadoGlobal = estadoGlobalTrasMesas(puesto.estadoGlobal, mesas);
+   693→}
+   694→
+   695→/**
+   696→ * KIT carga-masiva-supervision-v1 (D27) — superpone el registro RUNTIME del
+   697→ * digitalizador (fotos + encabezado impreso) sobre el acta base del mock.
+   698→ * Las fotos del runtime MANDAN en las páginas que traen; el resto cae al
+   699→ * acta base o al sintético D18. Si la mesa no tenía acta (NO_INICIADO), se
+   700→ * construye una mínima honesta desde el registro runtime.
+   701→ */
+   702→function fusionarActaRuntime(
+   703→  base: ActaMesa | null,
+   704→  runtime: import("./actas-reales/actas-reales").ActaRealLista,
+   705→  puesto: Puesto,
+   706→  mesa: Mesa
+   707→): ActaMesa {
+   708→  const horaRuntime = (() => {
+   709→    const d = new Date();
+   710→    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} LOCAL`;
+   711→  })();
+   712→  const acta: ActaMesa = base
+   713→    ? {
+   714→        ...base,
+   715→        formularios: { ...base.formularios },
+   716→        historial: [...base.historial],
+   717→        fotos: { ...(base.fotos ?? {}) },
+   718→      }
+   719→    : {
+   720→        id: `#MSV-${runtime.idEnlace.replace(/_/g, "")}-${runtime.mesa}`,
+   721→        mesaId: mesa.id,
+   722→        puestoId: puesto.id,
+   723→        horaCarga: horaRuntime,
+   724→        formularios: { TRANSMISION: [], DELEGADOS: [] },
+   725→        historial: [
+   726→          {
+   727→            hora: horaRuntime,
+   728→            titulo: "CARGA MASIVA",
+   729→            detalle: "Acta recibida del digitalizador (carga masiva)",
+   730→            nivel: "NEUTRAL",
+   731→          },
+   732→        ],
+   733→        version: 1,
+   734→      };
+   735→
+   736→  // Formularios: tamaño y estado por página — runtime con foto → VALIDA;
+   737→  // sin foto → lo que diga el base, o PENDIENTE.
+   738→  const formularios: Record<FormularioTipo, PaginaActa[]> = {
+   739→    TRANSMISION: [...acta.formularios.TRANSMISION],
+   740→    DELEGADOS: [...acta.formularios.DELEGADOS],
+   741→  };
+   742→  for (const formulario of ["TRANSMISION", "DELEGADOS"] as FormularioTipo[]) {
+   743→    const slotRuntime = runtime.fotos[formulario];
+   744→    if (!slotRuntime) continue;
+   745→    const total = Math.max(
+   746→      slotRuntime.length,
+   747→      formularios[formulario].length,
+   748→      1
+   749→    );
+   750→    const paginas: PaginaActa[] = [];
+   751→    for (let i = 0; i < total; i++) {
+   752→      paginas.push({
+   753→        numero: i + 1,
+   754→        estado: slotRuntime[i]
+   755→          ? "VALIDA"
+   756→          : (formularios[formulario][i]?.estado ?? "PENDIENTE"),
+   757→      });
+   758→    }
+   759→    formularios[formulario] = paginas;
+   760→  }
+   761→  acta.formularios = formularios;
+   762→
+   763→  // Fotos: el runtime manda donde trae foto; el base cubre el resto.
+   764→  const fotos = { ...(acta.fotos ?? {}) } as NonNullable<ActaMesa["fotos"]>;
+   765→  for (const formulario of ["TRANSMISION", "DELEGADOS"] as FormularioTipo[]) {
+   766→    const slotRuntime = runtime.fotos[formulario];
+   767→    if (!slotRuntime) continue;
+   768→    const baseSlot = fotos[formulario] ?? [];
+   769→    const total = Math.max(slotRuntime.length, baseSlot.length);
+   770→    const fusion: (import("../domain/acta").FotoActa | null)[] = [];
+   771→    for (let i = 0; i < total; i++) {
+   772→      fusion.push(slotRuntime[i] ?? baseSlot[i] ?? null);
+   773→    }
+   774→    fotos[formulario] = fusion;
+   775→  }
+   776→  acta.fotos = fotos;
+   777→
+   778→  // Encabezado impreso verbatim del runtime (se muestra, no se interpreta).
+   779→  acta.impresion = runtime.impresion;
+   780→  return acta;
+   781→}
+   782→
+   783→function coincide(puesto: Puesto, f: FiltrosPuestos | undefined): boolean {
+   784→  if (!f) return true;
+   785→  if (f.pais && puesto.codigoPais !== f.pais) return false;
+   786→  // KIT monitor-jornada-v1: filtro por día de la jornada electoral.
+   787→  if (f.fecha && puesto.diaJornada !== f.fecha) return false;
+   788→  if (f.zona && puesto.zonaId !== f.zona) return false;
+   789→  if (f.puesto && puesto.puesto !== f.puesto) return false;
+   790→  if (f.estado && puesto.estadoGlobal !== f.estado) return false;
+   791→  // M3 — contrato de filtros COMPLETO (reporte 02a 🔴-1): cierreCol y
+   792→  // tiempo estaban declarados en FiltrosPuestos (types.ts:140-145) pero
+   793→  // no implementados aquí (código muerto; el filtrado real vivía
+   794→  // duplicado en monitor-global.tsx:68-72). Misma semántica que allí:
+   795→  if (f.cierreCol && puesto.horaCierreColombia !== f.cierreCol) return false;
+   796→  if (f.tiempo && tramoDeMinutos(puesto.minutosDesdeCierre).id !== f.tiempo) {
+   797→    return false;
+   798→  }
+   799→  const q = f.busqueda?.trim().toLowerCase();
+   800→  if (q) {
+   801→    const texto = [
+   802→      puesto.id,
+   803→      puesto.codigoPais,
+   804→      puesto.pais,
+   805→      puesto.zona,
+   806→      puesto.puesto,
+   807→    ]
+   808→      .join(" ")
+   809→      .toLowerCase();
+   810→    if (!texto.includes(q)) return false;
+   811→  }
+   812→  return true;
+   813→}
+   814→
+   815→/**
+   816→ * M11 — clonado PROFUNDO mínimo en la frontera del repo (reporte 02a
+   817→ * 🟡-1): `{...mesa}` dejaba `delegados` y `transmision` (con `p1/p2` y
+   818→ * `alerta`) ALIASADOS al singleton; un mutador externo corrompía el
+   819→ * estado global del demo sin rastro.
+   820→ */
+   821→function clonarMesa(mesa: Mesa): Mesa {
+   822→  return {
+   823→    ...mesa,
+   824→    delegados: { ...mesa.delegados },
+   825→    transmision: {
+   826→      p1: { ...mesa.transmision.p1 },
+   827→      p2: { ...mesa.transmision.p2 },
+   828→    },
+   829→  };
+   830→}
+   831→
+   832→export const mockSupervisionRepository: SupervisionRepository = {
+   833→  async getResumen(): Promise<ResumenGlobal> {
+   834→    asegurarDatos();
+   835→    const resumen: ResumenGlobal = {
+   836→      total: PUESTOS.length,
+   837→      completo: 0,
+   838→      critico: 0,
+   839→      pendiente: 0,
+   840→      noIniciado: 0,
+   841→    };
+   842→    for (const puesto of PUESTOS) {
+   843→      if (puesto.estadoGlobal === "COMPLETO") resumen.completo += 1;
+   844→      if (puesto.estadoGlobal === "CRITICO") resumen.critico += 1;
+   845→      if (puesto.estadoGlobal === "PENDIENTE") resumen.pendiente += 1;
+   846→      if (puesto.estadoGlobal === "NO_INICIADO") resumen.noIniciado += 1;
+   847→    }
+   848→    return conLatencia(resumen);
+   849→  },
+   850→
+   851→  async getPuestos(filtros?: FiltrosPuestos): Promise<Puesto[]> {
+   852→    asegurarDatos();
+   853→    return conLatencia(PUESTOS.filter((puesto) => coincide(puesto, filtros)).map((p) => ({ ...p })));
+   854→  },
+   855→
+   856→  async getMesasDePuesto(puestoId: string): Promise<Mesa[]> {
+   857→    asegurarDatos();
+   858→    return conLatencia((MESAS_POR_PUESTO[puestoId] ?? []).map(clonarMesa));
+   859→  },
+   860→
+   861→  async getNotificaciones(): Promise<Notificacion[]> {
+   862→    asegurarDatos();
+   863→    return conLatencia(NOTIFICACIONES.map((n) => ({ ...n })));
+   864→  },
+   865→
+   866→  async getAnomalias(): Promise<Anomalia[]> {
+   867→    asegurarDatos();
+   868→    return conLatencia(ANOMALIAS.map((a) => ({ ...a })));
+   869→  },
+   870→
+   871→  async resolverRescaneo(puestoId, mesaId) {
+   872→    asegurarDatos();
+   873→    await esperar(LATENCIA_REINSPECCION_MS);
+   874→    const puesto = puestoPorId(puestoId);
+   875→    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+   876→    if (!puesto || !mesa) return null;
+   877→    const teniaAlerta =
+   878→      Boolean(mesa.transmision.p1.alerta) || Boolean(mesa.transmision.p2.alerta);
+   879→    if (!teniaAlerta) return null;
+   880→    // T4: la alerta "Rescaneo" se resuelve (desaparece) y se recalcula.
+   881→    mesa.transmision.p1 = { ...mesa.transmision.p1, alerta: undefined };
+   882→    mesa.transmision.p2 = { ...mesa.transmision.p2, alerta: undefined };
+   883→    refrescarMesa(mesa);
+   884→    refrescarPuesto(puesto);
+   885→    const notificacion = crearNotificacion(
+   886→      "rescaneo",
+   887→      `Rescaneo completado en Mesa ${mesa.id} (${etiquetaDePuesto(puesto)})`
+   888→    );
+   889→    NOTIFICACIONES.unshift(notificacion);
+   890→    return { mesa: clonarMesa(mesa), notificacion: { ...notificacion } };
+   891→  },
+   892→
+   893→  async aplicarTransicionVida() {
+   894→    asegurarDatos();
+   895→    await conLatencia(true);
+   896→    // Candidatas: mesas EN_PROCESO. Preferencia (D13): la primera cuya
+   897→    // transición COMPLETA su puesto (KPIs en vivo); si ninguna completa,
+   898→    // la primera EN_PROCESO en orden del mock.
+   899→    const candidatas: { puesto: Puesto; mesa: Mesa }[] = [];
+   900→    for (const puesto of PUESTOS) {
+   901→      for (const mesa of MESAS_POR_PUESTO[puesto.id] ?? []) {
+   902→        if (mesa.estadoMesa === "EN_PROCESO") candidatas.push({ puesto, mesa });
+   903→      }
+   904→    }
+   905→    if (candidatas.length === 0) return null;
+   906→    const elegida =
+   907→      candidatas.find(({ puesto, mesa }) => {
+   908→        const restantes = (MESAS_POR_PUESTO[puesto.id] ?? []).filter(
+   909→          (m) => m.id !== mesa.id && m.estadoMesa !== "COMPLETO"
+   910→        ).length;
+   911→        return restantes === 0;
+   912→      }) ?? candidatas[0];
+   913→    const { puesto, mesa } = elegida;
+   914→    // La transición completa las partes pendientes de la mesa.
+   915→    if (mesa.delegados.p1 !== "ok") mesa.delegados.p1 = "ok";
+   916→    if (mesa.delegados.p2 !== "ok") mesa.delegados.p2 = "ok";
+   917→    if (mesa.transmision.p1.estado !== "ok")
+   918→      mesa.transmision.p1 = { ...mesa.transmision.p1, estado: "ok" };
+   919→    if (mesa.transmision.p2.estado !== "ok")
+   920→      mesa.transmision.p2 = { ...mesa.transmision.p2, estado: "ok" };
+   921→    refrescarMesa(mesa);
+   922→    mesa.ultimaCarga = "Hace 1 min";
+   923→    const estadoAntes = puesto.estadoGlobal;
+   924→    refrescarPuesto(puesto);
+   925→    return {
+   926→      puestoId: puesto.id,
+   927→      mesaId: mesa.id,
+   928→      puestoEstado: puesto.estadoGlobal,
+   929→      puestoCompletado:
+   930→        estadoAntes !== "COMPLETO" && puesto.estadoGlobal === "COMPLETO",
+   931→    };
+   932→  },
+   933→
+   934→  // ── KIT SUP-4 (actas-v1) — el acta llega por el repositorio (§0-9) ──────
+   935→
+   936→  async getActaDeMesa(puestoId: string, mesaId: string) {
+   937→    asegurarDatos();
+   938→    const puesto = puestoPorId(puestoId);
+   939→    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+   940→    if (!puesto || !mesa) return conLatencia(null);
+   941→    // KIT carga-masiva (D27): el registro RUNTIME del digitalizador manda —
+   942→    // sus fotos se superponen al acta base (o la construyen si la mesa era
+   943→    // NO_INICIADO y no tenía acta). Sin runtime, camino de siempre.
+   944→    const runtime = consultarActaRuntime(puestoId, mesaId);
+   945→    if (runtime) {
+   946→      return conLatencia(
+   947→        fusionarActaRuntime(obtenerActa(mesa, puesto), runtime, puesto, mesa)
+   948→      );
+   949→    }
+   950→    // null = mesa sin transmisión (NO_INICIADO) o inexistente.
+   951→    return conLatencia(obtenerActa(mesa, puesto));
+   952→  },
+   953→
+   954→  // ── KIT carga-masiva-supervision-v1 (D27) — estado del monitor ──────────
+   955→
+   956→  async registrarCargaMasiva(puestoId, mesaId, formulario, paginas) {
+   957→    asegurarDatos();
+   958→    await conLatencia(true);
+   959→    const puesto = puestoPorId(puestoId);
+   960→    const mesa = MESAS_POR_PUESTO[puestoId]?.find((m) => m.id === mesaId);
+   961→    if (!puesto || !mesa) return null;
+   962→    // Las partes de la mesa reflejan lo recibido: TRANSMISION pág n →
+   963→    // transmisión pn ok (1|2); DELEGADOS → delegados presentes. Idempotente
+   964→    // por construcción (ok → ok).
+   965→    if (formulario === "TRANSMISION") {
+   966→      for (const pagina of paginas) {
+   967→        if (pagina === 1) mesa.transmision.p1 = { ...mesa.transmision.p1, estado: "ok" };
+   968→        if (pagina === 2) mesa.transmision.p2 = { ...mesa.transmision.p2, estado: "ok" };
+   969→      }
+   970→    } else {
+   971→      mesa.delegados.p1 = "ok";
+   972→      mesa.delegados.p2 = "ok";
+   973→    }
+   974→    refrescarMesa(mesa);
+   975→    mesa.ultimaCarga = "Hace 1 min";
+   976→    refrescarPuesto(puesto);
+   977→    const notificacion = crearNotificacion(
+   978→      "sistema",
+   979→      `CARGA MASIVA — MESA ${mesa.id} (${etiquetaDePuesto(puesto)})`
+   980→    );
+   981→    NOTIFICACIONES.unshift(notificacion);
+   982→    return { mesa: clonarMesa(mesa), notificacion: { ...notificacion } };
+   983→  },
+   984→
+   985→  async aprobarActa(actaId: string, observacion: string) {
+   986→    asegurarDatos();
+   987→    await esperar(LATENCIA_REINSPECCION_MS);
+   988→    const acta = aprobarActaMock(actaId, observacion);
+   989→    if (!acta) return null;
+   990→    const puesto = puestoPorId(acta.puestoId);
+   991→    const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;
+   992→    // T5.3 — notificación nueva (plantilla 1/2 del kit).
+   993→    const notificacion = crearNotificacion(
+   994→      "sistema",
+   995→      `ACTA APROBADA — MESA ${acta.mesaId} (${etiquetaPuesto})`
+   996→    );
+   997→    NOTIFICACIONES.unshift(notificacion);
+   998→    // T5.3 — anomalía vinculada abierta pasa a revisada (badge incluido).
+   999→    const vinculada = ANOMALIAS.find(
+  1000→      (a) =>
+  1001→        !a.revisada && a.puestoId === acta.puestoId && a.mesaId === acta.mesaId
+  1002→    );
+  1003→    const anomalia = vinculada
+  1004→      ? (() => {
+  1005→          vinculada.revisada = true;
+  1006→          return { ...vinculada };
+  1007→        })()
+  1008→      : undefined;
+  1009→    return { acta, notificacion: { ...notificacion }, anomalia };
+  1010→  },
+  1011→
+  1012→  async confirmarRescanActa(actaId: string, _observacion: string) {
+  1013→    asegurarDatos();
+  1014→    // La observación es OBLIGATORIA (T5.2) pero el kit no la imprime en el
+  1015→    // evento/notificación del rescan (textos exactos de T5.4) — queda en la
+  1016→    // auditoría del visor.
+  1017→    await esperar(LATENCIA_REINSPECCION_MS);
+  1018→    const acta = confirmarRescanActaMock(actaId, _observacion);
+  1019→    if (!acta) return null;
+  1020→    const puesto = puestoPorId(acta.puestoId);
+  1021→    const etiquetaPuesto = puesto ? etiquetaDePuesto(puesto) : acta.puestoId;
+  1022→    // T5.4 — notificación nueva (plantilla 2/2 del kit).
+  1023→    const notificacion = crearNotificacion(
+  1024→      "rescaneo",
+  1025→      `RESCANEO COMPLETADO — MESA ${acta.mesaId} (${etiquetaPuesto})`
+  1026→    );
+  1027→    NOTIFICACIONES.unshift(notificacion);
+  1028→    return { acta, notificacion: { ...notificacion } };
+  1029→  },
+  1030→};
+  1031→
