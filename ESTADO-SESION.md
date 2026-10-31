@@ -295,6 +295,47 @@ que la "la hora actual" (hora actual pais/puesto emisor) sea correcta».
    de 3 mesas se completen automáticamente, los paises con mas de 4
    mesas se completen despues de las 5 horas». NO implementado aún.
 
+## 8d. Feedback del dueño — REGLA 100% ⟺ COMPLETO (✅ IMPLEMENTADA Y VERIFICADA E2E)
+
+Pedido (cita del dueño): «si ya se recibieron todas las actas de un puesto
+deberia quedar al 100% y completado en verde».
+
+Diagnóstico (script sobre los 949 puestos — `tool-results/diag-coherencia.ts`):
+**134 puestos mostraban 100%/100% en las barras con badge CRÍTICO rojo**
+(todos de 1 mesa: el acta llegó completa pero una parte de transmisión
+tenía alerta «Rescaneo»). La incoherencia: `pctsDeMesas` contaba la parte
+alertada como «ok» mientras `estadoMesaDePartes` la marca INCOMPLETO —
+la barra decía 100% y el estado decía que no.
+
+Regla grabada (invariante exacta): **100% visible ⟺ todas las actas
+válidas ⟺ COMPLETO verde**. Una parte con rescaneo pendiente NO cuenta
+como recibida (el acta llegó pero fue rechazada); el CRÍTICO automático
+(>3 hrs) solo alcanza a los que NO han completado.
+
+1. `pctsDeMesas` (`mock-repository.ts`): la parte de transmisión con
+   `alerta` deja de contar como ok → 100/100 solo con todo válido. Los
+   134 casos contradictorios pasan a 100/50 honestos (el detalle muestra
+   «Rescaneo» + REINSPECCIONAR: la razón exacta de por qué siguen rojos).
+2. Red de seguridad en `initSupervisionDatos`: tras derivar pcts, el
+   estado pasa por `estadoGlobalTrasMesas` — si TODAS las mesas están
+   completas, el puesto QUEDA COMPLETO (no-op sobre la receta actual,
+   garantiza la invariante ante futuras recetas; un COMPLETO jamás es
+   degradado por el umbral de 3 hrs).
+3. Transición en vivo intacta: resolver el rescaneo (REINSPECCIONAR)
+   sube la barra y el puesto culmina 100/100 verde.
+4. Verificación: diagnóstico post-fix → **0 filas 100/100 sin verde y
+   0 verdes sin 100/100** (DOM completo, 116 filas del día, distribución
+   de estados intacta — GOLDEN 233/218/138/360 sin cambio). Suite
+   **68/68 pass**. E2E agent-browser: ARGELIA 81 (CRÍTICO 100/50) →
+   REINSPECCIONAR → **100/100 COMPLETO** con KPIs moviéndose en vivo
+   (COMPLETO 38→39, CRÍTICO 27→26); invariantes y orden de urgencia
+   re-escaneados sobre el DOM real; móvil 375×812 sin roturas.
+5. Lint del árbol a **0 errores** (los 3 errores que arrastraba el
+   template shadcn ahora rastreado — `carousel.tsx` setState-in-effect
+   ×2, `sidebar.tsx` Math.random en render, `use-mobile.ts` setState en
+   effect — quedaron resueltos con patrones canónicos: rAF diferido con
+   limpieza, ancho determinista por `useId`, `useSyncExternalStore`).
+
 ## 9. Cómo verificar (SIEMPRE)
 
 ```bash

@@ -491,7 +491,18 @@ function refrescarMesa(mesa: Mesa): void {
   mesa.accionSugerida = mesa.estadoMesa === "INCOMPLETO" ? "reinspeccionar" : "notificar";
 }
 
-/** pcts derivables de las mesas (≈ % de partes ok, kit T2). */
+/**
+ * pcts derivables de las mesas (≈ % de partes ok, kit T2).
+ *
+ * REGLA DEL DUEÑO (feedback matriz): «si ya se recibieron todas las actas
+ * de un puesto debería quedar al 100% y completado en verde». Para que
+ * 100% ⟺ COMPLETO sea EXACTO, una parte de transmisión con alerta de
+ * rescaneo PENDIENTE NO cuenta como recibida — el acta llegó pero fue
+ * rechazada (se ve en el detalle con «Rescaneo» + reinspeccionar) y el
+ * % solo sube con actas válidas. Así ningún puesto muestra 100%/100%
+ * sin estar COMPLETO (antes: 134 puestos de 1 mesa con 100%/100% en
+ * rojo CRÍTICO — la barra contaba la parte alertada y el estado no).
+ */
 function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
   const total = mesas.length * 2;
   if (total === 0) return { delegado: 0, transmision: 0 };
@@ -503,8 +514,8 @@ function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
   const transOk = mesas.reduce(
     (s, m) =>
       s +
-      (m.transmision.p1.estado === "ok" ? 1 : 0) +
-      (m.transmision.p2.estado === "ok" ? 1 : 0),
+      (m.transmision.p1.estado === "ok" && !m.transmision.p1.alerta ? 1 : 0) +
+      (m.transmision.p2.estado === "ok" && !m.transmision.p2.alerta ? 1 : 0),
     0
   );
   return {
@@ -513,8 +524,14 @@ function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
   };
 }
 
-/** Estado global derivado: COMPLETO si TODAS las mesas lo están; si no, se
- * conserva el estado actual (el kit solo define transición → COMPLETO). */
+/**
+ * Estado global derivado: COMPLETO si TODAS las mesas lo están (todas las
+ * actas recibidas y válidas — regla del dueño: 100% ⟺ verde); si no, se
+ * conserva el estado actual (el kit solo define transición → COMPLETO).
+ * Consecuencia de la regla: un puesto COMPLETO jamás es degradado por el
+ * umbral de 3 hrs — el CRÍTICO automático solo alcanza a los que NO han
+ * completado la digitalización.
+ */
 function estadoGlobalTrasMesas(actual: Puesto["estadoGlobal"], mesas: Mesa[]): Puesto["estadoGlobal"] {
   const todasCompletas = mesas.length > 0 && mesas.every((m) => m.estadoMesa === "COMPLETO");
   return todasCompletas ? "COMPLETO" : actual;
@@ -600,6 +617,12 @@ export function initSupervisionDatos(): ResultadoInitSupervision {
     const pcts = pctsDeMesas(mesas);
     puesto.pctDelegado = pcts.delegado;
     puesto.pctTransmision = pcts.transmision;
+    // REGLA DEL DUEÑO (red de seguridad sobre la semilla/umbral): si todas
+    // las mesas del puesto ya están completas, el puesto QUEDA COMPLETO.
+    // Hoy es no-op sobre la receta de siembra (solo la receta COMPLETO
+    // genera mesas todas COMPLETO), pero garantiza la invariante
+    // «100% visible ⟺ COMPLETO verde» ante futuros cambios de receta.
+    puesto.estadoGlobal = estadoGlobalTrasMesas(puesto.estadoGlobal, mesas);
   }
 
   // Época de la sesión congelada: las fechas relativas de las semillas

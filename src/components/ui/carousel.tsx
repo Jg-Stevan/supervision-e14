@@ -88,18 +88,28 @@ function Carousel({
     [scrollPrev, scrollNext]
   )
 
+  // react-hooks/set-state-in-effect (reporte lint): exponer la api de embla
+  // en el estado del consumidor era un setState sincrónico en effect
+  // (render cascada). Se difiere al siguiente frame con limpieza — misma
+  // semántica de exposición, sin la cascada.
   React.useEffect(() => {
     if (!api || !setApi) return
-    setApi(api)
+    const frame = requestAnimationFrame(() => setApi(api))
+    return () => cancelAnimationFrame(frame)
   }, [api, setApi])
 
+  // La llamada INICIAL a onSelect era sincrónica en el effect
+  // (setCanScrollPrev/Next → cascada de renders, mismo reporte lint):
+  // se difiere un frame; las suscripciones "select"/"reInit" ya son
+  // eventos asíncronos y no requieren cambio.
   React.useEffect(() => {
     if (!api) return
-    onSelect(api)
+    const frame = requestAnimationFrame(() => onSelect(api))
     api.on("reInit", onSelect)
     api.on("select", onSelect)
 
     return () => {
+      cancelAnimationFrame(frame)
       api?.off("select", onSelect)
     }
   }, [api, onSelect])
