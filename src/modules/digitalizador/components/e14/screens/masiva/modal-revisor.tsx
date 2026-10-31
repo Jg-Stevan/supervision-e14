@@ -84,6 +84,9 @@ import {
 import { pildoraEstadoActa } from "./helpers";
 import { PublicacionChip } from "./publicacion-chip";
 import type { PropsMasivaView } from "./orquestador";
+// Manifiesto de actas reales (D24 — memoizado en módulo): respaldo del
+// barcode IMPRESO en el papel cuando el pipeline no decodificó el 1D.
+import { cargarActasReales } from "@/modules/supervision/data/actas-reales/actas-reales";
 
 /** Rectángulo de recorte en % del área de la foto (0–100 — mapea a píxeles
  * naturales al aplicar; el drag llega saneado y el clamp lo respalda). */
@@ -458,6 +461,24 @@ export function ModalRevisor({
   const etiquetaForm = etiquetaFormularioDe(acta);
   const enviadaAuto = Boolean(acta.enviadoAutomaticamente);
   const rechazadaYa = acta.status === "RECHAZADA";
+
+  // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — ronda 2):
+  //    el 1D REAL leído al papel por el pipeline (clasificación AUTO →
+  //    codigoUnico.crudo — los 15 dígitos decodificados del escaneo,
+  //    gramática codigoUnicoE14). Respaldo honesto: el manifiesto de actas
+  //    reales (barcodeImpreso verbatim del formulario). NUNCA el código de
+  //    tracking del sistema (acta.codigoBarras «*E14-SEN-…*» — ese NO está
+  //    impreso en el acta).
+  const tipoFormulario = (acta.clasificacion?.tipo ?? acta.tipo) as
+    | "TRANSMISION"
+    | "DELEGADOS";
+  const barcodeEscaneado =
+    c?.codigoUnico?.crudo ??
+    (join
+      ? cargarActasReales().actas[`${join.idEnlace}::${join.mesa}`]
+          ?.barcodesImpresos[tipoFormulario]
+      : undefined) ??
+    "";
 
   return (
     <div
@@ -909,7 +930,7 @@ export function ModalRevisor({
               <DatoPanel etiqueta="Kit" valor={kit} />
               <DatoPanel
                 etiqueta="Código de Barras"
-                valor={(acta.codigoBarras ?? "").replace(/\*/g, "") || "—"}
+                valor={barcodeEscaneado || "—"}
               />
             </div>
           </div>
