@@ -1,8 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Eye, Funnel } from "lucide-react";
-import { DropdownMenu } from "radix-ui";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Eye } from "lucide-react";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
   TableCell,
@@ -11,11 +10,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "cn";
-import type { FiltrosPuestos, Mesa, Puesto } from "../domain/types";
+import type { Mesa, Puesto } from "../domain/types";
 import {
   minutosDeReloj,
   tramoDeMinutos,
-  TRAMOS_TIEMPO,
   type SeveridadTiempo,
 } from "../domain/tiempo-cierre";
 import { colorDeEstado, StatusBadge } from "./status-badge";
@@ -64,108 +62,79 @@ const COLUMNAS = [
   { ancho: "13%", align: "right" }, // Estado global
 ] as const;
 
-/** Índices de columnas con filtro en el encabezado. */
+/** Índices de columnas con control de ORDEN en el encabezado. */
 const INDICE_CIERRE = 4;
 const INDICE_TIEMPO = 6;
 
-/** Opción del filtro de columna (valor canónico + etiqueta visible). */
-interface OpcionFiltro {
-  valor: string;
-  etiqueta: string;
+/**
+ * Columna ordenable de la matriz (pedido del dueño): «Cierre COL» y
+ * «Tiempo» dejan de ser filtros de columna (dropdown) y pasan a ser
+ * controles de ORDENAMIENTO — «en realidad eran filtros de mayor a menor».
+ *
+ * - Primer clic → MAYOR A MENOR (desc).
+ * - Segundo clic → menor a mayor (asc).
+ * - Tercer clic → vuelve al orden de URGENCIA por defecto (ver
+ *   `ordenados`): los puestos sin completar arriba, encabezados por los
+ *   que llevan más tiempo transcurrido desde su cierre («los quedados»),
+ *   y los COMPLETO siempre al fondo.
+ */
+type ColumnaOrden = "cierre" | "tiempo";
+type DireccionOrden = "desc" | "asc";
+
+interface OrdenColumna {
+  columna: ColumnaOrden;
+  direccion: DireccionOrden;
 }
 
-/** Opciones del filtro «Tiempo» — los tramos canónicos del dominio. */
-const OPCIONES_TIEMPO: OpcionFiltro[] = TRAMOS_TIEMPO.map((tramo) => ({
-  valor: tramo.id,
-  etiqueta: tramo.etiqueta,
-}));
-
 /**
- * Clases comunes de los RadioItems del menú de columna: el resaltado de
- * Radix (puntero o teclado) usa data-highlighted — el foco es siempre
- * visible y la navegación por flechas la resuelve el propio primitive.
+ * Botón de orden del encabezado: la etiqueta COMPLETA es el control
+ * (toque generoso), con flecha de señalética — ↕ inactivo · ↓ mayor a
+ * menor (desc) · ↑ menor a mayor (asc). Activo se señaliza en ámbar
+ * (misma señalética que tenían los embudos al filtrar).
  */
-const CLASE_RADIO_ITEM =
-  "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-left outline-none data-[highlighted]:bg-(--accent)";
-
-/**
- * Filtro de COLUMNA (pedido del dueño): embudo en el encabezado de
- * «Cierre COL» y «Tiempo». Abre un menú con «Todos» + las opciones del
- * conjunto del día; el activo queda marcado y el embudo se señaliza en
- * ámbar mientras haya filtro aplicado.
- *
- * R4-C7 (reporte 02-b M2) — era un menú a mano (role="menu" sobre un
- * Collapsible): no cerraba con Escape ni clic-fuera, sin aria-haspopup,
- * sin aria-checked real y sin flechas. Ahora es DropdownMenu de Radix
- * (ya en deps): Escape/clic-fuera/flechas/aria-expanded/aria-checked y
- * typeahead gratis, misma señalética visual (check con opacidad).
- */
-function FiltroColumna({
+function BotonOrden({
   label,
-  valor,
-  opciones,
-  onFiltro,
+  activo,
+  direccion,
+  onAlternar,
 }: {
   label: string;
-  valor: string | undefined;
-  opciones: OpcionFiltro[];
-  onFiltro: (valor: string | undefined) => void;
+  activo: boolean;
+  direccion: DireccionOrden | undefined;
+  onAlternar: () => void;
 }) {
-  const activa = valor !== undefined;
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={`Filtrar por ${label}`}
-          title={activa ? `Filtro activo por ${label}` : `Filtrar por ${label}`}
-          className={cn(
-            "inline-flex size-4 items-center justify-center rounded-[2px] hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)",
-            activa ? "text-(--warning)" : "text-muted-foreground"
-          )}
-        >
-          <Funnel className="size-3" aria-hidden />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="start"
-          sideOffset={6}
-          className="z-50 min-w-[10rem] border border-border bg-popover font-data text-[13px] shadow-md"
-        >
-          <DropdownMenu.RadioGroup
-            value={valor ?? "todos"}
-            onValueChange={(nuevo) =>
-              onFiltro(nuevo === "todos" ? undefined : nuevo)
-            }
-          >
-            <DropdownMenu.RadioItem value="todos" className={CLASE_RADIO_ITEM}>
-              <Check
-                className={cn("size-3", !activa ? "opacity-100" : "opacity-0")}
-                aria-hidden
-              />
-              Todos
-            </DropdownMenu.RadioItem>
-            {opciones.map((opcion) => (
-              <DropdownMenu.RadioItem
-                key={opcion.valor}
-                value={opcion.valor}
-                className={CLASE_RADIO_ITEM}
-              >
-                <Check
-                  className={cn(
-                    "size-3",
-                    valor === opcion.valor ? "opacity-100" : "opacity-0"
-                  )}
-                  aria-hidden
-                />
-                {opcion.etiqueta}
-              </DropdownMenu.RadioItem>
-            ))}
-          </DropdownMenu.RadioGroup>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    <button
+      type="button"
+      onClick={onAlternar}
+      title={
+        activo
+          ? direccion === "desc"
+            ? `Ordenado por ${label}: mayor a menor (clic: menor a mayor)`
+            : `Ordenado por ${label}: menor a mayor (clic: orden de urgencia)`
+          : `Ordenar por ${label} (mayor a menor)`
+      }
+      aria-label={
+        activo
+          ? `Ordenado por ${label}, ${direccion === "desc" ? "mayor a menor" : "menor a mayor"}. Activar para cambiar.`
+          : `Ordenar por ${label} de mayor a menor`
+      }
+      className={cn(
+        "inline-flex items-center gap-1 rounded-[2px] uppercase focus-visible:outline-2 focus-visible:outline-(--primary)",
+        activo ? "text-(--warning)" : "hover:text-foreground"
+      )}
+    >
+      {label}
+      {activo ? (
+        direccion === "asc" ? (
+          <ArrowUp className="size-3 shrink-0" aria-hidden />
+        ) : (
+          <ArrowDown className="size-3 shrink-0" aria-hidden />
+        )
+      ) : (
+        <ArrowUpDown className="size-3 shrink-0 opacity-60" aria-hidden />
+      )}
+    </button>
   );
 }
 
@@ -252,15 +221,6 @@ if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
 
 interface PuestosTableProps {
   puestos: Puesto[];
-  /**
-   * Conjunto del día SIN filtros de columna/búsqueda — de donde salen
-   * las opciones de los filtros de columna (ver FiltroColumna).
-   */
-  puestosBase: Puesto[];
-  /** Filtros activos — marca los embudos de «Cierre COL» y «Tiempo». */
-  filtros: FiltrosPuestos;
-  /** Actualización parcial de filtros desde los encabezados. */
-  onFiltroColumna: (parcial: Partial<FiltrosPuestos>) => void;
   /** Mesas del store del shell (kit SUP-3 T4 — ya no se piden al repo
    * directamente desde la fila: los datos viven en el store cliente). */
   mesasPorPuesto: Record<string, Mesa[]>;
@@ -279,9 +239,6 @@ interface PuestosTableProps {
 
 export function PuestosTable({
   puestos,
-  puestosBase,
-  filtros,
-  onFiltroColumna,
   mesasPorPuesto,
   expandidoInicialId,
   mesaEnAccionId,
@@ -292,6 +249,61 @@ export function PuestosTable({
   const [expandidos, setExpandidos] = useState<Set<string>>(
     () => new Set(expandidoInicialId ? [expandidoInicialId] : [])
   );
+
+  /** Orden activo de la matriz; null = orden de urgencia por defecto. */
+  const [orden, setOrden] = useState<OrdenColumna | null>(null);
+
+  // Clics cíclicos: desc (mayor a menor) → asc → orden de urgencia.
+  const alternarOrden = useCallback((columna: ColumnaOrden) => {
+    setOrden((prev) => {
+      if (prev?.columna !== columna) return { columna, direccion: "desc" };
+      if (prev.direccion === "desc") return { columna, direccion: "asc" };
+      return null;
+    });
+  }, []);
+
+  /**
+   * Orden de la matriz (pedido del dueño):
+   *
+   * · POR DEFECTO (sin orden activo): «mostrar los urgentes» — los
+   *   puestos sin COMPLETAR arriba, ordenados por el tiempo transcurrido
+   *   desde el cierre de SUS mesas (los más quedados primero; los
+   *   > 3 hrs son CRÍTICO por regla del dueño); los COMPLETO, «en orden»
+   *   al fondo.
+   * · Orden «Cierre COL» o «Tiempo» aplicado: MAYOR A MENOR en la
+   *   columna elegida (toggle a asc en el segundo clic, urgencia en el
+   *   tercero) — los COMPLETO SIEMPRE se mantienen al fondo, también
+   *   bajo el orden activo.
+   *
+   * sort() es estable (ES2019): los empates conservan el orden del día.
+   */
+  const ordenados = useMemo(() => {
+    const esCompleto = (p: Puesto) => p.estadoGlobal === "COMPLETO";
+    const comparador = (a: Puesto, b: Puesto): number => {
+      if (!orden) return b.minutosDesdeCierre - a.minutosDesdeCierre;
+      const delta =
+        orden.columna === "cierre"
+          ? minutosDeReloj(a.horaCierreColombia) -
+            minutosDeReloj(b.horaCierreColombia)
+          : a.minutosDesdeCierre - b.minutosDesdeCierre;
+      return orden.direccion === "desc" ? -delta : delta;
+    };
+    const activos = puestos.filter((p) => !esCompleto(p)).sort(comparador);
+    const completos = puestos.filter(esCompleto).sort(comparador);
+    return [...activos, ...completos];
+  }, [puestos, orden]);
+
+  /** aria-sort del encabezado activo (accesibilidad de ordenamiento). */
+  const ariaSortDe = (
+    indice: number
+  ): "ascending" | "descending" | undefined => {
+    if (!orden) return undefined;
+    const esSuColumna =
+      (orden.columna === "cierre" && indice === INDICE_CIERRE) ||
+      (orden.columna === "tiempo" && indice === INDICE_TIEMPO);
+    if (!esSuColumna) return undefined;
+    return orden.direccion === "desc" ? "descending" : "ascending";
+  };
 
   // D42 — toggle ESTABLE (useCallback): el onToggle por fila ya no cambia
   // de identidad en cada render del padre → el memo de PuestoRow aplica.
@@ -306,22 +318,9 @@ export function PuestosTable({
     []
   );
 
-  // Filtro de columna «Cierre COL»: valores distintos del día, ordenados
-  // cronológicamente (minutosDeReloj), no lexicográficamente.
-  const opcionesCierre = useMemo<OpcionFiltro[]>(() => {
-    const minutos = new Map<string, number>();
-    for (const puesto of puestosBase) {
-      if (!minutos.has(puesto.horaCierreColombia)) {
-        minutos.set(
-          puesto.horaCierreColombia,
-          minutosDeReloj(puesto.horaCierreColombia)
-        );
-      }
-    }
-    return [...minutos.entries()]
-      .sort((a, b) => a[1] - b[1])
-      .map(([hora]) => ({ valor: hora, etiqueta: hora }));
-  }, [puestosBase]);
+  // Filtro de columna «Cierre COL» retirado (feedback del dueño): era un
+  // dropdown de valor exacto y «en realidad era un orden de mayor a menor»
+  // — la opción vive ahora en BotonOrden (ver ENCABEZADOS/INDICE_CIERRE).
 
   if (puestos.length === 0) {
     return (
@@ -358,26 +357,25 @@ export function PuestosTable({
                 TH,
                 COLUMNAS[indice].align === "right" && "text-right"
               )}
+              aria-sort={ariaSortDe(indice)}
             >
-              <span className="inline-flex items-center gap-1">
-                {encabezado}
-                {indice === INDICE_CIERRE && opcionesCierre.length > 0 && (
-                  <FiltroColumna
-                    label="Cierre COL"
-                    valor={filtros.cierreCol}
-                    opciones={opcionesCierre}
-                    onFiltro={(valor) => onFiltroColumna({ cierreCol: valor })}
-                  />
-                )}
-                {indice === INDICE_TIEMPO && (
-                  <FiltroColumna
-                    label="Tiempo"
-                    valor={filtros.tiempo}
-                    opciones={OPCIONES_TIEMPO}
-                    onFiltro={(valor) => onFiltroColumna({ tiempo: valor })}
-                  />
-                )}
-              </span>
+              {indice === INDICE_CIERRE ? (
+                <BotonOrden
+                  label="Cierre COL"
+                  activo={orden?.columna === "cierre"}
+                  direccion={orden?.direccion}
+                  onAlternar={() => alternarOrden("cierre")}
+                />
+              ) : indice === INDICE_TIEMPO ? (
+                <BotonOrden
+                  label="Tiempo"
+                  activo={orden?.columna === "tiempo"}
+                  direccion={orden?.direccion}
+                  onAlternar={() => alternarOrden("tiempo")}
+                />
+              ) : (
+                <span className="inline-flex items-center gap-1">{encabezado}</span>
+              )}
             </TableHead>
           ))}
         </TableRow>
@@ -389,7 +387,7 @@ export function PuestosTable({
           tabla (el raíz por defecto de Radix sería un <div> dentro de la
           tabla). Expansión controlada: Italia abierta por defecto (kit §2.4).
         */}
-        {puestos.map((puesto) => (
+        {ordenados.map((puesto) => (
           <PuestoRow
             key={puesto.id}
             puesto={puesto}

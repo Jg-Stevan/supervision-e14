@@ -48,6 +48,7 @@ import { zonaParaUI } from "../domain/divipola";
 import {
   CIERRE_LOCAL_MIN,
   tramoDeMinutos,
+  UMBRAL_CRITICO_MIN,
 } from "../domain/tiempo-cierre";
 import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
 import { consultarActaRuntime } from "./actas-runtime";
@@ -109,6 +110,28 @@ function estadoPorSeed(random: number): EstadoGlobal {
   if (random < 0.3) return "COMPLETO"; // ~25%
   if (random < 0.5) return "PENDIENTE"; // ~20%
   return "NO_INICIADO"; // ~50%
+}
+
+/**
+ * Regla del dueño (feedback de la matriz): un puesto con MÁS DE 3 HORAS
+ * transcurridas desde el cierre de sus mesas (4:00 p. m. hora local) que
+ * AÚN no completa la digitalización pasa a estado CRÍTICO automático —
+ * «para saber cuáles puestos están quedados en la digitalización de las
+ * actas». Los COMPLETO no se tocan (ya terminaron; quedan al fondo de la
+ * matriz) y un CRÍTICO sembrado nunca se degrada. Umbral alineado con el
+ * tramo «> 3 hrs» del dominio (UMBRAL_CRITICO_MIN, inclusivo — un puesto
+ * que MUESTRA «> 3 hrs» en rojo no puede tener badge NO_INICIADO).
+ *
+ * La derivación es POSTERIOR al draw de estado (D43): no consume draws,
+ * así que las secuencias determinísticas de mesas/actas quedan intactas.
+ */
+function derivarEstadoPorUmbral(
+  sembrado: EstadoGlobal,
+  minutosDesdeCierre: number
+): EstadoGlobal {
+  if (sembrado === "COMPLETO") return "COMPLETO";
+  if (minutosDesdeCierre >= UMBRAL_CRITICO_MIN) return "CRITICO";
+  return sembrado;
 }
 
 const CIERRES_COL_MIN = [9 * 60, 10 * 60, 11 * 60, 12 * 60, 13 * 60];
@@ -206,6 +229,14 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
   const esAnclaBarcelona = registro.idEnlace === ID_ENLACE_BARCELONA;
   const random = crearRandomDeterministico(`divipola::puesto::${registro.idEnlace}`);
   const horario = esAncla ? HORARIO_ROMA : horarioPorSeed(random);
+  // D43 — el 4.º draw SOLO se consume en puestos sin ancla (igual que
+  // antes); la derivación por umbral (>3 hrs → CRÍTICO) es posterior y no
+  // consume draws, así que la secuencia determinística queda intacta.
+  const estadoSembrado: EstadoGlobal = esAncla
+    ? "CRITICO"
+    : esAnclaCairo || esAnclaBarcelona
+      ? "COMPLETO"
+      : estadoPorSeed(random());
   return {
     id: registro.idEnlace,
     codigoPais: registro.codigoMunicipio,
@@ -221,11 +252,10 @@ function puestoDeRegistro(registro: PuestoDivipola): Puesto {
     // Los pcts se recalculan al inicializar (derivación de mesas, D16).
     pctDelegado: 0,
     pctTransmision: 0,
-    estadoGlobal: esAncla
-      ? "CRITICO"
-      : esAnclaCairo || esAnclaBarcelona
-        ? "COMPLETO"
-        : estadoPorSeed(random()),
+    estadoGlobal: derivarEstadoPorUmbral(
+      estadoSembrado,
+      horario.minutosDesdeCierre
+    ),
     diaJornada: diaDeNombrePuesto(registro.nombre),
   };
 }

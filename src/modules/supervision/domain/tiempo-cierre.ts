@@ -20,6 +20,16 @@
 /** Cierre de la jornada de digitalización: 4:00 p. m. hora local. */
 export const CIERRE_LOCAL_MIN = 16 * 60;
 
+/**
+ * Umbral del dueño (feedback sobre la matriz del monitor): un puesto con
+ * «más de 3 horas transcurridas» desde el cierre de sus mesas y que aún
+ * no completa la digitalización pasa a estado CRÍTICO. Fuente ÚNICA del
+ * umbral — alimenta el tramo «> 3 hrs» (columna «Tiempo»), la derivación
+ * automática del estado en el mock (mock-repository) y el orden de
+ * urgencia por defecto de la matriz.
+ */
+export const UMBRAL_CRITICO_MIN = 180;
+
 /** Severidad de señalización del tiempo transcurrido. */
 export type SeveridadTiempo = "ok" | "alerta" | "critico";
 
@@ -40,11 +50,11 @@ export interface TramoTiempo {
 export const TRAMOS_TIEMPO: readonly TramoTiempo[] = [
   { id: "<1", etiqueta: "< 1 hr", minMin: 0, maxMin: 60, severidad: "ok" },
   { id: "1-2", etiqueta: "1-2 hrs", minMin: 60, maxMin: 120, severidad: "alerta" },
-  { id: "2-3", etiqueta: "2-3 hrs", minMin: 120, maxMin: 180, severidad: "alerta" },
+  { id: "2-3", etiqueta: "2-3 hrs", minMin: 120, maxMin: UMBRAL_CRITICO_MIN, severidad: "alerta" },
   {
     id: ">3",
     etiqueta: "> 3 hrs",
-    minMin: 180,
+    minMin: UMBRAL_CRITICO_MIN,
     maxMin: Number.POSITIVE_INFINITY,
     severidad: "critico",
   },

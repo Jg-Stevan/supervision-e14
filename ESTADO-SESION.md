@@ -249,6 +249,52 @@ duplicada, idéntica):
   (desktop + móvil 375×812): tarjeta sin la fila, resto intacto,
   consola sin errores.
 
+## 8c. Feedback del dueño — MATRIZ DEL MONITOR (✅ IMPLEMENTADA Y VERIFICADA E2E)
+
+Pedidos (cita del dueño): «los filtro de "cierre colombia" y "tiempo" en
+realidad eran filtros de mayor a menor, cambialos» · «por defecto mostrar
+los urgentes, pero si se aplica un filtro de "cierre col" mostrarlos con
+el filtro de mayor a menor» · «si pasan mas de 3 horas transcurridas pasa
+a estado critico el puesto» · «los puesto que ya quedan en estado
+completo, se van ordenando en orden en la parte inferior» · «verificar
+que la "la hora actual" (hora actual pais/puesto emisor) sea correcta».
+
+1. **CIERRE COL y TIEMPO → órdenes, no filtros** (`puestos-table.tsx`):
+   los dropdowns Radix de columna (FiltroColumna) se RETIRARON; el
+   encabezado COMPLETO es botón de orden (BotonOrden): 1.er clic =
+   MAYOR A MENOR (desc), 2.º = menor a mayor (asc), 3.er clic = vuelve
+   al orden de urgencia. `aria-sort` en el `th` activo; ámbar + flecha
+   ↓/↑/↕ como señalética. Props `puestosBase`/`filtros`/
+   `onFiltroColumna` salieron de la tabla (monitor-global deja de
+   pasarlas); el filtrado por `cierreCol`/`tiempo` queda vivo en el
+   repo/dominio (tests de filtros intactos) pero la UI ya no lo emite.
+2. **Orden por defecto = URGENCIA**: sin completar arriba por tiempo
+   transcurrido DESC (los quedados primero); COMPLETO SIEMPRE al fondo
+   (en orden), incluso con un orden activo.
+3. **Regla del dueño >3 hrs → CRÍTICO** (`mock-repository.ts` +
+   `domain/tiempo-cierre.ts`): fuente única `UMBRAL_CRITICO_MIN = 180`;
+   `derivarEstadoPorUmbral` aplica POSTERIOR al draw de estado (D43:
+   cero draws consumidos — semillas intactas). COMPLETO no se toca;
+   CRÍTICO sembrado no se degrada. GOLDEN actualizado CONSCIENTEMENTE
+   (regla del propio test): 949 = 233 COMPLETO + **218 CRÍTICO** +
+   138 PENDIENTE + 360 NO_INICIADO (antes 233/44/198/474).
+4. **Verificación «hora actual»**: script sobre los 949 puestos →
+   0 incoherencias (`horaActualLocal` = 16:00 local + transcurrido
+   EXACTO en el 100%; coherente por construcción). NOTA honesta: el
+   demo NO conoce husos reales (cierre COL aleatorio 9 AM–1 PM por
+   diseño del kit §4.9); si el dueño quiere cierre geográfico real
+   (Tokio 2:00 AM COL primero), es un follow-up con tabla país→huso.
+5. Suite: **68/68 tests pass** (determinismo con regla+golden nuevos).
+   E2E agent-browser (1440×900 + 375×812): urgencia por defecto
+   (críticos >3 hrs arriba, transcurrido descendente exacto), ciclo de
+   orden verificado (desc/asc/urgencia), COMPLETO al fondo incluso
+   ordenando, KPIs CRÍTICO 27 (lunes), consola/dev.log limpios, lint
+   0 errores en archivos tocados.
+6. **BACKLOG (palabra del dueño)**: botón de SIMULACIÓN que auto-complete
+   puestos con estándares — «después de 2 horas los puestos con menos
+   de 3 mesas se completen automáticamente, los paises con mas de 4
+   mesas se completen despues de las 5 horas». NO implementado aún.
+
 ## 9. Cómo verificar (SIEMPRE)
 
 ```bash

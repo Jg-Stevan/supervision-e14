@@ -181,11 +181,6 @@ export function VistaMonitor() {
         />
         <PuestosTable
           puestos={filtrados}
-          puestosBase={puestosDelDia}
-          filtros={filtros}
-          onFiltroColumna={(parcial) =>
-            setFiltros((prev) => ({ ...prev, ...parcial }))
-          }
           mesasPorPuesto={mesasPorPuesto}
           expandidoInicialId={filtrados[0]?.id}
           mesaEnAccionId={mesaEnAccionId}

@@ -9,14 +9,19 @@
  *   jitter quemado — para no desplazar el draw de estado, mock-repository.ts:149-170);
  * · los umbrales de distribución de estados (L99-104) y de tramos de
  *   tiempo (L116-121);
+ * · la REGLA DEL DUEÑO (feedback matriz): transcurrido ≥ 3 hrs sin
+ *   completar → CRÍTICO automático (derivarEstadoPorUmbral; los COMPLETO
+ *   se respetan y un CRÍTICO sembrado no se degrada);
  * · la invariante D21: `total = completo + crítico + pendiente + no_iniciado`
  *   EXACTO en TODOS los puestos;
  * · las 3 ANCLAS forzadas (L189-198): Roma→CRÍTICO (8 mesas, acta #A92-F),
  *   El Cairo→COMPLETO (D26), Barcelona-Girona→COMPLETO (D44);
- * · GOLDEN del resumen agregado medido en el seed vigente:
- *   949 = 233 COMPLETO + 44 CRÍTICO + 198 PENDIENTE + 474 NO_INICIADO.
- *   (Los literales de DECISIONS D21 — 231/44/199/475 — corresponden a un
- *   seed anterior a las anclas D26/D44; el golden vive aquí desde ahora.)
+ * · GOLDEN del resumen agregado medido en el seed vigente (con la regla
+ *   del dueño >3 hrs → CRÍTICO aplicada desde 2026-02, feedback matriz):
+ *   949 = 233 COMPLETO + 218 CRÍTICO + 138 PENDIENTE + 360 NO_INICIADO.
+ *   (Golden anterior sin la regla: 233/44/198/474; los literales de
+ *   DECISIONS D21 — 231/44/199/475 — corresponden a un seed previo a las
+ *   anclas D26/D44; el golden vive aquí desde entonces.)
  *
  * REGLA DEL GOLDEN: si un cambio LEGÍTIMO de seeds altera estos números,
  * el dueño debe actualizarlos aquí a conciencia — nunca en silencio.
@@ -24,7 +29,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { crearRandomDeterministico } from "@/modules/supervision/domain/acta";
-import { CIERRE_LOCAL_MIN } from "@/modules/supervision/domain/tiempo-cierre";
+import {
+  CIERRE_LOCAL_MIN,
+  UMBRAL_CRITICO_MIN,
+} from "@/modules/supervision/domain/tiempo-cierre";
 import {
   mockSupervisionRepository,
   ID_ENLACE_CAIRO,
@@ -43,6 +51,17 @@ function estadoPorSeedRef(random: number): Puesto["estadoGlobal"] {
   if (random < 0.3) return "COMPLETO";
   if (random < 0.5) return "PENDIENTE";
   return "NO_INICIADO";
+}
+
+/** Contraparte de `derivarEstadoPorUmbral` (mock-repository.ts): la regla
+ * del dueño — >3 hrs transcurridas sin completar → CRÍTICO. */
+function derivarEstadoPorUmbralRef(
+  sembrado: Puesto["estadoGlobal"],
+  minutosDesdeCierre: number
+): Puesto["estadoGlobal"] {
+  if (sembrado === "COMPLETO") return "COMPLETO";
+  if (minutosDesdeCierre >= UMBRAL_CRITICO_MIN) return "CRITICO";
+  return sembrado;
 }
 
 function transcurridoPorSeedRef(r: number): number {
@@ -92,11 +111,12 @@ function esperadoDeId(idEnlace: string): {
   const cierre = CIERRES_COL_MIN_REF[Math.floor(random() * CIERRES_COL_MIN_REF.length)];
   const transcurrido = transcurridoPorSeedRef(random());
   void random(); // D43 — tercer draw quemado
+  const sembrado =
+    idEnlace === ID_ENLACE_CAIRO || idEnlace === ID_ENLACE_BARCELONA
+      ? ("COMPLETO" as const)
+      : estadoPorSeedRef(random());
   return {
-    estado:
-      idEnlace === ID_ENLACE_CAIRO || idEnlace === ID_ENLACE_BARCELONA
-        ? "COMPLETO"
-        : estadoPorSeedRef(random()),
+    estado: derivarEstadoPorUmbralRef(sembrado, transcurrido),
     minutosDesdeCierre: transcurrido,
     horaActualLocal: relojDeMinutosRef(CIERRE_LOCAL_MIN + transcurrido),
     horaCierreColombia: relojDeMinutosRef(cierre),
@@ -167,14 +187,14 @@ describe("invariante D21 — total = completo + crítico + pendiente + no_inicia
     ).toBe(resumen.total);
   }, 20_000);
 
-  test("GOLDEN del seed vigente: 949 = 233 + 44 + 198 + 474", async () => {
+  test("GOLDEN del seed vigente (con regla >3 hrs → CRÍTICO): 949 = 233 + 218 + 138 + 360", async () => {
     const resumen = await mockSupervisionRepository.getResumen();
     expect(resumen).toEqual({
       total: 949,
       completo: 233,
-      critico: 44,
-      pendiente: 198,
-      noIniciado: 474,
+      critico: 218,
+      pendiente: 138,
+      noIniciado: 360,
     });
   }, 20_000);
 });
