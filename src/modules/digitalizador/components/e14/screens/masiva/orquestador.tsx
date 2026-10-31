@@ -715,11 +715,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
             <MotorOcr />
 
             {/* ---------- INFORME & TELEMETRÍA (diseño — datos reales) ---------- */}
-            <InformeLote
-              metricas={metricasLote}
-              enviadas={enviadas + yaEnviadas}
-              enCola={enCola}
-            />
+            <InformeLote metricas={metricasLote} />
           </aside>
 
           {/* ───── COLUMNA DERECHA: cola de resultados (filtros + filas +

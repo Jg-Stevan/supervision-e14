@@ -233,6 +233,22 @@ duplicada, idéntica):
   r3-07/08).
 - lint 0 errores (5 warnings preexistentes ajenos) · dev.log limpio.
 
+## 8b. Feedback del dueño — POST-RONDA 3 (2026-10-31, ✅ APLICADO)
+
+- **«elimina lo de INTEGRIDAD SHA-256:»** → fila retirada del sidebar
+  INFORME & TELEMETRÍA (`informe-lote.tsx`): quedan LATENCIA MEDIA ·
+  ID LOTE · botón TELEMETRÍA (JSON). Props `enviadas`/`enCola` salieron
+  del componente (orquestador deja de pasarlas — siguen vivas para la
+  barra de éxito y la bandeja). El hash SHA-256 por acta SIGUE vivo en
+  el ledger e65b — solo deja de pintarse en el UI (cero cambios de
+  lógica, regla §2 respetada).
+- **Push a GitHub aprobado por el dueño** (token entregado en chat) →
+  serie completa de parches subida a `main` de
+  `Jg-Stevan/supervision-e14`. Pendiente de push (§10) queda CERRADO.
+- Verificado: lint 0 errores · dev.log limpio · E2E agent-browser
+  (desktop + móvil 375×812): tarjeta sin la fila, resto intacto,
+  consola sin errores.
+
 ## 9. Cómo verificar (SIEMPRE)
 
 ```bash
@@ -250,7 +266,8 @@ tail -n 40 dev.log    # dev server corre en :3000 (preview del dueño)
   implementados en ronda 3 (§8)**.
 - Posible rediseño del visor del MONITOR de supervisión (hoy conserva su
   diseño original — se abre con VER EN MONITOR).
-- Push a GitHub del repo `Jg-Stevan/supervision-e14` cuando el dueño apruebe.
+- ~~Push a GitHub del repo `Jg-Stevan/supervision-e14` cuando el dueño
+  apruebe.~~ → **HECHO (§8b)** — dueño aprobó y serie completa en `main`.
 - Decisión del dueño (opcional): que las actas ACEPTADAS con clasificación
   débil (ingreso manual confirmado) aterricen en el monitor con join — hoy
   van honestas a Recepción como SIN_JOIN (joinDeActa exige nivel AUTO).

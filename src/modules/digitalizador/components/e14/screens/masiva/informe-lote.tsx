@@ -3,36 +3,19 @@
 /**
  * KIT carga-masiva-redesign-v1 — INFORME & TELEMETRÍA (diseño «CARGA MASIVA»,
  * tarjeta del sidebar): resumen compacto de la corrida (LATENCIA MEDIA ·
- * INTEGRIDAD SHA-256 · ID LOTE) + botón TELEMETRÍA (JSON) — el MISMO export
- * del InformeCorrida (exportarInformeMetricas). Datos REALES y honestos:
+ * ID LOTE) + botón TELEMETRÍA (JSON) — el MISMO export del InformeCorrida
+ * (exportarInformeMetricas). Datos REALES y honestos:
  * · LATENCIA MEDIA — media de totalMs de la corrida viva (metricas-vista).
- * · INTEGRIDAD SHA-256 — estado del LEDGER de enviadas: VÁLIDA cuando hay
- *   enviadas y ninguna quedó «EN COLA» (offline); EN COLA k si hay pendientes
- *   de drenaje; — sin enviadas. (El SHA-256 por acta vive en el ledger e65b.)
  * · ID LOTE — ordinal de la corrida en el historial (#LOTE-N; el id REAL
  *   completo viaja en el title).
+ * (La fila «INTEGRIDAD SHA-256» se retiró a pedido del dueño — el hash
+ *  por acta sigue vivo en el ledger e65b, solo deja de pintarse aquí.)
  */
 
 import { exportarInformeMetricas } from "@/modules/digitalizador/lib/e14/masiva/metricas";
 import { fmtVelocidad, type MetricasLote } from "./metricas-vista";
 
-export function InformeLote({
-  metricas,
-  enviadas,
-  enCola,
-}: {
-  metricas: MetricasLote;
-  enviadas: number;
-  enCola: number;
-}) {
-  const integridad =
-    enviadas > 0 ? (enCola > 0 ? `EN COLA ${enCola}` : "VÁLIDA") : "—";
-  const integridadClase =
-    enviadas <= 0
-      ? "text-gray-200 font-bold"
-      : enCola > 0
-        ? "font-semibold text-amber-400"
-        : "font-semibold text-[#00e599]";
+export function InformeLote({ metricas }: { metricas: MetricasLote }) {
   const corrida = metricas.corrida;
 
   const exportar = () => {
@@ -75,10 +58,6 @@ export function InformeLote({
           <span className="font-bold text-gray-200" title={metricas.latenciaMuestras > 0 ? `${metricas.latenciaMuestras} actas medidas` : undefined}>
             {fmtVelocidad(metricas.latenciaMediaMs)}
           </span>
-        </div>
-        <div className="flex items-center justify-between text-gray-400">
-          <span>INTEGRIDAD SHA-256:</span>
-          <span className={integridadClase}>{integridad}</span>
         </div>
         <div className="flex items-center justify-between text-gray-400">
           <span>ID LOTE:</span>
