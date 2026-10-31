@@ -144,7 +144,96 @@ debe de aparecer el codigo de barras del acta escaneada».
 - Barcodes reales por imagen verificados 1 a 1 (r2-10/11).
 - lint 0 errores · dev.log limpio.
 
-## 7. Cómo verificar (SIEMPRE)
+## 8. RONDA 3 (2026-10-31) — NUEVOS DISEÑOS: pantalla CARGA MASIVA + visor SIN
+##    envío automático + barcode real (✅ IMPLEMENTADA Y VERIFICADA E2E)
+
+El dueño anexó 2 zips nuevos (`upload/design_extract_r3/` y
+`upload/design_extract_r3b/`) con 3 pantallas (la de carga masiva viene
+duplicada, idéntica):
+
+- **Diseño A — «SISTEMA DE MONITOREO ELECTORAL E-14 · CARGA MASIVA»**:
+  remodelación de la PANTALLA principal (no del modal): navbar del sistema
+  (ya existía en supervision-shell), header del módulo con métricas de
+  sesión (SESIÓN INICIO/FIN · DURACIÓN · ESTADO barra), SIDEBAR izquierda
+  (ELEGIR FOTOS + PROCESAR COLA + VACIAR/REINICIAR + MOTOR OCR +
+  INFORME & TELEMETRÍA + TELEMETRÍA JSON) y cola a la derecha con filtros y
+  tarjetas (thumb blanca, título acta, filename, chips, pills %/score/
+  TIEMPO, ABRIR/QUITAR).
+- **Diseño B — «visor_de_actas_sin_envio_automatico»**: la SEGUNDA cara del
+  modal de revisión (la ronda 1-2 era la variante «ENVÍO AUTOMÁTICO»,
+  score 10/10, sin ACEPTAR). Esta variante (score 6/10 ámbar) = panel
+  «INGRESO MANUAL DE DATOS» con selects editables (PAÍS/ZONA/PUESTO/MESA/
+  ORIGEN/PÁGINA) + KIT/CÓDIGO DE BARRAS read-only + **ACEPTAR ACTA**
+  (verde, envía) + RECHAZAR (REESCANEAR).
+- **MOTOR OCR (duda resuelta por el dueño)**: el toggle del diseño es REAL —
+  «tess best (rápido)» = `tesseract-spa-best-psm4` y «pp (preciso)» =
+  `tesseract-best-psm4` (RapidOCR PP-OCRv4, motor de producción).
+
+### Implementación (archivos)
+
+| Cambio | Archivo |
+|---|---|
+| Header del módulo (métricas reales) | `masiva/barra-lote.tsx` (NUEVO) |
+| Selector MOTOR OCR (tess best/pp vía flags.ocrMotor + reinicio seguro) | `masiva/motor-ocr.tsx` (NUEVO) |
+| Tarjeta INFORME & TELEMETRÍA + TELEMETRÍA (JSON) | `masiva/informe-lote.tsx` (NUEVO) |
+| Hook de métricas (corrida viva O última cerrada; latencia media; msPorFila) | `masiva/metricas-vista.ts` (NUEVO) |
+| Layout 2 columnas (sidebar + cola) — acciones al sidebar | `masiva/orquestador.tsx` |
+| ZonaCarga sin borde propio (vive en el card del sidebar) | `masiva/dropzone.tsx` |
+| Filtros paleta diseño + hilo msPorFila → tiempoTexto | `masiva/bandeja.tsx` |
+| Tarjeta de fila (thumb blanca, título=infoTitulo, pills %/score/tiempo) | `masiva/fila.tsx` |
+| Fila "PROCESANDO X/Y · COLA QUIETA" | `masiva/progreso-lote.tsx` |
+| Glow del sidebar | `src/app/globals.css` → `.glow-border-emerald` |
+| **ACEPTAR ACTA** — envío real de la fila abierta (registrarEnvioMasiva → monitor + registro ENVIADA + ledger e65b + patchFila) | `lib/e14/masiva/store.ts` → `enviarActaAbierta` (+ tipos.ts) |
+| Variante INGRESO MANUAL (header SquarePen, selects DIVIPOL reales en cascada, ACEPTAR 2 toques, flash → avance) | `masiva/modal-revisor.tsx` |
+| **Barcode REAL compartido** (`codigoUnico.crudo` → manifiesto D24; NUNCA `*E14-SEN-…*`) — modal Y publicación del monitor | `store/store-e14.ts` → `barcodeRealDeActa` + `publicarDesdeActa` |
+
+### Puntos finos descubiertos (NO romper)
+
+1. `sincronizarAlVolver` SIEMPRE limpia `origenAbierto` al final (línea
+   ~1269) — es su contrato «al volver». `enviarActaAbierta` captura el id
+   ANTES, lo re-establece tras el sync (la revisión sigue abierta) y
+   re-verifica identidad contra `actaActual` (no contra el puntero).
+2. Zona DIVIPOL = 2 dígitos en la base (`zonasDe` → "05"); el join del
+   adaptador la normaliza a 3 ("005"). En el modal la zona viaja verbatim
+   de la base (2 dígitos) — si no, `puestosDe` no resuelve.
+3. El selector de motor usa `reiniciarMotorOcrSiInactivo` (NUNCA
+   `rapidOcrReiniciar` a pelo — eso tumba sesiones con OCR en vuelo).
+   Si hay OCR en vuelo: override queda guardado + aviso «se aplica al
+   próximo arranque». El modelo REAL que cargó se muestra
+   (`motorOcrActual()?.modelos` → PP-OCRV4/TESS SPA-BEST).
+4. Score pill del modal: esmeralda si `score >= 8` (diseño 10/10) · ámbar
+   si < 8 (diseño 6/10) — semántica de los dos diseños.
+5. La publicación de actas ACEPTADAS con clasificación débil (EN RH/
+   SUGERIDA) sigue el camino D27 honesto: SIN_JOIN → registro en Recepción
+   (joinDeActa exige nivel AUTO — no se maquilla). La fila queda ENVIADA
+   con los datos corregidos por el supervisor.
+
+### Verificación E2E ronda 3 (agent-browser — r3-*.png en tool-results/)
+
+- Desktop 1360×820: pantalla masiva IDÉNTICA al diseño con datos reales —
+  VELOCIDAD PROMEDIO 7.5 s/acta, SESIÓN/DURACIÓN, LOTE #3, latencia 7.5 s,
+  SHA-256 VÁLIDA, pills de tiempo por acta (8.6 s, 6.3 s, …) (r3-01/09).
+- MOTOR OCR: selector visible con modelo vivo; RÁPIDO/PRECISO cambian
+  `flags.ocrMotor` (localStorage e14-flags-overrides) — verificado por
+  código + render.
+- **Flujo ACEPTAR completo (Diseño B)**: se procesó una foto DEGRADADA
+  (`/tmp/acta-degradada.py` PIL: rotada −7°, blur, oscuridad) → pipeline
+  real → REVISIÓN HUMANA (score 8.5) → ABRIR → panel INGRESO MANUAL DE
+  DATOS con selects en cascada de la base DIVIPOL REAL (Egipto 335 → Zona
+  05 → 02 - El Cairo → Mesa 001) → franja inferior refleja la corrección
+  en vivo → ACEPTAR (2 toques) → fila ENVIADA con datos corregidos
+  (r3-02/03).
+- Variante conmuta sola: al re-abrir la acta ya enviada → header ENVÍO
+  AUTOMÁTICO + VER EN MONITOR + sin ACEPTAR + datos display (r3-04).
+- **Ronda 3 cerrada E2E**: CÓDIGO DE BARRAS = `710003992010202` (1D real del
+  papel, NO «E14-SEN-2026-001») en el modal, y el MISMO barcode viaja en la
+  publicación → caption del visor del monitor `· 710003992010202` (r3-04).
+- Móvil 375×812: masiva apilada (header + sidebar full-width) (r3-06);
+  modal scrollable completo (CERRAR/RECHAZAR/auditoría alcanzables,
+  r3-07/08).
+- lint 0 errores (5 warnings preexistentes ajenos) · dev.log limpio.
+
+## 9. Cómo verificar (SIEMPRE)
 
 ```bash
 bun run lint          # 0 errores
@@ -155,9 +244,13 @@ tail -n 40 dev.log    # dev server corre en :3000 (preview del dueño)
 # Repetir a 375px (móvil).
 ```
 
-## 8. Pendientes futuros (que el dueño anexará)
+## 10. Pendientes futuros (que el dueño anexará)
 
-- Diseños para los demás flujos (ej. fotos de score bajo → flujo con editor).
+- ~~Diseños para los demás flujos (score bajo)~~ → **ENTREGADOS e
+  implementados en ronda 3 (§8)**.
 - Posible rediseño del visor del MONITOR de supervisión (hoy conserva su
   diseño original — se abre con VER EN MONITOR).
 - Push a GitHub del repo `Jg-Stevan/supervision-e14` cuando el dueño apruebe.
+- Decisión del dueño (opcional): que las actas ACEPTADAS con clasificación
+  débil (ingreso manual confirmado) aterricen en el monitor con join — hoy
+  van honestas a Recepción como SIN_JOIN (joinDeActa exige nivel AUTO).

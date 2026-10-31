@@ -7,6 +7,11 @@
  * los nombres de las variables originales para que el JSX movido quede
  * verbatim. Quedan separados porque `<InformeCorrida />` vive entre ambos
  * en el orquestador (orden de la vista intacto).
+ *
+ * KIT carga-masiva-redesign-v1 — paleta del diseño «CARGA MASIVA» en los
+ * chips de filtro (#00e599 activo sobre #061d19) y hilo de TIEMPOS reales
+ * (msPorFila — MetricaActa de la corrida) hacia la fila memoizada como
+ * prop primitivo (tiempoTexto) — misma disciplina R6-perf.
  */
 import type { FiltroMasiva } from "@/modules/digitalizador/lib/e14/masiva/store";
 import type { FilaMasiva } from "@/modules/digitalizador/lib/e14/masiva/tipos";
@@ -18,6 +23,7 @@ import {
   pildoraDe,
   porcentajeProcesoActa,
 } from "./helpers";
+import { fmtTiempoActa } from "./metricas-vista";
 import { FilaMasivaVista, type ProgresoFilaVista } from "./fila";
 
 /** Filtros + línea de conteos + botón ENVIAR ADVERTENCIAS. */
@@ -49,41 +55,73 @@ export function BandejaFiltros({
   enviarLote: (estado: "ADVERTENCIA") => void;
 }) {
   return (
-  <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filtrar por estado">
-    {FILTROS.map(({ valor, label }) => (
-      <button
-        key={valor}
-        type="button"
-        onClick={() => setFiltro(valor)}
-        aria-pressed={filtro === valor}
-        className={`min-h-[44px] px-3 py-1 rounded-full border font-mono text-[10px] font-bold uppercase tracking-wider transition ${
-          filtro === valor
-            ? "border-[#10b981] text-[#10b981] bg-[#10b981]/15"
-            : "border-slate-800 text-slate-400 hover:text-white hover:border-slate-700"
-        }`}
+  <div className="flex flex-wrap items-center justify-between gap-3" role="group" aria-label="Filtrar por estado">
+    <div className="flex flex-wrap items-center gap-1.5">
+      {FILTROS.map(({ valor, label }) => (
+        <button
+          key={valor}
+          type="button"
+          onClick={() => setFiltro(valor)}
+          aria-pressed={filtro === valor}
+          className={`min-h-[36px] rounded-full border px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider transition ${
+            filtro === valor
+              ? "border-[#00e599] bg-[#061d19] text-[#00e599]"
+              : "border-[#112b2a] bg-[#071214] text-gray-400 hover:border-[#1b3f3e] hover:text-gray-200"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-gray-400"
+        aria-label={`Conteos: ${enviadas} enviadas, ${enCola} en cola, ${pendientes} pendientes, ${duplicadas} duplicadas, ${yaEnviadas} ya enviadas, ${errores} errores`}
       >
-        {label}
-      </button>
-    ))}
-    <span
-      className="font-mono text-[10px] uppercase tracking-wider text-slate-400"
-      aria-label={`Conteos: ${enviadas} enviadas, ${enCola} en cola, ${pendientes} pendientes, ${duplicadas} duplicadas, ${yaEnviadas} ya enviadas, ${errores} errores`}
-    >
-      ENVIADAS {enviadas} · EN COLA {enCola} · PENDIENTES {pendientes}
-      {duplicadas > 0 && <> · DUPLICADAS {duplicadas}</>}
-      {yaEnviadas > 0 && <> · YA ENVIADAS {yaEnviadas}</>} · ERRORES {errores}
-    </span>
-    {(advertenciasPend > 0 || enviandoLote) && !corriendo && (
-      <button
-        type="button"
-        disabled={enviandoLote}
-        onClick={() => void enviarLote("ADVERTENCIA")}
-        aria-label={`Enviar ${advertenciasPend} actas con advertencia`}
-        className="ml-auto min-h-[44px] px-3.5 rounded-full border border-amber-400/60 text-amber-400 bg-amber-400/10 font-mono text-[10px] font-bold uppercase tracking-wider hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition"
-      >
-        {enviandoLote ? "ENVIANDO…" : `ENVIAR ADVERTENCIAS (${advertenciasPend})`}
-      </button>
-    )}
+        <span>
+          ENVIADAS <strong className="font-bold text-white">{enviadas}</strong>
+        </span>
+        <span className="text-gray-600" aria-hidden>·</span>
+        <span>
+          EN COLA <strong className="font-bold text-white">{enCola}</strong>
+        </span>
+        <span className="text-gray-600" aria-hidden>·</span>
+        <span>
+          PENDIENTES <strong className="font-bold text-white">{pendientes}</strong>
+        </span>
+        {duplicadas > 0 && (
+          <>
+            <span className="text-gray-600" aria-hidden>·</span>
+            <span>
+              DUPLICADAS <strong className="font-bold text-white">{duplicadas}</strong>
+            </span>
+          </>
+        )}
+        {yaEnviadas > 0 && (
+          <>
+            <span className="text-gray-600" aria-hidden>·</span>
+            <span>
+              YA ENVIADAS <strong className="font-bold text-white">{yaEnviadas}</strong>
+            </span>
+          </>
+        )}
+        <span className="text-gray-600" aria-hidden>·</span>
+        <span>
+          ERRORES <strong className="font-bold text-white">{errores}</strong>
+        </span>
+      </span>
+      {(advertenciasPend > 0 || enviandoLote) && !corriendo && (
+        <button
+          type="button"
+          disabled={enviandoLote}
+          onClick={() => void enviarLote("ADVERTENCIA")}
+          aria-label={`Enviar ${advertenciasPend} actas con advertencia`}
+          className="min-h-[36px] rounded-full border border-amber-400/60 bg-amber-400/10 px-3.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {enviandoLote ? "ENVIANDO…" : `ENVIAR ADVERTENCIAS (${advertenciasPend})`}
+        </button>
+      )}
+    </div>
   </div>
   );
 }
@@ -97,6 +135,7 @@ export function BandejaFilas({
   totalCola,
   nombrePorId,
   recienListas,
+  msPorFila,
   procesarIgual,
   abrirActa,
   reintentar,
@@ -113,13 +152,16 @@ export function BandejaFilas({
    *  `filas.find((o) => o.id === f.dupOf)` O(n²) del render). */
   nombrePorId: Map<string, string>;
   recienListas: Set<string>;
+  /** Map fila.id → totalMs REAL (metricas de la corrida viva — metricas-vita;
+   *  SOLO-LECTURA, el pill de tiempo del diseño). */
+  msPorFila: Map<string, number>;
   procesarIgual: (id: string) => void;
   abrirActa: (id: string) => void;
   reintentar: (id: string) => void;
   quitar: (id: string) => void;
 }) {
   return (
-  <ul className="flex flex-col gap-2 pr-1" aria-label="Bandeja de resultados">
+  <ul className="flex flex-col gap-2.5 pr-1" aria-label="Bandeja de resultados">
     {visiblesOrdenadas.map((f) => {
       // R6-perf: derivados por fila en O(1) → props PRIMITIVOS para la fila
       // memoizada. Una señal de vida (throttle 250 ms) solo cambia los
@@ -152,6 +194,8 @@ export function BandejaFilas({
           totalCola={totalCola}
           recienLista={recienListas.has(f.id)}
           nombreOriginal={f.dupOf != null ? (nombrePorId.get(f.dupOf) ?? null) : null}
+          // Tiempo REAL del pipeline (diseño — pill "20 s"); "" = sin dato.
+          tiempoTexto={fmtTiempoActa(msPorFila.get(f.id)) ?? ""}
           procesarIgual={procesarIgual}
           abrirActa={abrirActa}
           reintentar={reintentar}
@@ -160,7 +204,7 @@ export function BandejaFilas({
       );
     })}
     {visibles.length === 0 && (
-      <li className="rounded-xl border border-brand-borderdim bg-brand-surface/40 px-3 py-4 text-center font-mono text-[10px] uppercase tracking-wider text-gray-400">
+      <li className="rounded-lg border border-[#112b2a] bg-[#071214]/40 px-3 py-4 text-center font-mono text-[10px] uppercase tracking-wider text-gray-400">
         SIN FILAS CON ESE FILTRO
       </li>
     )}

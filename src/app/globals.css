@@ -205,6 +205,15 @@
     background: var(--muted-foreground);
   }
 
+  /* KIT carga-masiva-redesign-v1 (diseño «CARGA MASIVA») — glow sutil del
+     sidebar (borde esmeralda tenue; al hover se aviva — DropzoneHero). */
+  .glow-border-emerald {
+    box-shadow: 0 0 10px rgba(0, 229, 153, 0.08);
+  }
+  .glow-border-emerald:hover {
+    box-shadow: 0 0 15px rgba(0, 229, 153, 0.18);
+  }
+
   /* Destello de LLEGADA: la fila nueva entra con fondo acento que se
      disuelve (1.6s) — feedback inmediato de "está llegando en vivo". */
   @keyframes recepcion-llegada {

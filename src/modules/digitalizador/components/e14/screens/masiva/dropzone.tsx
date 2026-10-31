@@ -65,7 +65,9 @@ export function OverlayDragGlobal({
   );
 }
 
-/** Zona de carga manual (input file + botón + chips de guardado/sondeo QR). */
+/** Zona de carga manual (input file + botón + chips de guardado/sondeo QR).
+ *  KIT carga-masiva-redesign-v1: vive DENTRO del card del sidebar (diseño
+ *  «CARGA MASIVA») — sin borde propio; el marco lo pone el aside. */
 export function ZonaCarga({
   inputRef,
   agregarFiles,
@@ -80,7 +82,7 @@ export function ZonaCarga({
   conPayload: number;
 }) {
   return (
-<div className="rounded-2xl border-2 border-dashed border-slate-800 bg-[#10161f] hover:border-slate-700 px-4 py-6 text-center transition-all">
+<div className="w-full text-center">
   <input
     ref={inputRef}
     id="masiva-archivos"
@@ -98,22 +100,22 @@ export function ZonaCarga({
       type="button"
       onClick={() => inputRef.current?.click()}
       aria-label="Elegir fotos de actas para la cola"
-      className="min-h-[44px] inline-flex items-center gap-2 px-6 rounded-xl bg-[#10b981]/15 border border-[#10b981]/50 font-mono text-xs font-bold uppercase tracking-wider text-[#10b981] hover:bg-[#10b981]/25 transition cursor-pointer shadow-sm active:scale-[0.98]"
+      className="inline-flex min-h-[44px] items-center gap-2 rounded border border-[#00e599]/70 bg-[#08201c] px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-[#00e599] shadow-[0_0_15px_rgba(0,229,153,0.1)] transition active:scale-[0.98] hover:bg-[#0c2f29]"
     >
-      <StitchStackIcon className="w-4 h-4" />
+      <StitchStackIcon className="h-4 w-4" />
       ELEGIR FOTOS O ARCHIVOS
     </button>
-    <p className="font-mono text-[11px] tracking-wider text-slate-400 uppercase mt-1">
+    <p className="mt-1 font-mono text-[11px] font-bold uppercase tracking-widest text-gray-300">
       SUELTA ARCHIVOS EN CUALQUIER PARTE DE ESTA PANTALLA
     </p>
-    <span className="font-mono text-[9px] text-slate-400 uppercase tracking-widest">
+    <span className="font-mono text-[10px] uppercase tracking-wider text-gray-500">
       SOPORTA MÚLTIPLES FOTOS, PDF, ZIP O RAR
     </span>
   </div>
 
   {guardando > 0 && (
     <p
-      className="mt-3 inline-block rounded-full border border-slate-700 bg-slate-800 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-300"
+      className="mt-3 inline-block rounded-full border border-[#112b2a] bg-[#0b191c] px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-300"
       role="status"
       aria-live="polite"
     >
@@ -126,7 +128,7 @@ export function ZonaCarga({
       ingesta; SIN tocar la lógica de la cola — SOLO-LECTURA del store). */}
   {sondeadas > 0 && (
     <p
-      className="mt-3 inline-block rounded-full border border-[#10b981]/30 bg-[#10b981]/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-[#10b981]"
+      className="mt-3 inline-block rounded-full border border-[#00e599]/30 bg-[#10b981]/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-[#00e599]"
       role="status"
       aria-label={`Sondeo QR: ${sondeadas} leídos, ${conPayload} con payload`}
     >

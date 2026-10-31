@@ -1398,6 +1398,78 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     }
   },
 
+  // KIT aceptar-revision-masiva-v1 (diseño «visor de actas sin envío
+  // automático» — ACEPTAR ACTA del modal): el supervisor revisó una acta
+  // SIN envío automático (ADVERTENCIA/RECHAZADA/EN_RH), corrigió datos si
+  // hacía falta y la ACEPTA → envío manual de ESA fila con la MISMA
+  // maquinaria del lote (registrarEnvioMasiva → monitor D27 + registro
+  // ENVIADA + ledger e65b + patchFila). El primer paso SINCRONIZA: los
+  // datos editados en el panel (y el status ENVIADA que la vista ya no
+  // necesita estampar — este action es el dueño del desenlace) pasan al
+  // registro ANTES de leerlo. Nada del runner ni del lote se toca.
+  enviarActaAbierta: async () => {
+    const { origenAbierto } = get();
+    if (!origenAbierto || get().enviandoLote) return false;
+    // 1) Ediciones del panel (ubicación manual/página/tipo) → registro.
+    //    ATENCIÓN — contrato de sincronizarAlVolver: al terminar SIEMPRE
+    //    limpia `origenAbierto` (es su gesto «al volver a la bandeja») y
+    //    dentro valida la identidad (identidad NO coincidente ⇒ NO escribe).
+    //    Por eso el id local (`origenAbierto` capturado arriba) sigue siendo
+    //    la llave del registro; la identidad se re-verifica abajo contra el
+    //    acta abierta VIVA (actaActual), no contra el puntero ya limpiado.
+    await get().sincronizarAlVolver();
+    // La revisión SIGUE abierta (el modal no se cerró) — re-establecer el
+    // puntero que el sync limpia por contrato, para que cerrar/navegar
+    // sigan sincronizando (mismo flujo que ABRIR).
+    set({ origenAbierto });
+    const registro = await leerRegistro(origenAbierto);
+    const acta = registro.acta;
+    const actaViva = useE14Store.getState().actaActual;
+    // Identidad REAL: el registro debe seguir siendo el del acta abierta
+    // (el sync no escribió si no coincidió — aquí se re-verifica honesto).
+    if (!acta || !actaViva || acta.id !== actaViva.id) return false;
+    if (acta.status === "ENVIADA") return true; // ya enviada — idempotente
+    set({ enviandoLote: true });
+    try {
+      // 2) La MISMA vía que el envío manual del lote (T3.3) — historial +
+      //    completadas + hueco archivado + cola offline (hashSha256 «EN
+      //    COLA» si la conexión estaba OFFLINE — T3.2, drenaje intacto).
+      const onlineAlEnviar = useE14Store.getState().online;
+      useE14Store.getState().registrarEnvioMasiva(acta);
+      const actaEnviada: Acta = {
+        ...acta,
+        status: "ENVIADA",
+        enviadoAutomaticamente: getBridge().horaEnvio(),
+        ...(onlineAlEnviar ? {} : { hashSha256: "EN COLA" }),
+      };
+      await guardarRegistro({ ...registro, acta: actaEnviada });
+      // e65b (T-3c): el desenlace ENVIADO también alimenta el ledger
+      // (RL-e65b-2 — misma vía del helper único). Fire-and-forget (RL-e65b-3).
+      void registrarEnviadaHistorico({
+        id: origenAbierto,
+        ts: Date.now(),
+        hashBytes: registro.hashBytes,
+        hashDedup: registro.hashDedup,
+        payloadQr: registro.qrPayload,
+        serie: registro.serie ?? undefined,
+      }).catch(() => {});
+      patchFila(origenAbierto, {
+        statusActa: "ENVIADA",
+        score: actaEnviada.score,
+        motivo: null,
+        envioEnCola: actaEnviada.hashSha256 === "EN COLA",
+      });
+      // 3) Reflejo INMEDIATO en el acta abierta (el modal re-pinta ENVIADA).
+      useE14Store.getState().editarActaActual({
+        status: "ENVIADA",
+        enviadoAutomaticamente: actaEnviada.enviadoAutomaticamente,
+      });
+      return true;
+    } finally {
+      set({ enviandoLote: false });
+    }
+  },
+
   // D65 (T3.1): señal de vida — estado transitorio (NUNCA a IDB, kit T3.4);
   // el % fantasma no existe: al recargar, progreso vuelve a null.
   marcarProgreso: (id, progreso) => set({ progreso: { id, ...progreso } }),

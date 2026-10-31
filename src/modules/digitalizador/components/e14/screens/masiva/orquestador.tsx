@@ -58,10 +58,15 @@ import { esDuplicada } from "./helpers";
 import { BandejaFiltros, BandejaFilas } from "./bandeja";
 import { ProgresoLote } from "./progreso-lote";
 import { OverlayDragGlobal, ZonaCarga } from "./dropzone";
+// KIT carga-masiva-redesign-v1 (diseño «CARGA MASIVA»): barra del módulo con
+// métricas de sesión + sidebar (motor OCR + informe/telemetría).
+import { BarraLote } from "./barra-lote";
+import { MotorOcr } from "./motor-ocr";
+import { InformeLote } from "./informe-lote";
+import { fmtVelocidad, useMetricasLote } from "./metricas-vista";
 // R6 — SPLIT move-only: modal de revisión (con editor) vive en masiva/
 // (verbatim — sin cambio de lógica); PublicacionChip lo consume el modal.
 import { ModalRevisor } from "./modal-revisor";
-import { StitchStackIcon } from "../../icons";
 
 /** Seam de UI (D27): props que el shell de supervision entrega a la vista.
  * `onVerEnMonitor` aterriza un acta publicada en el visor del dashboard
@@ -99,6 +104,9 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
     vaciar,
     reiniciarEnvios, // D33 — KIT e14-reiniciar-envios-v1
     enviarLote,
+    // KIT aceptar-revision-masiva-v1 — ACEPTAR ACTA del modal (diseño 3):
+    // envío real de la fila abierta con la maquinaria del lote.
+    enviarActaAbierta,
     setFiltro,
     procesarIgual,
     reintentar, // D59 — KIT e14-info-acta-filas-v1 (T4)
@@ -383,6 +391,16 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   } = conteos;
   const hayCola = filas.length > 0;
 
+  // KIT carga-masiva-redesign-v1 — header del diseño: métricas de la corrida
+  // (SESIÓN/DURACIÓN/LATENCIA/LOTE — SOLO-LECTURA de metricas.ts) y TASA DE
+  // ÉXITO = enviadas reales sobre terminadas con desenlace (LISTA +
+  // YA-ENVIADA + ERROR). null = sin terminadas — la barra no la pinta.
+  const metricasLote = useMetricasLote();
+  const tasaExito =
+    terminadas > 0
+      ? Math.round(((enviadas + yaEnviadas) / terminadas) * 100)
+      : null;
+
   const visibles = useMemo(
     () =>
       filtro === "TODAS"
@@ -486,7 +504,11 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
 
   return (
     <section
-      className="flex-1 min-h-0 overflow-y-auto bg-[#090d12] relative flex flex-col"
+      className="relative flex flex-1 min-h-0 flex-col overflow-y-auto bg-[#04090b]"
+      style={{
+        backgroundImage: "radial-gradient(rgba(0, 229, 153, 0.03) 1px, transparent 0)",
+        backgroundSize: "32px 32px",
+      }}
       aria-label="MASIVA — carga masiva de actas"
     >
       {/* ---------- OVERLAY DRAG & DROP GLOBAL (ESTILO DEEPSEEK) ---------- */}
@@ -498,74 +520,73 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
         />
       )}
 
-      {/* ---------- HEADER FIJO / STICKY SUPERIOR CON BOTÓN PROCESAR COLA ---------- */}
-      <header className="sticky top-0 z-30 w-full bg-[#090d12]/92 backdrop-blur-xl border-b border-slate-800/80 px-4 py-3 shadow-lg shadow-black/40">
-        <div className="w-full max-w-6xl mx-auto flex items-center justify-between gap-3">
-          {/* Título + estado visual */}
-          <div className="min-w-0 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#10b981]/15 border border-[#10b981]/40 flex items-center justify-center text-[#10b981] shrink-0">
-              <StitchStackIcon className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              {/* KIT e14-gama-adaptativa-v1 — flex-wrap: en móvil el chip de
-                  gama ENVUELVE a la línea siguiente (jamás tapa el título ni
-                  desborda sobre los botones de la derecha). */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <h1 className="font-mono text-sm md:text-base font-black tracking-wider text-white uppercase truncate">
-                  CARGA MASIVA
-                </h1>
-                {hayCola && (
-                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-slate-800 bg-[#10161f] font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                    {terminadas}/{filas.length}
-                  </span>
-                )}
-                {/* KIT e14-gama-adaptativa-v1 (D74) — chip SOLO con
-                    adaptaciones activas (BAJO/MEDIO + flag ON): transparencia
-                    del dueño (el espíritu D6 — detectar Y reportar). Con el
-                    detalle completo en el title (ajustes aplicados + cómo
-                    desactivar). `hidden sm:inline-flex` — MISMO patrón del
-                    contador {terminadas}/{filas}: en móvil (<640 px) la fila
-                    de acciones derecha ya ocupa el ancho y el chip no cabe
-                    sin tapar el título/botón (verificado en 390 px); desde sm
-                    sí hay sitio. El detalle del plan SIEMPRE queda en la
-                    traza `[e14] gama plan …` de consola. */}
-                {gama.activo && (
-                  <span
-                    className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-300 whitespace-nowrap"
-                    title={`Gama ${gama.tier} detectada${gama.tierInferido ? " (inferida)" : ""} — modo adaptado (KIT e14-gama-adaptativa-v1 · D74): ${gama.ajustes.join(" · ")}. Desactivable con el flag masivaAdaptativoGama=false.`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mr-1" />
-                    GAMA {gama.tier} · ADAPTADO
-                  </span>
-                )}
-              </div>
-              <p className="font-mono text-[9px] md:text-[10px] tracking-wider text-slate-400 uppercase truncate">
-                {corriendo ? (
-                  <span className="text-[#10b981] font-bold flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-ping" />
-                    PROCESANDO EN COLA…
-                  </span>
-                ) : pendientes > 0 ? (
-                  `${pendientes} PENDIENTES DE ENVÍO`
-                ) : hayCola ? (
-                  "COLA COMPLETADA"
-                ) : (
-                  "ARRASTRA ARCHIVOS O SELECCIONA"
-                )}
-              </p>
-            </div>
-          </div>
+      {/* ---------- HEADER DEL MÓDULO (sticky — diseño «CARGA MASIVA»):
+          barra con métricas de sesión REALES (corrida de metricas.ts). Los
+          BOTONES de acción NO viven aquí: el diseño los manda al SIDEBAR. ---------- */}
+      <header className="sticky top-0 z-30 w-full border-b border-[#112b2a]/80 bg-[#04090b]/95 px-4 py-3 shadow-lg shadow-black/40 backdrop-blur-xl">
+        <div className="mx-auto w-full max-w-[1360px]">
+          <BarraLote
+            terminadas={terminadas}
+            total={filas.length}
+            corriendo={corriendo}
+            pendientes={pendientes}
+            hayCola={hayCola}
+            tasaExito={tasaExito}
+            velocidad={fmtVelocidad(metricasLote.latenciaMediaMs)}
+            gama={gama}
+            metricas={metricasLote}
+          />
+        </div>
+      </header>
 
-          {/* Acciones principales fijas: PROCESAR / PAUSAR + VACIAR */}
-          <div className="relative flex items-center gap-2 shrink-0">
+      {/* ---------- CUERPO DE LA VISTA (SCROLL PRINCIPAL) — diseño «CARGA
+          MASIVA»: sidebar de carga/acciones/motor/telemetría (izquierda) +
+          cola de resultados (derecha) ---------- */}
+      <div className="mx-auto w-full max-w-[1360px] flex-1 px-4 py-4 pb-24">
+        {/* ---------- FALLBACK IDB ---------- */}
+        {!colaDisponible && (
+          <p
+            role="alert"
+            className="mb-4 rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
+          >
+            TU NAVEGADOR NO SOPORTA LA COLA — IMPORTA DE A UNA EN ESCANEAR
+          </p>
+        )}
+        {colaDisponible && avisoCola && (
+          <p
+            role="alert"
+            className="mb-4 rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
+          >
+            {avisoCola}
+          </p>
+        )}
+
+        <div className="flex w-full flex-col items-start gap-4 pt-1 lg:flex-row">
+          {/* ───── SIDEBAR (diseño: ELEGIR FOTOS + PROCESAR COLA + VACIAR/
+                  REINICIAR + MOTOR OCR + INFORME & TELEMETRÍA) ───── */}
+          <aside
+            className="glow-border-emerald flex w-full shrink-0 flex-col gap-3 rounded-lg border border-[#112b2a] bg-gradient-to-b from-[#061214] to-[#040c0e] p-4 lg:w-[268px]"
+            aria-label="Carga y acciones de la cola"
+          >
+            {/* ---------- ZONA DE CARGA (input + botón manual + hint) ---------- */}
+            <ZonaCarga
+              inputRef={inputRef}
+              agregarFiles={agregarFiles}
+              guardando={guardando}
+              sondeadas={sondeadas}
+              conPayload={conPayload}
+            />
+
+            {/* ---------- ACCIONES DE LA COLA (lógica intacta — llegada al
+                    sidebar por diseño) ---------- */}
             {corriendo ? (
               <button
                 type="button"
                 onClick={pausar}
                 aria-label="Pausar la cola"
-                className="min-h-[44px] px-4 rounded-xl border border-amber-500/50 bg-amber-500/15 text-amber-300 font-mono text-[11px] font-bold uppercase tracking-wider hover:bg-amber-500/25 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                className="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded border border-amber-500/50 bg-amber-500/15 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-300 transition hover:bg-amber-500/25 active:scale-[0.98]"
               >
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden />
                 PAUSAR
               </button>
             ) : (
@@ -577,17 +598,75 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
                 onClick={() => void prescanYIniciar()}
                 disabled={!colaDisponible || (pendientes === 0 && duplicadas === 0) || prescan.corriendo}
                 aria-label="Procesar la cola"
-                className="min-h-[44px] px-4 md:px-5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-[#090d12] font-mono text-[11px] md:text-xs font-black uppercase tracking-wider shadow-md shadow-[#10b981]/25 hover:shadow-[#10b981]/40 active:scale-[0.98] transition cursor-pointer disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded border border-[#00e599]/40 bg-[#0a3a32] font-mono text-[11px] font-black uppercase tracking-wider text-[#00e599] shadow-[0_0_12px_rgba(0,229,153,0.15)] transition hover:bg-[#0c2f29] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
-                <span className="w-2 h-2 rounded-full bg-[#090d12]" />
+                <span
+                  className="h-2 w-2 rounded-full border border-[#00e599] bg-black"
+                  aria-hidden
+                />
                 PROCESAR COLA
                 {pendientes + duplicadas > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[#090d12]/20 font-extrabold text-[10px]">
+                  <span className="ml-1 rounded bg-black/30 px-1.5 py-0.5 text-[10px] font-extrabold">
                     {pendientes + duplicadas}
                   </span>
                 )}
               </button>
             )}
+
+            <div className="grid w-full grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!vaciarArmado) {
+                    setVaciarArmado(true);
+                    return;
+                  }
+                  setVaciarArmado(false);
+                  void vaciar();
+                }}
+                disabled={!hayCola || corriendo}
+                aria-label={
+                  vaciarArmado ? "Confirmar vaciar toda la cola" : "Vaciar toda la cola"
+                }
+                className={`min-h-[40px] rounded border px-2 font-mono text-[10px] font-bold uppercase tracking-wider transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+                  vaciarArmado
+                    ? "animate-pulse border-red-500 bg-red-500/20 text-red-400"
+                    : "border-[#112b2a] bg-[#071214] text-gray-400 hover:border-[#1b3f3e] hover:bg-[#0b191c] hover:text-white"
+                }`}
+              >
+                {vaciarArmado ? "¿SEGURO?" : "VACIAR"}
+              </button>
+
+              {/* D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO (cola +
+                  ledger de enviadas). El VACIAR respeta el ledger POR DISEÑO
+                  (RL-e65b-5) — este es el corte explícito para re-probar el
+                  MISMO lote y medir. 2 toques — nunca accidental. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!resetArmado) {
+                    setResetArmado(true);
+                    return;
+                  }
+                  setResetArmado(false);
+                  void reiniciarEnvios();
+                }}
+                disabled={corriendo}
+                aria-label={
+                  resetArmado
+                    ? "Confirmar reiniciar envíos: borra la cola y el historial de enviadas"
+                    : "Reiniciar envíos: borra la cola y el historial de enviadas"
+                }
+                title="Borra la cola y el historial de enviadas — re-procesa el mismo lote desde cero"
+                className={`min-h-[40px] truncate rounded border px-2 font-mono text-[10px] font-bold uppercase tracking-wider transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+                  resetArmado
+                    ? "animate-pulse border-red-500 bg-red-500/20 text-red-400"
+                    : "border-[#112b2a] bg-[#071214] text-gray-400 hover:border-[#1b3f3e] hover:bg-[#0b191c] hover:text-white"
+                }`}
+              >
+                {resetArmado ? "¿SEGURO?" : "REINICIAR"}
+              </button>
+            </div>
 
             {/* KIT visor-masiva-redesign-v1 — botón DEMO del preview: siembra
                 el lote real del dueño (6 fotos) y arranca el pipeline. */}
@@ -597,78 +676,22 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
               disabled={demoSembrando || corriendo}
               aria-label="Sembrar el lote demo de 6 fotos reales y procesarlo"
               title="Siembra el lote demo (6 fotos reales) y procesa la cola"
-              className="min-h-[44px] px-3 rounded-xl border border-amber-500/50 bg-amber-500/10 text-amber-300 font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer hover:bg-amber-500/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              className="flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {demoSembrando ? (
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden />
               ) : (
-                <span className="w-2 h-2 rounded-full border border-amber-400" />
+                <span className="h-2 w-2 rounded-full border border-amber-400" aria-hidden />
               )}
               {demoSembrando ? "SEMBRANDO…" : "DEMO ×6"}
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (!vaciarArmado) {
-                  setVaciarArmado(true);
-                  return;
-                }
-                setVaciarArmado(false);
-                void vaciar();
-              }}
-              disabled={!hayCola || corriendo}
-              aria-label={
-                vaciarArmado ? "Confirmar vaciar toda la cola" : "Vaciar toda la cola"
-              }
-              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                vaciarArmado
-                  ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
-                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
-              }`}
-            >
-              {vaciarArmado ? "¿SEGURO?" : "VACIAR"}
-            </button>
-
-            {/* D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO (cola + ledger
-                de enviadas). El VACIAR de arriba respeta el ledger POR DISEÑO
-                (RL-e65b-5) — este es el corte explícito que pidió el dueño
-                para re-probar el MISMO lote y medir. 2 toques — nunca
-                accidental; disabled si la cola corre (doble guard en store). */}
-            <button
-              type="button"
-              onClick={() => {
-                if (!resetArmado) {
-                  setResetArmado(true);
-                  return;
-                }
-                setResetArmado(false);
-                void reiniciarEnvios();
-              }}
-              disabled={corriendo}
-              aria-label={
-                resetArmado
-                  ? "Confirmar reiniciar envíos: borra la cola y el historial de enviadas"
-                  : "Reiniciar envíos: borra la cola y el historial de enviadas"
-              }
-              title="Borra la cola y el historial de enviadas — re-procesa el mismo lote desde cero"
-              className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] md:text-[11px] font-bold uppercase tracking-wider transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                resetArmado
-                  ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
-                  : "border-slate-800 bg-[#10161f] text-slate-400 hover:border-slate-700 hover:text-white"
-              }`}
-            >
-              {resetArmado ? "¿SEGURO?" : "REINICIAR ENVÍOS"}
-            </button>
-
             {/* KIT e107-prescan-qr-cola-v1 (§D.3): banner del pre-scan —
-                hermano visual del chip «Sondeo QR» de e73 (overlay sobre el
-                header, SIN mover el layout). fase "boot" → «Preparando
-                lector…»; al "fin" desaparece (el % por-fila de la Fase 3 es
-                el sistema de siempre — cero trabajo extra). */}
+                fase "boot" → «Preparando lector…»; al "fin" desaparece (el %
+                por-fila de la Fase 3 es el sistema de siempre). */}
             {prescan.corriendo && (
               <div
-                className="absolute right-0 top-full mt-2 z-40 min-w-[230px] rounded-xl border border-[#10b981]/40 bg-[#090d12]/95 px-3.5 py-2 shadow-lg shadow-black/40 backdrop-blur-md"
+                className="w-full rounded border border-[#00e599]/40 bg-[#04090b]/95 px-3.5 py-2"
                 role="status"
                 aria-live="polite"
                 aria-label={
@@ -677,97 +700,82 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
                     : `Sondeando QR: ${prescan.listo} de ${prescan.total}`
                 }
               >
-                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#10b981] whitespace-nowrap">
+                <p className="whitespace-nowrap font-mono text-[10px] font-bold uppercase tracking-wider text-[#00e599]">
                   {prescan.fase === "boot"
                     ? "PREPARANDO LECTOR…"
                     : `SONDEANDO QR… ${prescan.listo}/${prescan.total}`}
                 </p>
-                <p className="font-mono text-[9px] uppercase tracking-wider text-slate-400 whitespace-nowrap">
+                <p className="whitespace-nowrap font-mono text-[9px] uppercase tracking-wider text-gray-400">
                   {`${prescan.leidos} leídos · los no leídos pasan al OCR`}
                 </p>
               </div>
             )}
+
+            {/* ---------- MOTOR OCR (diseño — selector REAL tess best/pp) ---------- */}
+            <MotorOcr />
+
+            {/* ---------- INFORME & TELEMETRÍA (diseño — datos reales) ---------- */}
+            <InformeLote
+              metricas={metricasLote}
+              enviadas={enviadas + yaEnviadas}
+              enCola={enCola}
+            />
+          </aside>
+
+          {/* ───── COLUMNA DERECHA: cola de resultados (filtros + filas +
+                  informe de corrida) ───── */}
+          <div className="min-w-0 w-full flex-1 space-y-3">
+            {/* ---------- BARRA DE PROGRESO DEL LOTE + AVISO HEIC (fila activa) ---------- */}
+            <ProgresoLote
+              hayCola={hayCola}
+              terminadas={terminadas}
+              total={filas.length}
+              filaActiva={filaActiva}
+              progreso={progreso}
+              corriendo={corriendo}
+              pendientes={pendientes}
+            />
+
+            {/* ---------- BANDEJA: FILTROS + LOTE ---------- */}
+            {hayCola && (
+              <BandejaFiltros
+                filtro={filtro}
+                setFiltro={setFiltro}
+                enviadas={enviadas}
+                enCola={enCola}
+                pendientes={pendientes}
+                duplicadas={duplicadas}
+                yaEnviadas={yaEnviadas}
+                errores={errores}
+                advertenciasPend={advertenciasPend}
+                enviandoLote={enviandoLote}
+                corriendo={corriendo}
+                enviarLote={enviarLote}
+              />
+            )}
+
+            {/* ---------- BANDEJA: FILAS (SIN RESTRICCIÓN RÍGIDA DE ALTURA PARA SCROLL FLUIDO) ---------- */}
+            {hayCola && (
+              <BandejaFilas
+                visibles={visibles}
+                visiblesOrdenadas={visiblesOrdenadas}
+                progreso={progreso}
+                posicionesCola={posicionesCola}
+                totalCola={totalCola}
+                nombrePorId={nombrePorId}
+                recienListas={recienListas}
+                msPorFila={metricasLote.msPorFila}
+                procesarIgual={procesarIgual}
+                abrirActa={abrirActa}
+                reintentar={reintentar}
+                quitar={quitar}
+              />
+            )}
+
+            {/* ---------- D34 — INFORME DE CARGA (se oculta solo sin datos) ---------- */}
+            <InformeCorrida />
           </div>
         </div>
-      </header>
-
-      {/* ---------- CUERPO DE LA VISTA (SCROLL PRINCIPAL) ---------- */}
-      <div className="w-full max-w-6xl mx-auto px-4 py-5 flex flex-col gap-4 pb-24">
-        {/* ---------- FALLBACK IDB ---------- */}
-        {!colaDisponible && (
-          <p
-            role="alert"
-            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
-          >
-            TU NAVEGADOR NO SOPORTA LA COLA — IMPORTA DE A UNA EN ESCANEAR
-          </p>
-        )}
-        {colaDisponible && avisoCola && (
-          <p
-            role="alert"
-            className="rounded-xl border border-amber-400/60 bg-amber-400/10 px-3.5 py-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400"
-          >
-            {avisoCola}
-          </p>
-        )}
-
-        {/* ---------- ZONA DE CARGA (input + botón manual + hint) ---------- */}
-        <ZonaCarga
-          inputRef={inputRef}
-          agregarFiles={agregarFiles}
-          guardando={guardando}
-          sondeadas={sondeadas}
-          conPayload={conPayload}
-        />
-
-        {/* ---------- BARRA DE PROGRESO DEL LOTE + AVISO HEIC (fila activa) ---------- */}
-        <ProgresoLote
-          hayCola={hayCola}
-          terminadas={terminadas}
-          total={filas.length}
-          filaActiva={filaActiva}
-          progreso={progreso}
-          corriendo={corriendo}
-          pendientes={pendientes}
-        />
-
-        {/* ---------- BANDEJA: FILTROS + LOTE ---------- */}
-        {hayCola && (
-          <BandejaFiltros
-            filtro={filtro}
-            setFiltro={setFiltro}
-            enviadas={enviadas}
-            enCola={enCola}
-            pendientes={pendientes}
-            duplicadas={duplicadas}
-            yaEnviadas={yaEnviadas}
-            errores={errores}
-            advertenciasPend={advertenciasPend}
-            enviandoLote={enviandoLote}
-            corriendo={corriendo}
-            enviarLote={enviarLote}
-          />
-        )}
-
-        {/* ---------- D34 — INFORME DE CARGA (se oculta solo sin datos) ---------- */}
-        <InformeCorrida />
-
-        {/* ---------- BANDEJA: FILAS (SIN RESTRICCIÓN RÍGIDA DE ALTURA PARA SCROLL FLUIDO) ---------- */}
-        {hayCola && (
-          <BandejaFilas
-            visibles={visibles}
-            visiblesOrdenadas={visiblesOrdenadas}
-            progreso={progreso}
-            posicionesCola={posicionesCola}
-            totalCola={totalCola}
-            nombrePorId={nombrePorId}
-            recienListas={recienListas}
-            procesarIgual={procesarIgual}
-            abrirActa={abrirActa}
-            reintentar={reintentar}
-            quitar={quitar}
-          />
-        )}
       </div>
 
       {/* ── D27 — modal de revisión (ABRIR) + publicación en el monitor ── */}
@@ -779,6 +787,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
         posNavegacion={posNavegacion}
         onNavegar={(d) => void navegarActa(d)}
         cargarOriginal={cargarOriginal}
+        onAceptar={() => enviarActaAbierta()}
       />
     </section>
   );

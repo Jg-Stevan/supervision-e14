@@ -553,6 +553,15 @@ export interface MasivaStore {
   /** Envío en lote SECUENCIAL de ADVERTENCIAS (cada una vía registrarEnvio
    *  real). NO toca RECHAZADAS ni EN_RH (kit §6). */
   enviarLote: (estado: "ADVERTENCIA") => Promise<void>;
+  /** KIT aceptar-revision-masiva-v1 (diseño «visor de actas sin envío
+   *  automático» — ACEPTAR ACTA del modal): envía SOLO la fila ABIERTA
+   *  (origenAbierto) con la MISMA maquinaria del envío manual del lote
+   *  (registrarEnvioMasiva → monitor + registro ENVIADA + ledger + fila).
+   *  Los datos corregidos por el supervisor ya viven en el registro al
+   *  entrar aquí (la acción sincroniza primero — sincronizarAlVolver).
+   *  Idempotente: fila ya ENVIADA → true sin tocar nada. false = sin fila
+   *  abierta / registro ausente / envío de lote en curso. */
+  enviarActaAbierta: () => Promise<boolean>;
   /** D65 (T3.1): señal de vida de la fila en curso — action NUEVO del kit;
    *  el runner emite con throttle 250 ms vía bucketDeVida. Transitorio
    *  (NUNCA a IDB — kit T3.4). `fracGlobal` = % ÚNICO del proceso completo

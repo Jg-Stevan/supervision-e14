@@ -10,13 +10,20 @@
  * R6-perf (re-renders, reporte 03b §M-2): componente MEMOIZADO. Los valores
  * derivados POR RENDER llegan como props primitivos (esActiva, pildora*,
  * pctProceso, ocrPct, vidaTexto, posCola, totalCola, recienLista,
- * nombreOriginal) — precalculados en BandejaFilas; una señal de vida
- * (throttle 250 ms) solo cambia los primitivos de la fila ACTIVA, así que
- * las demás filas comparan iguales y SALTAN el re-render. `f` se pasa por
+ * nombreOriginal, tiempoTexto) — precalculados en BandejaFilas; una señal de
+ * vida (throttle 250 ms) solo cambia los primitivos de la fila ACTIVA, así
+ * que las demás filas comparan iguales y SALTAN el re-render. `f` se pasa por
  * IDENTIDAD (el store parchea con `filas.map(f => f.id === id ?
  * { ...f, ...patch } : f)`: el objeto de una fila solo se reemplaza cuando
  * ESA fila cambia — misma granularidad que explotarlo en 16 primitivos,
  * sin duplicar su forma). Las acciones del store (zustand) son estables.
+ *
+ * KIT carga-masiva-redesign-v1 — tarjeta del diseño «CARGA MASIVA»: miniatura
+ * REAL en marco blanco, título del acta (infoTitulo) como línea principal,
+ * filename en gris, píldoras % / score / TIEMPO REAL (msPorFila de la
+ * corrida — metricas.ts; sin dato no se pinta) y botones ABRIR/QUITAR.
+ * Todos los estados del repo (DUPLICADA/YA-ENVIADA/PREPARADA/QR/error)
+ * se conservan — solo cambia la presentación.
  */
 import { memo } from "react";
 
@@ -58,6 +65,9 @@ export interface PropsFilaMasiva {
   recienLista: boolean;
   /** Nombre de la fila original de una DUPLICADA (null → «OTRA FILA»). */
   nombreOriginal: string | null;
+  /** Tiempo REAL del pipeline de ESTA fila ("20 s") — metricas de la corrida
+   *  (MetricaActa.id ≡ fila.id). "" = sin dato → la píldora NO se pinta. */
+  tiempoTexto: string;
   procesarIgual: (id: string) => void;
   abrirActa: (id: string) => void;
   reintentar: (id: string) => void;
@@ -78,6 +88,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
   totalCola,
   recienLista,
   nombreOriginal,
+  tiempoTexto,
   procesarIgual,
   abrirActa,
   reintentar,
@@ -92,60 +103,66 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
       // filas fuera del viewport no pintan su contenido (el navegador las
       // salta) y reservan ~88px estimados — sin librería de virtualización
       // (eso exigiría ADR; ver pr.md).
-      className={`rounded-2xl border px-3.5 py-3 transition-all [content-visibility:auto] [contain-intrinsic-size:auto_88px] ${
+      className={`rounded-lg border p-3 transition-all [content-visibility:auto] [contain-intrinsic-size:auto_88px] ${
         esDup
           ? // KIT e64v — Cambio A: specs dark del kit (bg/borde azul).
             // El repo es dark-only (paleta oscura hardcodeada — sin
             // variante `dark:`): los tokens dark aplican directos.
             "bg-blue-950/60 border-blue-800 hover:border-blue-700"
-          : `bg-[#10161f] ${
-              esActiva ? "border-[#10b981]/60 ring-1 ring-[#10b981]/60 shadow-md shadow-[#10b981]/10" : "border-slate-800 hover:border-slate-700"
+          : `bg-[#071214] ${
+              esActiva ? "border-[#00e599]/60 ring-1 ring-[#00e599]/60 shadow-md shadow-[#00e599]/10" : "border-[#112b2a] hover:border-[#1b3f3e]"
             }`
       }`}
     >
-      <div className="flex items-center gap-3">
-      {/* Thumb 40px (o cuadrado pendiente) */}
+      <div className="flex items-start gap-3.5">
+      {/* Thumb (marco blanco del diseño — la miniatura SIEMPRE es la foto
+          real de la fila; regla del dueño: jamás fotos inventadas) */}
       {f.thumb ? (
         <img
           src={f.thumb}
           alt={`Miniatura de ${f.nombre}`}
-          className="w-11 h-11 rounded-xl object-cover bg-[#090d12] border border-slate-700 shrink-0"
+          className="mt-0.5 h-14 w-12 shrink-0 rounded border border-gray-400 bg-white object-cover shadow-inner"
         />
       ) : (
         <div
           aria-hidden
-          className="w-11 h-11 rounded-xl bg-[#090d12] border border-slate-800 flex items-center justify-center text-slate-500 shrink-0"
+          className="mt-0.5 flex h-14 w-12 shrink-0 items-center justify-center rounded border border-[#112b2a] bg-[#04090b] text-gray-500"
         >
-          <StitchStackIcon className="w-5 h-5" />
+          <StitchStackIcon className="h-5 w-5" />
         </div>
       )}
 
-      {/* Nombre + estado/motivo */}
+      {/* Título del acta + nombre/estado/motivo */}
       <div className="min-w-0 flex-1">
         {/* D59 — KIT e14-info-acta-filas-v1 (T4): línea de título
-            ENCIMA del nombre con la info reconocida del acta
-            (idea del dueño, mockup Stitch corregido — paleta del
-            repo: brand-green mono). Fila sin infoTitulo queda
-            EXACTAMENTE como hoy (cero regresión); null = sin
-            datos → no se pinta nada (jamás inventar). */}
+            ENCIMA del nombre con la info reconocida del acta — en el
+            diseño es la LÍNEA PRINCIPAL (gris claro, bold). Fila sin
+            infoTitulo queda EXACTAMENTE como hoy (cero regresión);
+            null = sin datos → no se pinta nada (jamás inventar). */}
         {f.infoTitulo && (
-          <p
-            className="font-mono text-[11px] font-bold uppercase tracking-wider text-brand-green truncate"
+          <h2
+            className="truncate text-xs font-bold tracking-wider text-gray-200"
             title={f.infoTitulo}
           >
             {f.infoTitulo}
-          </p>
+          </h2>
         )}
         <p
-          className={`font-mono text-[11px] font-bold uppercase truncate ${
-            f.estado === "ERROR" ? "text-red-300" : "text-white"
+          className={`truncate font-mono text-[11px] font-semibold tracking-wide ${
+            f.infoTitulo
+              ? f.estado === "ERROR"
+                ? "text-red-300"
+                : "text-gray-400"
+              : f.estado === "ERROR"
+                ? "text-red-300"
+                : "text-white"
           }`}
         >
           {f.nombre}
         </p>
-        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
           <span
-            className={`px-2 py-0.5 rounded-full border font-mono text-[9px] font-bold uppercase tracking-wider ${pildoraClases}`}
+            className={`rounded border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${pildoraClases}`}
           >
             {pildoraLabel}
           </span>
@@ -159,10 +176,10 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               existe en el repo — sistema de diseño propio manda). */}
           {esDup && (
             <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-900 text-blue-300 font-mono text-[9px] font-bold tracking-wider"
+              className="inline-flex items-center gap-1 rounded-full bg-blue-900 px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-wider text-blue-300"
               aria-label={`Gemela confirmada — ${etiquetaDup}`}
             >
-              <CheckIcon className="w-3 h-3" strokeWidth={2.5} />
+              <CheckIcon className="h-3 w-3" strokeWidth={2.5} />
               {etiquetaDup}
             </span>
           )}
@@ -173,7 +190,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               promesas. Flag transitorio (muere con la recarga). */}
           {f.estado === "PENDIENTE" && f.precalentada === true && (
             <span
-              className="px-1.5 py-0.5 rounded-full border border-brand-green/40 text-brand-green/90 font-mono text-[9px] font-bold uppercase tracking-wider"
+              className="rounded-full border border-brand-green/40 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-brand-green/90"
               title="El precalor ya decodificó esta fila (master listo)"
             >
               PREPARADA
@@ -186,15 +203,15 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               reportes «no lee»: el dueño VERÁ cuándo sí leyó. */}
           {f.qrEstado === "leido" && (
             <span
-              className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-emerald-300/90"
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold tracking-wider text-[#00e599]"
               aria-label="QR leído"
             >
-              QR ✓
+              QR <span aria-hidden>✓</span>
             </span>
           )}
           {f.qrEstado === "sin-payload" && f.estado === "LISTA" && (
             <span
-              className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-slate-400"
+              className="rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide text-gray-500"
               aria-label="QR no decodificado"
             >
               QR ✗
@@ -203,7 +220,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
           {/* KIT e14-masiva-tiempos-v1 (PR-1): la DUPLICADA señala
               a su original — transparencia total del dedup. */}
           {f.estado === "DUPLICADA" && f.dupOf && (
-            <span className="font-mono text-[9px] uppercase tracking-wider text-gray-400 truncate">
+            <span className="truncate font-mono text-[9px] uppercase tracking-wider text-gray-500">
               ≡ {nombreOriginal ?? "OTRA FILA"}
             </span>
           )}
@@ -211,12 +228,12 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               fila nació con contenido ya enviado (bytes/dhash);
               cero OCR, cero envío. JUNTO al chip DUPLICADA. */}
           {f.estado === "YA-ENVIADA" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/60 text-emerald-300 bg-emerald-500/10">
+            <span className="rounded border border-[#00e599]/60 bg-[#00e599]/10 px-1.5 py-0.5 text-[10px] text-[#00e599]">
               YA ENVIADA
             </span>
           )}
           {f.estado === "ERROR" && f.error && (
-            <span className="font-mono text-[9px] uppercase tracking-wider text-red-400/80 truncate">
+            <span className="truncate font-mono text-[9px] uppercase tracking-wider text-red-400/80">
               {f.error}
             </span>
           )}
@@ -228,98 +245,99 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
         </div>
       </div>
 
-      {/* % del proceso · score · página · nivel (div:nth-of-type(3)) */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0 font-mono text-[10px] uppercase tracking-wider text-gray-400">
-        <span
-          className={`font-mono text-[10px] sm:text-[11px] font-black tracking-wider px-2 py-0.5 rounded-md border flex items-center gap-1.5 transition-all ${
-            esActiva || f.estado === "PROCESANDO"
-              ? "border-[#10b981]/60 bg-[#10b981]/15 text-[#10b981] shadow-xs"
-              : f.estado === "LISTA"
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-                : f.estado === "ERROR"
-                  ? "border-red-500/40 bg-red-500/10 text-red-400"
-                  : "border-slate-800 bg-[#090d12] text-slate-400"
-          }`}
-          title={`Progreso del proceso del acta: ${pctProceso}%`}
-        >
-          {(esActiva || f.estado === "PROCESANDO") && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-ping shrink-0" />
-          )}
-          {pctProceso}%
-        </span>
-        {typeof f.score === "number" && (
-          <span className="text-gray-200 font-bold hidden md:inline" title="Score de calidad">
-            {f.score.toFixed(1)}
-          </span>
-        )}
-        <span className="hidden sm:inline">{f.pagina ?? "-/-"}</span>
-        {f.nivel && (
+      {/* Píldoras del diseño: % · score · tiempo — + acciones */}
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2">
+        <div className="flex items-center gap-1.5">
           <span
-            className={`hidden sm:inline px-1.5 py-0.5 rounded border ${
-              f.nivel === "AUTO"
-                ? "border-brand-green/50 text-brand-green"
-                : "border-brand-borderdim text-gray-500"
+            className={`rounded border px-2.5 py-0.5 font-mono text-[10px] font-bold transition-all ${
+              esActiva || f.estado === "PROCESANDO"
+                ? "border-[#00e599]/60 bg-[#061e19] text-[#00e599] shadow-xs"
+                : f.estado === "LISTA"
+                  ? "border-[#00e599]/40 bg-[#061e19] text-[#00e599]"
+                  : f.estado === "ERROR"
+                    ? "border-red-500/40 bg-red-500/10 text-red-400"
+                    : "border-[#112b2a] bg-[#04090b] text-gray-400"
             }`}
+            title={`Progreso del proceso del acta: ${pctProceso}%`}
           >
-            {f.nivel}
+            {(esActiva || f.estado === "PROCESANDO") && (
+              <span className="mr-1.5 inline-block h-1.5 w-1.5 shrink-0 animate-ping rounded-full bg-[#00e599]" />
+            )}
+            {pctProceso}%
           </span>
-        )}
-      </div>
+          {typeof f.score === "number" && (
+            <span
+              className="rounded border border-[#112b2a] bg-[#0b191c] px-2.5 py-0.5 font-mono text-[10px] font-bold text-gray-300"
+              title="Score de calidad"
+            >
+              {f.score.toFixed(1)}
+            </span>
+          )}
+          {tiempoTexto && (
+            <span
+              className="rounded border border-[#112b2a] bg-[#0b191c] px-2.5 py-0.5 font-mono text-[10px] font-bold text-gray-300"
+              title="Tiempo real del pipeline de esta acta"
+            >
+              {tiempoTexto}
+            </span>
+          )}
+        </div>
 
-      {/* Acciones por fila */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        {/* KIT e14-masiva-tiempos-v1 (PR-1): rescate del kit §2 —
-            reprocesar la gemela COMPLETA por si el dhash la
-            confundió (fotos distintas parecidas en thumb).
-            e65 (T-7): también sobre YA-ENVIADA — ÚNICO escape del
-            dueño para estampar QR/OCR en una fila ya enviada. */}
-        {(f.estado === "DUPLICADA" || f.estado === "YA-ENVIADA") && (
+        {/* Acciones por fila */}
+        <div className="flex items-center gap-1 pl-1">
+          {/* KIT e14-masiva-tiempos-v1 (PR-1): rescate del kit §2 —
+              reprocesar la gemela COMPLETA por si el dhash la
+              confundió (fotos distintas parecidas en thumb).
+              e65 (T-7): también sobre YA-ENVIADA — ÚNICO escape del
+              dueño para estampar QR/OCR en una fila ya enviada. */}
+          {(f.estado === "DUPLICADA" || f.estado === "YA-ENVIADA") && (
+            <button
+              type="button"
+              onClick={() => void procesarIgual(f.id)}
+              aria-label={`Reprocesar ${f.nombre} completo aunque esté duplicada`}
+              className="min-h-[40px] rounded border border-amber-500/50 px-2.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400 transition-colors hover:border-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+            >
+              PROCESAR IGUAL
+            </button>
+          )}
+          {f.estado === "LISTA" && (
+            <button
+              type="button"
+              onClick={() => void abrirActa(f.id)}
+              aria-label={`Abrir ${f.nombre} en revisión`}
+              className="min-h-[40px] min-w-[44px] rounded border border-[#112b2a] bg-[#0b191c] px-3 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-300 transition-colors hover:border-[#1b3f3e] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00e599]/60"
+            >
+              ABRIR
+            </button>
+          )}
+          {/* D59 — KIT e14-info-acta-filas-v1 (T4): «REINTENTAR» de
+              filas ERROR — re-encola (PENDIENTE) para que PROCESAR la
+              procese; SIN_ARCHIVO_ORIGINAL si el registro no trae el
+              archivo original (honesto). */}
+          {f.estado === "ERROR" && (
+            <button
+              type="button"
+              onClick={() => void reintentar(f.id)}
+              aria-label={`Reintentar ${f.nombre}: re-encolar para procesar`}
+              className="min-h-[40px] rounded border border-red-500/40 px-2.5 font-mono text-[10px] font-bold uppercase tracking-wider text-red-300 transition-colors hover:border-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
+            >
+              REINTENTAR
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => void procesarIgual(f.id)}
-            aria-label={`Reprocesar ${f.nombre} completo aunque esté duplicada`}
-            className="min-h-[44px] px-2.5 rounded-lg border border-amber-400/50 text-amber-400 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+            // FIX (auditoría 2-b #15): QUITAR fuera de la fila en
+            // PROCESO — el desenlace de la foto activa ya está en
+            // vuelo (el runner descarta el resultado de una fila
+            // quitada, pero el botón mentía sobre lo que hace).
+            disabled={f.estado === "PROCESANDO"}
+            onClick={() => void quitar(f.id)}
+            aria-label={`Quitar ${f.nombre} de la cola`}
+            className="min-h-[40px] min-w-[44px] rounded px-2 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-400 transition-colors hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
           >
-            PROCESAR IGUAL
+            QUITAR
           </button>
-        )}
-        {f.estado === "LISTA" && (
-          <button
-            type="button"
-            onClick={() => void abrirActa(f.id)}
-            aria-label={`Abrir ${f.nombre} en revisión`}
-            className="min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-brand-border text-gray-300 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-brand-green hover:text-brand-green focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/60"
-          >
-            ABRIR
-          </button>
-        )}
-        {/* D59 — KIT e14-info-acta-filas-v1 (T4): «REINTENTAR» del
-            mockup en filas ERROR — re-encola (PENDIENTE) para que
-            PROCESAR la procese; SIN_ARCHIVO_ORIGINAL si el
-            registro no trae el archivo original (honesto). */}
-        {f.estado === "ERROR" && (
-          <button
-            type="button"
-            onClick={() => void reintentar(f.id)}
-            aria-label={`Reintentar ${f.nombre}: re-encolar para procesar`}
-            className="min-h-[44px] px-2.5 rounded-lg border border-red-500/40 text-red-300 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
-          >
-            REINTENTAR
-          </button>
-        )}
-        <button
-          type="button"
-          // FIX (auditoría 2-b #15): QUITAR fuera de la fila en
-          // PROCESO — el desenlace de la foto activa ya está en
-          // vuelo (el runner descarta el resultado de una fila
-          // quitada, pero el botón mentía sobre lo que hace).
-          disabled={f.estado === "PROCESANDO"}
-          onClick={() => void quitar(f.id)}
-          aria-label={`Quitar ${f.nombre} de la cola`}
-          className="min-h-[44px] min-w-[44px] rounded-lg text-gray-400 hover:text-red-400 font-mono text-[10px] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
-        >
-          QUITAR
-        </button>
+        </div>
       </div>
       </div>
 
@@ -343,12 +361,12 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               aria-valuemax={100}
               aria-valuenow={ocrPct}
               aria-label={`OCR ${ocrPct}%`}
-              className="h-1 rounded-full bg-white/10 overflow-hidden"
+              className="h-1 overflow-hidden rounded-full bg-white/10"
             >
               <div className="h-full bg-brand-green" style={{ width: `${ocrPct}%` }} />
             </div>
           ) : esActiva ? (
-            <div className="h-1 rounded-full bg-brand-green/40 animate-pulse" aria-hidden />
+            <div className="h-1 animate-pulse rounded-full bg-[#00e599]/40" aria-hidden />
           ) : f.estado === "ERROR" ? (
             <div className="h-1 rounded-full bg-red-500/40" aria-hidden />
           ) : f.estado === "LISTA" ? (
@@ -357,7 +375,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
             <div className="h-1 rounded-full bg-white/5" aria-hidden />
           )}
           {(enColaVida || esActiva) && (
-            <p className="mt-1 font-mono text-[11px] tabular-nums tracking-wider text-gray-400 uppercase truncate">
+            <p className="mt-1 truncate font-mono text-[11px] uppercase tabular-nums tracking-wider text-gray-400">
               <span aria-live="polite">
                 {enColaVida
                   ? `EN COLA #${posCola} DE ${totalCola}`

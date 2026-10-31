@@ -57,6 +57,7 @@ import {
   Monitor,
   RotateCw,
   ShieldCheck,
+  SquarePen,
   Undo2,
   X,
   ZoomIn,
@@ -64,11 +65,25 @@ import {
 } from "lucide-react";
 
 import {
+  barcodeRealDeActa,
   joinDeActa,
   useE14Store,
   type PublicacionActa,
 } from "@/modules/digitalizador/store/store-e14";
 import type { Acta } from "@/modules/digitalizador/lib/e14/types";
+// KIT aceptar-revision-masiva-v1 (diseño 3 — INGRESO MANUAL DE DATOS): las
+// opciones de los selects salen de la base DIVIPOL REAL del repo (§8 —
+// PROHIBIDO inventar jerarquía: si la base falla, los selects degradan a
+// display honesto). public/e14/divipol.json — mismo catálogo del
+// clasificador.
+import {
+  cargarDivipol,
+  mesasDePuesto,
+  municipiosDe,
+  puestosDe,
+  zonasDe,
+  type DivipolBase,
+} from "@/modules/digitalizador/lib/e14/divipol";
 // KIT editor-masiva-v1: horneado de ROTAR/RECORTAR por canvas (misma
 // disciplina de siempre — canvas puro, dataURL out).
 import {
@@ -84,9 +99,6 @@ import {
 import { pildoraEstadoActa } from "./helpers";
 import { PublicacionChip } from "./publicacion-chip";
 import type { PropsMasivaView } from "./orquestador";
-// Manifiesto de actas reales (D24 — memoizado en módulo): respaldo del
-// barcode IMPRESO en el papel cuando el pipeline no decodificó el 1D.
-import { cargarActasReales } from "@/modules/supervision/data/actas-reales/actas-reales";
 
 /** Rectángulo de recorte en % del área de la foto (0–100 — mapea a píxeles
  * naturales al aplicar; el drag llega saneado y el clamp lo respalda). */
@@ -149,6 +161,7 @@ export function ModalRevisor({
   posNavegacion,
   onNavegar,
   cargarOriginal,
+  onAceptar,
 }: {
   acta: Acta | null;
   publicacion?: PublicacionActa;
@@ -163,6 +176,11 @@ export function ModalRevisor({
   /** MOSTRAR ORIGINAL — materializa el archivo ORIGINAL del registro
    * (orquestador: FileReader del File en IDB). null si no hay archivo. */
   cargarOriginal?: (id: string) => Promise<string | null>;
+  /** KIT aceptar-revision-masiva-v1 (diseño 3 — ACEPTAR ACTA): envío real
+   * de la fila abierta (store masiva: registrarEnvioMasiva → monitor +
+   * registro ENVIADA + ledger + fila). Sin ella, el panel no ofrece ACEPTAR
+   * (mismo degradado honesto que onVerEnMonitor/onNavegar). */
+  onAceptar?: () => Promise<boolean>;
 }) {
   // ── Visor (estado del redesign — todo local, cero acople con el store) ──
   const [verOriginal, setVerOriginal] = useState(false);
@@ -218,8 +236,41 @@ export function ModalRevisor({
   const [rechazoHecho, setRechazoHecho] = useState(false);
   const timerRechazoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset del visor/editor/rechazo al cambiar de acta abierta (navegación
-  // incluida) — y del timer de avance pendiente.
+  // ── KIT aceptar-revision-masiva-v1 — INGRESO MANUAL DE DATOS (diseño 3,
+  //    panel de actas SIN envío automático) ────────────────────────────────
+  // Base DIVIPOL REAL para las opciones de los selects (fetch de
+  // /e14/divipol.json — el mismo catálogo del clasificador). null/fallo →
+  // los selects degradan a display honesto (jamás opciones inventadas).
+  const [baseDivipol, setBaseDivipol] = useState<DivipolBase | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void cargarDivipol().then((b) => {
+      if (vivo) setBaseDivipol(b);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  /** Selección del supervisor (códigos DIVIPOL) — null = aún sin acta. */
+  const [datosManual, setDatosManual] = useState<null | {
+    municipio: string;
+    zona: string;
+    puesto: string;
+    mesa: number | null;
+    tipo: "TRANSMISION" | "DELEGADOS";
+    paginaIndex: number;
+  }>(null);
+  /** El supervisor tocó AL MENOS un dato (transparencia de la corrección). */
+  const [huboEdicionManual, setHuboEdicionManual] = useState(false);
+  // ACEPTAR ACTA — armado a 2 toques (mismo patrón del rechazo: el envío
+  // NUNCA es accidental) + flash de confirmación → avance al siguiente.
+  const [aceptarArmado, setAceptarArmado] = useState(false);
+  const [aceptacionHecha, setAceptacionHecha] = useState(false);
+  const [aceptando, setAceptando] = useState(false);
+  const timerAceptarRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset del visor/editor/rechazo/aceptación al cambiar de acta abierta
+  // (navegación incluida) — y de los timers de avance pendientes.
   useEffect(() => {
     setEditandoRecorte(false);
     setRect(null);
@@ -236,18 +287,48 @@ export function ModalRevisor({
     setRechazoHecho(false);
     setErrorMotivo(false);
     setObservaciones("");
+    setAceptarArmado(false);
+    setAceptacionHecha(false);
+    setHuboEdicionManual(false);
     if (timerRechazoRef.current) {
       clearTimeout(timerRechazoRef.current);
       timerRechazoRef.current = null;
+    }
+    if (timerAceptarRef.current) {
+      clearTimeout(timerAceptarRef.current);
+      timerAceptarRef.current = null;
     }
   }, [acta?.id]);
 
   useEffect(
     () => () => {
       if (timerRechazoRef.current) clearTimeout(timerRechazoRef.current);
+      if (timerAceptarRef.current) clearTimeout(timerAceptarRef.current);
     },
     [],
   );
+
+  // INGRESO MANUAL DE DATOS — pre-carga con los valores RECONOCIDOS del
+  // acta (clasificación si existe; códigos vacíos si no — jamás inventar).
+  // Re-carga en cada acta abierta (navegación incluida).
+  useEffect(() => {
+    if (!acta) {
+      setDatosManual(null);
+      return;
+    }
+    const c = acta.clasificacion;
+    const pagina = acta.pagina ?? c?.pagina ?? null;
+    setDatosManual({
+      municipio: c?.municipio?.codigo?.padStart(3, "0") ?? "",
+      // §1 de la base DIVIPOL: zona de 2 dígitos (el join del adaptador la
+      // normaliza a 3 — aquí viaja verbatim de la base).
+      zona: c?.zona?.codigo?.padStart(2, "0") ?? "",
+      puesto: c?.puesto?.codigo?.padStart(2, "0") ?? "",
+      mesa: c?.mesa ?? null,
+      tipo: c?.tipo ?? "DELEGADOS",
+      paginaIndex: pagina?.index ?? 1,
+    });
+  }, [acta?.id]);
 
   /** ROTAR: actas sin envío automático → HORNEA 90° (persiste en el acta);
    *  enviadas auto → rotación VISUAL del visor (ayuda de lectura). */
@@ -417,6 +498,108 @@ export function ModalRevisor({
     }, 1200);
   };
 
+  // Desarme solo del armado de ACEPTAR (3 s — el envío NUNCA es accidental;
+  // mismo gesto del VACIAR/REINICIAR de la bandeja).
+  useEffect(() => {
+    if (!aceptarArmado) return;
+    const t = window.setTimeout(() => setAceptarArmado(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [aceptarArmado]);
+
+  // ── ACEPTAR ACTA (diseño 3 — actas SIN envío automático): 1) aplica la
+  //    corrección manual de datos al acta abierta (clasificación DIVIPOL +
+  //    ubicación + página — SOLO los campos que el supervisor tocó); 2)
+  //    envía la fila por la vía real del store masiva (onAceptar →
+  //    registrarEnvioMasiva → monitor + registro ENVIADA + ledger + fila);
+  //    3) flash de confirmación → avance al siguiente acta del lote.
+  const aceptarActa = async () => {
+    if (!acta || !onAceptar || aceptando || aceptacionHecha) return;
+    if (acta.status === "ENVIADA") return; // ya enviada — nada que aceptar
+    if (!aceptarArmado) {
+      setAceptarArmado(true);
+      return;
+    }
+    setAceptarArmado(false);
+    setAceptando(true);
+    try {
+      // 1) Corrección manual de datos — SOLO si el supervisor editó algo y
+      //    el acta trae clasificación (sin ella no hay códigos reales que
+      //    corregir; la ubicación textual degradada no se toca — honestidad).
+      if (huboEdicionManual && datosManual && acta.clasificacion) {
+        const c = acta.clasificacion;
+        const dep2 = c.departamento?.codigo?.padStart(2, "0") ?? "";
+        // Nombres REALES desde la base (el select solo viaja con códigos;
+        // el nombre sale del catálogo — jamás inventado). Si la base no
+        // cargó o la ruta no existe, el nombre cae al reconocido o "".
+        const nombreMun =
+          baseDivipol
+            ? (municipiosDe(baseDivipol, dep2).find(
+                (m) => m.codigo.padStart(3, "0") === datosManual.municipio,
+              )?.nombre ?? c.municipio?.nombre ?? "")
+            : (c.municipio?.nombre ?? "");
+        const nombrePuesto =
+          baseDivipol && datosManual.zona
+            ? (puestosDe(baseDivipol, dep2, datosManual.municipio, datosManual.zona).find(
+                (p) => p.codigo.padStart(2, "0") === datosManual.puesto,
+              )?.nombre ?? c.puesto?.nombre ?? "")
+            : (c.puesto?.nombre ?? "");
+        const municipio =
+          datosManual.municipio && datosManual.municipio !== c.municipio?.codigo?.padStart(3, "0")
+            ? { codigo: datosManual.municipio, nombre: nombreMun }
+            : c.municipio;
+        const zona =
+          datosManual.zona && datosManual.zona !== c.zona?.codigo?.padStart(2, "0")
+            ? { codigo: datosManual.zona }
+            : c.zona;
+        const puesto =
+          datosManual.puesto && datosManual.puesto !== c.puesto?.codigo?.padStart(2, "0")
+            ? { codigo: datosManual.puesto, nombre: nombrePuesto }
+            : c.puesto;
+        const mesa = datosManual.mesa ?? c.mesa;
+        const tipo = datosManual.tipo !== c.tipo ? datosManual.tipo : c.tipo;
+        const totalPaginas =
+          c.pagina?.total ?? acta.pagina?.total ?? 1;
+        const paginaEditada =
+          datosManual.paginaIndex !== (c.pagina?.index ?? acta.pagina?.index ?? 1)
+            ? { index: datosManual.paginaIndex, total: totalPaginas }
+            : c.pagina;
+        useE14Store.getState().editarActaActual({
+          clasificacion: { ...c, municipio, zona, puesto, mesa, tipo, pagina: paginaEditada },
+          // Ubicación textual (fallback de display) — coherente con la
+          // corrección (mismos datos, formato de la ActaUbicacion).
+          ubicacion: {
+            ...acta.ubicacion,
+            municipio: municipio ? `${municipio.codigo} - ${municipio.nombre}`.replace(/ - $/, "") : acta.ubicacion?.municipio ?? "",
+            zona: zona?.codigo ?? acta.ubicacion?.zona ?? "",
+            puesto: puesto ? `${puesto.codigo} - ${puesto.nombre}`.replace(/ - $/, "") : acta.ubicacion?.puesto ?? "",
+            mesa: mesa != null ? String(mesa) : acta.ubicacion?.mesa ?? "",
+          },
+          ...(paginaEditada ? { pagina: paginaEditada } : {}),
+        });
+      }
+      // 2) Envío REAL de la fila abierta (misma maquinaria del lote).
+      const ok = await onAceptar();
+      if (!ok) return; // sin fila abierta / envío en curso — honesto, sin flash
+      // 3) Flash → avance al siguiente acta del lote (mismo gesto del rechazo).
+      setAceptacionHecha(true);
+      if (timerAceptarRef.current) clearTimeout(timerAceptarRef.current);
+      timerAceptarRef.current = setTimeout(() => {
+        timerAceptarRef.current = null;
+        setAceptacionHecha(false);
+        onNavegar?.(1);
+      }, 1200);
+    } finally {
+      setAceptando(false);
+    }
+  };
+
+  /** Patch del ingreso manual (selects del diseño 3) — marca la edición
+   *  para que ACEPTAR sepa que hay corrección que hornear. */
+  const patchManual = (p: Partial<NonNullable<typeof datosManual>>) => {
+    setDatosManual((prev) => (prev ? { ...prev, ...p } : prev));
+    setHuboEdicionManual(true);
+  };
+
   if (!acta) return null;
   const join = joinDeActa(acta);
   const pildora = pildoraEstadoActa(acta);
@@ -462,23 +645,46 @@ export function ModalRevisor({
   const enviadaAuto = Boolean(acta.enviadoAutomaticamente);
   const rechazadaYa = acta.status === "RECHAZADA";
 
-  // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — ronda 2):
-  //    el 1D REAL leído al papel por el pipeline (clasificación AUTO →
-  //    codigoUnico.crudo — los 15 dígitos decodificados del escaneo,
-  //    gramática codigoUnicoE14). Respaldo honesto: el manifiesto de actas
-  //    reales (barcodeImpreso verbatim del formulario). NUNCA el código de
-  //    tracking del sistema (acta.codigoBarras «*E14-SEN-…*» — ese NO está
-  //    impreso en el acta).
-  const tipoFormulario = (acta.clasificacion?.tipo ?? acta.tipo) as
-    | "TRANSMISION"
-    | "DELEGADOS";
-  const barcodeEscaneado =
-    c?.codigoUnico?.crudo ??
-    (join
-      ? cargarActasReales().actas[`${join.idEnlace}::${join.mesa}`]
-          ?.barcodesImpresos[tipoFormulario]
-      : undefined) ??
-    "";
+  // ── KIT aceptar-revision-masiva-v1 — opciones REALES de la base DIVIPOL ──
+  // Editable SOLO en actas sin envío automático que no están enviadas ni
+  // rechazadas (el diseño 3: el supervisor corrige y ACEPTA). Sin base o
+  // sin departamento reconocido → display honesto (DatoPanel de siempre).
+  const manualEditable = Boolean(
+    onAceptar && !enviadaAuto && acta.status !== "ENVIADA" && !rechazadaYa,
+  );
+  const dep2 = c?.departamento?.codigo?.padStart(2, "0") ?? "";
+  const opsPaises =
+    baseDivipol && dep2 ? municipiosDe(baseDivipol, dep2) : [];
+  const opsZonas =
+    baseDivipol && dep2 && datosManual?.municipio
+      ? zonasDe(baseDivipol, dep2, datosManual.municipio)
+      : [];
+  const opsPuestos =
+    baseDivipol && dep2 && datosManual?.municipio && datosManual?.zona
+      ? puestosDe(baseDivipol, dep2, datosManual.municipio, datosManual.zona)
+      : [];
+  const totalMesas =
+    baseDivipol && dep2 && datosManual
+      ? mesasDePuesto(
+          baseDivipol,
+          dep2,
+          datosManual.municipio,
+          datosManual.zona,
+          datosManual.puesto,
+        )
+      : null;
+  const opsMesas =
+    totalMesas != null && totalMesas > 0
+      ? Array.from({ length: totalMesas }, (_, i) => i + 1)
+      : [];
+  const totalPaginas = c?.pagina?.total ?? acta.pagina?.total ?? 1;
+
+  // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — rondas 2
+  //    y 3): el 1D REAL leído al papel por el pipeline o el manifiesto de
+  //  actas reales como respaldo — UNA sola fuente (barcodeRealDeActa del
+  //  adaptador, la misma que publica el monitor). NUNCA el código de
+  //  tracking del sistema (acta.codigoBarras «*E14-SEN-…*»).
+  const barcodeEscaneado = barcodeRealDeActa(acta);
 
   return (
     <div
@@ -608,9 +814,16 @@ export function ModalRevisor({
             <Contrast className="h-4 w-4" />
           </button>
           <span className="h-3 w-px bg-[#21362e]" />
-          {/* SCORE — dato real del pipeline (misma escala /10 de siempre). */}
+          {/* SCORE — dato real del pipeline (misma escala /10 de siempre).
+              Color semántico de los diseños: esmeralda ≥ 8 (óptima —
+              diseño «envío automático» 10/10) · ámbar < 8 (score bajo —
+              diseño «sin envío automático» 6/10). */}
           <span
-            className="flex items-center gap-1.5 rounded border border-emerald-400 bg-emerald-500/25 px-2 py-0.5 text-[11px] font-bold tracking-wider text-emerald-400"
+            className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-bold tracking-wider ${
+              acta.score >= 8
+                ? "border-emerald-400 bg-emerald-500/25 text-emerald-400"
+                : "border-amber-500/70 bg-[#261e0b] text-amber-300"
+            }`}
             title="Score de calidad del acta"
           >
             <CircleCheck className="h-3 w-3" />
@@ -846,9 +1059,11 @@ export function ModalRevisor({
                 </>
               ) : (
                 <>
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+                  {/* Diseño 3 — «visor de actas sin envío automático»: el
+                      panel pasa a MODO EDICIÓN (ingreso manual de datos). */}
+                  <SquarePen className="h-4 w-4 shrink-0 text-emerald-400" />
                   <span className="truncate font-mono text-xs font-bold uppercase tracking-wider text-gray-200">
-                    SIN ENVÍO AUTOMÁTICO
+                    INGRESO MANUAL DE DATOS
                   </span>
                 </>
               )}
@@ -914,17 +1129,101 @@ export function ModalRevisor({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <DatoPanel etiqueta="País" valor={pais} />
-              <DatoPanel etiqueta="Zona" valor={zonaTxt} />
-              <DatoPanel etiqueta="Puesto" valor={puesto} />
-              <DatoPanel etiqueta="Mesa" valor={mesa} />
+              {manualEditable && opsPaises.length > 0 && datosManual ? (
+                <>
+                  {/* DISEÑO 3 — INGRESO MANUAL DE DATOS: selects con opciones
+                      REALES de la base DIVIPOL (país/zona/puesto/mesa); la
+                      cascada reinyecta la ruta (cambiar país limpia zona,
+                      puesto y mesa — la jerarquía manda). */}
+                  <DatoSelect
+                    etiqueta="País"
+                    ariaLabel="Seleccionar país del acta"
+                    valor={datosManual.municipio}
+                    opciones={opsPaises.map((m) => ({
+                      valor: m.codigo.padStart(3, "0"),
+                      texto: `${m.nombre} (${m.codigo})`,
+                    }))}
+                    onCambiar={(v) =>
+                      patchManual({ municipio: v, zona: "", puesto: "", mesa: null })
+                    }
+                  />
+                  <DatoSelect
+                    etiqueta="Zona"
+                    ariaLabel="Seleccionar zona del acta"
+                    valor={datosManual.zona}
+                    opciones={opsZonas.map((z) => ({
+                      valor: z.codigo.padStart(2, "0"),
+                      texto: `Zona ${z.codigo}`,
+                    }))}
+                    onCambiar={(v) =>
+                      patchManual({ zona: v, puesto: "", mesa: null })
+                    }
+                  />
+                  <DatoSelect
+                    etiqueta="Puesto"
+                    ariaLabel="Seleccionar puesto del acta"
+                    valor={datosManual.puesto}
+                    opciones={opsPuestos.map((p) => ({
+                      valor: p.codigo.padStart(2, "0"),
+                      texto: `${p.codigo} - ${p.nombre}`,
+                    }))}
+                    onCambiar={(v) => patchManual({ puesto: v, mesa: null })}
+                  />
+                  <DatoSelect
+                    etiqueta="Mesa"
+                    ariaLabel="Seleccionar mesa del acta"
+                    valor={datosManual.mesa != null ? String(datosManual.mesa) : ""}
+                    opciones={opsMesas.map((n) => ({
+                      valor: String(n),
+                      texto: `Mesa ${String(n).padStart(3, "0")}`,
+                    }))}
+                    onCambiar={(v) => patchManual({ mesa: v ? Number(v) : null })}
+                  />
+                </>
+              ) : (
+                <>
+                  <DatoPanel etiqueta="País" valor={pais} />
+                  <DatoPanel etiqueta="Zona" valor={zonaTxt} />
+                  <DatoPanel etiqueta="Puesto" valor={puesto} />
+                  <DatoPanel etiqueta="Mesa" valor={mesa} />
+                </>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2 border-t border-[#16231e]/40 pt-2">
-              <DatoPanel etiqueta="Origen" valor={origenDe(acta)} />
-              <DatoPanel
-                etiqueta="Página"
-                valor={pagina ? `${pagina.index} DE ${pagina.total}` : "- DE -"}
-              />
+              {manualEditable && datosManual ? (
+                <>
+                  <DatoSelect
+                    etiqueta="Origen"
+                    ariaLabel="Seleccionar origen del acta"
+                    valor={datosManual.tipo}
+                    opciones={[
+                      { valor: "DELEGADOS", texto: "DELEGADOS" },
+                      { valor: "TRANSMISION", texto: "TRANSMISIÓN" },
+                    ]}
+                    onCambiar={(v) =>
+                      patchManual({ tipo: v === "TRANSMISION" ? "TRANSMISION" : "DELEGADOS" })
+                    }
+                  />
+                  <DatoSelect
+                    etiqueta="Página"
+                    ariaLabel="Seleccionar página del acta"
+                    valor={String(datosManual.paginaIndex)}
+                    opciones={Array.from({ length: Math.max(1, totalPaginas) }, (_, i) => ({
+                      valor: String(i + 1),
+                      texto: `${i + 1} DE ${Math.max(1, totalPaginas)}`,
+                    }))}
+                    onCambiar={(v) => patchManual({ paginaIndex: Number(v) || 1 })}
+                  />
+                </>
+              ) : (
+                <>
+                  <DatoPanel etiqueta="Origen" valor={origenDe(acta)} />
+                  <DatoPanel
+                    etiqueta="Página"
+                    valor={pagina ? `${pagina.index} DE ${pagina.total}` : "- DE -"}
+                  />
+                </>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2 border-t border-[#16231e]/40 pt-2">
               <DatoPanel etiqueta="Kit" valor={kit} />
@@ -994,6 +1293,43 @@ export function ModalRevisor({
               <ShieldCheck className="h-4 w-4 text-emerald-400" />
               <span>ACCIONES DEL SUPERVISOR</span>
             </div>
+            {/* ACEPTAR ACTA (diseño 3 — actas SIN envío automático): envío
+                real de la fila abierta con los datos corregidos. 2 toques —
+                el envío NUNCA es accidental. */}
+            {onAceptar && !enviadaAuto && acta.status !== "ENVIADA" && (
+              aceptacionHecha ? (
+                <p
+                  role="status"
+                  className="mb-3 flex w-full items-center justify-center gap-2 rounded border border-emerald-500/60 bg-emerald-500/15 px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-emerald-400"
+                >
+                  <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                  ACEPTADA — ENVIADA
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void aceptarActa()}
+                  disabled={aceptando}
+                  title="Aceptar el acta con los datos revisados y enviarla (2 toques)"
+                  className={`mb-3 flex w-full items-center justify-center gap-2 rounded px-4 py-2.5 font-mono font-bold text-xs uppercase tracking-wider shadow-lg transition-colors active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 ${
+                    aceptarArmado
+                      ? "animate-pulse bg-emerald-400 text-[#04120c]"
+                      : "bg-emerald-500 text-[#04120c] hover:bg-emerald-400"
+                  }`}
+                >
+                  {aceptando ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" strokeWidth={2.5} />
+                  )}
+                  {aceptando
+                    ? "ENVIANDO…"
+                    : aceptarArmado
+                      ? "¿CONFIRMAR ENVÍO?"
+                      : "ACEPTAR ACTA"}
+                </button>
+              )
+            )}
             {rechazoHecho ? (
               <p
                 role="status"
@@ -1064,6 +1400,44 @@ function DatoPanel({ etiqueta, valor }: { etiqueta: string; valor: string }) {
       >
         {valor}
       </div>
+    </div>
+  );
+}
+
+/** Celda SELECT del ingreso manual de datos (diseño 3) — misma caja del
+ *  DatoPanel pero editable. Opciones SIEMPRE de la base real (el llamador
+ *  filtra por ruta DIVIPOL). */
+function DatoSelect({
+  etiqueta,
+  valor,
+  opciones,
+  onCambiar,
+  ariaLabel,
+}: {
+  etiqueta: string;
+  valor: string;
+  opciones: Array<{ valor: string; texto: string }>;
+  onCambiar: (valor: string) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-gray-400">
+        {etiqueta}
+      </label>
+      <select
+        value={valor}
+        onChange={(e) => onCambiar(e.target.value)}
+        aria-label={ariaLabel}
+        className="w-full cursor-pointer truncate rounded border border-[#16231e] bg-[#060a09] px-2 py-1.5 font-mono text-xs text-gray-200 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+      >
+        {valor === "" && <option value="">—</option>}
+        {opciones.map((o) => (
+          <option key={o.valor} value={o.valor}>
+            {o.texto}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

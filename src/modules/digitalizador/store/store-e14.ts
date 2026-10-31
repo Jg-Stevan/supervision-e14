@@ -42,6 +42,9 @@ import { publicarActaMasiva, type ResultadoPublicacion } from "@/modules/supervi
 // KIT recepcion-actas-v1 (D28): el desenlace SIN_JOIN nunca llega a
 // publicarActaMasiva — se registra aquí, donde se decide (log de recepción).
 import { registrarRecepcion } from "@/modules/supervision/data/recepcion-log";
+// Manifiesto de actas reales (D24 — memoizado en módulo): respaldo del
+// barcode IMPRESO en el papel cuando el pipeline no decodificó el 1D.
+import { cargarActasReales } from "@/modules/supervision/data/actas-reales/actas-reales";
 import { leerRegistro } from "../lib/e14/masiva/cola";
 import type { Acta } from "../lib/e14/types";
 import { logger } from "../lib/logger";
@@ -106,6 +109,27 @@ export function joinDeActa(acta: Acta): { idEnlace: string; mesa: string; tipo: 
   return { idEnlace, mesa: String(c.mesa).padStart(3, "0"), tipo: c.tipo };
 }
 
+/** CÓDIGO DE BARRAS REAL del acta escaneada (feedback del dueño — ronda 3):
+ *  el 1D decodificado del papel por el pipeline (codigoUnico.crudo — los
+ *  dígitos reales del escaneo, gramática codigoUnicoE14) o, como respaldo
+ *  honesto, el barcodeImpreso del manifiesto de actas reales (verbatim del
+ *  formulario). NUNCA el código de tracking del sistema (acta.codigoBarras
+ *  «*E14-SEN-…*» — ese NO está impreso en el acta). Única fuente para el
+ *  panel del modal y la impresión publicada al monitor (D23). */
+export function barcodeRealDeActa(acta: Acta): string {
+  const crudo = acta.clasificacion?.codigoUnico?.crudo;
+  if (crudo) return crudo;
+  const join = joinDeActa(acta);
+  if (!join) return "";
+  const tipo = (acta.clasificacion?.tipo ?? acta.tipo) as
+    | "TRANSMISION"
+    | "DELEGADOS";
+  return (
+    cargarActasReales().actas[`${join.idEnlace}::${join.mesa}`]
+      ?.barcodesImpresos[tipo] ?? ""
+  );
+}
+
 /** Dimensions de la foto (dataURL) para `FotoActa` — la medición real vive
  * en supervision/data/actas-runtime.ts (única fuente); aquí solo se consume. */
 
@@ -160,7 +184,9 @@ async function publicarDesdeActa(
       puesto: c.puesto!.codigo,
       mesa,
       lugar: c.puesto!.nombre,
-      barcode: acta.codigoBarras || undefined,
+      // Ronda 3 (feedback del dueño): el barcode REAL del acta escaneada
+      // (1D del pipeline o manifiesto) — JAMÁS el tracking «*E14-SEN-…*».
+      barcode: barcodeRealDeActa(acta) || undefined,
       etiquetaFormulario: formulario === "TRANSMISION" ? "TRANSMISIÓN" : "CÓNSUL/EMBAJADOR",
     },
     nombreArchivo: `E14_${idEnlace}_${mesa}_${formulario}-${paginaIndex}.jpg`,
