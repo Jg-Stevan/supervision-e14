@@ -15,11 +15,14 @@
  */
 import {
   actualizarIndicePayload,
+  borrarHistorico,
+  indiceEnviadasPorPayload,
   listarHistorico,
   registrarEntradaHistorico,
   type EntradaHistorica,
 } from "./historico";
-import { listarMapeados } from "./cola";
+import { listarMapeados, vaciar as vaciarCola } from "./cola";
+import { resetearPayloadsSesion } from "./dedup-payloads";
 import { leerFlags } from "../flags";
 
 // ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1/C-3): MODO PRUEBAS ───────
@@ -44,8 +47,72 @@ import { leerFlags } from "../flags";
 /** e64p (C-1/C-2 — MODO PRUEBAS). Desde cola-persistente-v1: kill switch del
  *  dueño — el override `colaPersistente: false` (e14-flags-overrides) activa
  *  el modo pruebas (auto-borrado al cargar). Default TRUE: la masiva SOLO se
- *  elimina con vaciar() del dueño — petición literal 2026-10-24. */
-export const COLA_PERSISTENTE = leerFlags().colaPersistente ?? true;
+ *  elimina con vaciar() del dueño — petición literal 2026-10-24.
+ *  R8b — DESCONEXIÓN COMPLETA: constante PRIVADA del ledger — los gestos de
+ *  ciclo de vida de abajo son la ÚNICA puerta (el store JAMÁS brancha sobre
+ *  el flag; cero imports de este kill switch fuera de este módulo). */
+const COLA_PERSISTENTE = leerFlags().colaPersistente ?? true;
+
+// ─── R8b — DESCONEXIÓN COMPLETA del kill switch (misión punto 2) ────────────
+// El ciclo de vida del MODO PRUEBAS (e64p C-1/C-2/C-3) se decide AQUÍ y SOLO
+// aquí: el store consume los TRES gestos de abajo (sesión / vaciar / índice
+// por payload) y no conoce el flag. Comportamiento byte a byte del bloque
+// que vivía disperso en store.ts — misma higiene, mismo orden, mismos catch.
+
+/** e64p (C-1 — MODO PRUEBAS): preparación de sesión en cargarFilas().
+ *  false = producción (el caller sigue con la restauración de siempre).
+ *  true = la cola arranca VACÍA — cero restauración (sin filas fantasma ni
+ *  Maps reconstruidos) + higiene de la persistencia vieja (cola IDB + ledger
+ *  del histórico) + memoria de dedup de la sesión en cero, para que la
+ *  pasada siguiente sea de cero (QA doble pasada del kit). */
+export async function prepararSesionModoPruebas(): Promise<boolean> {
+  if (COLA_PERSISTENTE) return false;
+  try {
+    await vaciarCola();
+  } catch {
+    /* la cola muere igual en la bandeja (IDB caída — kit §3) */
+  }
+  try {
+    await borrarHistorico();
+  } catch {
+    /* conservador — el ledger se re-borra en el próximo vaciar/carga */
+  }
+  resetearPayloadsSesion(); // e64p C-1 — el mapa de payload de la sesión muere aquí
+  resetearIndiceEnviadas();
+  return true;
+}
+
+/** e64p (C-2 — MODO PRUEBAS) dentro de vaciar(): el ciclo de vida COMPLETO
+ *  de la memoria de dedup muere aquí (reversa declarada del RL-e65b-5 SOLO
+ *  en modo pruebas): mapa de payload de la sesión (hoy sobrevivía a vaciar
+ *  en la misma sesión) + ledger del histórico → limpiar y re-subir el MISMO
+ *  lote procesa completo de cero (QA del kit). En producción (true) no-op
+ *  byte a byte: D-e65b-1 intacta — VACIAR respeta el ledger (RL-e65b-5). */
+export async function higieneModoPruebasVaciar(): Promise<void> {
+  if (COLA_PERSISTENTE) return;
+  resetearPayloadsSesion();
+  try {
+    await borrarHistorico();
+  } catch {
+    /* conservador — el índice ya no lo verá en esta sesión */
+  }
+}
+
+/** e73 §C + e64p C-3 — hit del LEDGER por payload EXACTO (el índice por
+ *  payload del sondeo) con la decisión COLA_PERSISTENTE AQUÍ. null = sin hit
+ *  (modo pruebas: el ledger NO alimenta los Maps de dedup ni el índice por
+ *  payload — cero memoria ENTRE lotes · payload vacío · índice caído —
+ *  conservador RL-e65b-3: el caller sigue a dhash como hoy). */
+export async function enviadaLedgerPorPayload(
+  payload: string,
+): Promise<EntradaHistorica | null> {
+  if (!payload || !COLA_PERSISTENTE) return null; // e64p C-3
+  try {
+    return (await indiceEnviadasPorPayload(true)).get(payload) ?? null;
+  } catch {
+    return null; // índice caído → conservador (RL-e65b-3)
+  }
+}
 
 // ─── e65-dedup-enviadas-v1 — ÍNDICE DEL HISTÓRICO DE ENVIADAS (D-e65-3) ────
 // Carga LIVIANA una vez por sesión de encolado: listarMapeados con mapper

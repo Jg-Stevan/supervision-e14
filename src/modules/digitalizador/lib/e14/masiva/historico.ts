@@ -79,7 +79,7 @@ export async function registrarEntradaHistorico(e: EntradaHistorica): Promise<vo
 
 /** getAll() — los registros son llaves chicas (~100 B c/u); miles de entradas
  *  son triviales; NUNCA retiene Blob (lección L7). Consumido por
- *  indiceEnviadasDe() en store.ts (índice fusionado ledger+cola — T-2b). */
+ *  indiceEnviadasDe() en dedup-indice.ts (índice fusionado ledger+cola — T-2b). */
 export async function listarHistorico(): Promise<EntradaHistorica[]> {
   const db = await abrirHistorico();
   const store = transaccion(db, "readonly");
@@ -93,10 +93,12 @@ export async function listarHistorico(): Promise<EntradaHistorica[]> {
 /** clear() — e65b: SOLO para utilidad futura del dueño, SIN cablear a
  *  vaciar() en producción (RL-e65b-5 — REVERSA de D-e65b-1: el histórico
  *  sobrevive la cola; la cola es el taller, el envío es el hecho).
- *  e64p (C-1/C-2 — MODO PRUEBAS): cableada en store.ts SOLO bajo !COLA_PERSISTENTE
- *  — la memoria de enviadas muere con la sesión/limpiar (la cola arranca
- *  vacía y el dueño re-prueba de cero). En producción
- *  (COLA_PERSISTENTE=true) sigue SIN cablear (D-e65b-1 intacta). */
+ *  e64p (C-1/C-2 — MODO PRUEBAS): cableada en dedup-indice.ts SOLO bajo
+ *  !COLA_PERSISTENTE (prepararSesionModoPruebas / higieneModoPruebasVaciar —
+ *  desconexión R8b: la decisión vive en el ledger) — la memoria de enviadas
+ *  muere con la sesión/limpiar (la cola arranca vacía y el dueño re-prueba
+ *  de cero). En producción (COLA_PERSISTENTE=true) sigue SIN cablear
+ *  (D-e65b-1 intacta). */
 export async function borrarHistorico(): Promise<void> {
   const db = await abrirHistorico();
   const store = transaccion(db, "readwrite");

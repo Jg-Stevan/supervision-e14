@@ -54,6 +54,7 @@ import {
 import { BANDA_A, intentoSobrePixeles, type PixelesQr } from "./qr-pixeles";
 import {
   enviadaPorPayload as enviadaPorPayloadStore,
+  marcarDuplicadaCon,
   marcarYaEnviada,
   originalQrDePayload as originalQrDePayloadStore,
   registrarQrPayload as registrarQrPayloadStore,
@@ -160,19 +161,24 @@ export async function aplicarVeredictoPrescan(
 ): Promise<void> {
   switch (veredicto.accion) {
     case "duplicada": {
-      try {
-        const reg = await deps.leerRegistro(filaId);
-        await deps.guardarRegistro({
-          ...reg,
-          estado: "DUPLICADA",
-          dupOf: veredicto.originalId,
-          // SIN campo `dedup` (§F.2) — es opcional; el comportamiento queda
-          // completo (reuso <1 s, UI, informe) y el contrato D57 intacto.
-        });
-      } catch {
-        /* IDB caída / fila fuera de la cola → patch solo en memoria */
-      }
-      deps.actualizarFila(filaId, { estado: "DUPLICADA", dupOf: veredicto.originalId });
+      // Helper ÚNICO de la marca DUPLICADA (R8b — misma maquinaria que
+      // cadenaDedup/dedupExactoIngesta) con las deps INYECTADAS de este
+      // módulo (patrón §C — este contrato congelado no cambia). SIN guard
+      // (el caller ya garantizó viva+PENDIENTE — anti-zombi §G), SIN campo
+      // `dedup` (§F.2 — es opcional; el comportamiento queda completo:
+      // reuso <1 s, UI, informe — contrato D57 intacto), SIN traza y con
+      // patch SIEMPRE (§G: IDB caída / fila fuera de la cola → patch solo
+      // en memoria — honesto).
+      await marcarDuplicadaCon(
+        {
+          leerRegistro: deps.leerRegistro,
+          guardarRegistro: deps.guardarRegistro,
+          actualizarFila: deps.actualizarFila,
+        },
+        filaId,
+        veredicto.originalId,
+        { patchSiempre: true },
+      );
       return;
     }
     case "ya-enviada":
