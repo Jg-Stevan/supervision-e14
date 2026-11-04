@@ -79,8 +79,9 @@ Un clon limpio queda operativo tras `bun install`.
 | `bun run build` | Export estático a `out/` (con `preparar` previo). |
 | `bun run typecheck` | `tsc --noEmit` en modo estricto. |
 | `bun run lint` | ESLint (flat config). |
-| `bun test` | Suite de `bun:test` (31 archivos, 354 pruebas). |
+| `bun test` | Suite de `bun:test` (33 archivos, 385 pruebas). |
 | `bun run verificar` | typecheck + lint + test, la misma puerta que CI. |
+| `bun scripts/hub-local.mjs` | Hub E2E en esta máquina: sirve el móvil y el panel por HTTPS/HTTP y recibe `POST /actas`. Ver [`docs/RUNBOOK-e2e-local-v1.md`](docs/RUNBOOK-e2e-local-v1.md). |
 
 Pruebas opcionales de medición (no son gates): `scripts/bench-navegador.mjs`,
 `scripts/ort-bench.mjs`, `scripts/cf-wasm-partes.mjs --dry-run`.
@@ -148,6 +149,7 @@ docs/                Arquitectura, ADR, mediciones, notas OCR/QR y runbooks
 | [`docs/DEUDA.md`](docs/DEUDA.md) | Lo que falta, lo cortado y sus condiciones de retorno. |
 | [`docs/RUNBOOK-deploy-pages-v1.md`](docs/RUNBOOK-deploy-pages-v1.md) | Despliegue Cloudflare y wasm partido. |
 | [`docs/RUNBOOK-sidecar-instalable-v1.md`](docs/RUNBOOK-sidecar-instalable-v1.md) | Empaquetado y uso del sidecar nativo. |
+| [`docs/RUNBOOK-e2e-local-v1.md`](docs/RUNBOOK-e2e-local-v1.md) | Flujo E2E en una máquina: el celular envía, este panel recibe por red. |
 | [`docs/auditoria/GUIA-AUDITORIA-supervision-e14.md`](docs/auditoria/GUIA-AUDITORIA-supervision-e14.md) | Guion de verificación funcional. |
 
 ## Contribuir
