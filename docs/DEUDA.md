@@ -57,6 +57,30 @@ operación; **P2** mejora deseable.
   fueron: cero consumidores en `src`, `functions`, `scripts` y `native`, y no
   hay `prisma/` (el `@prisma/client` de `db.ts` no era ni generable). Lección
   para el gate: si algo se borra, hay que borrar también su import huérfano.
+- **PENDIENTE DE DECISIÓN DEL DUEÑO — datos personales en un repo que va a
+  público.** Dos niveles, verificados abriendo los archivos, no deducidos del
+  nombre:
+  · *Capturas de sesión* (`docs/capturas-actas-reales-v1/` y
+    `docs/capturas-divipola-v1/`, quince PNG, 1,5 MB, cero referencias en el
+    repo): pantazos del supervisor con actas reales abiertas; en la página 2 se
+    leen nombres, cédulas y firmas de los jurados. **Ya retiradas del árbol de
+    trabajo.**
+  · *Assets que consume el producto*: ocho `*.webp` de
+    `src/modules/supervision/data/actas-reales/assets/`, seis `*.jpg` de
+    `src/modules/digitalizador/assets/actas-demo/` y `acta-e14-real.jpg`
+    (3,3 MB). La página 1 lleva totales de votación (eso es público por ley),
+    pero la página 2 —`E14_88_335_005_02_001_TRANSMISION-2.webp`, revisada—
+    muestra **nombres, cédulas y firmas de tres jurados**, que son datos
+    personales de particulares y contradicen la regla del propio repo
+    («no commitees actas», `CONTRIBUTING.md` regla 10).
+  **El commit `910c71f` ya está empujado a `origin/main`**, así que borrar del
+  árbol no basta: purgar el historial exige reescritura (`git filter-repo`/BFG)
+  + `push --force` — prohibida por la regla del repo sin autorización explícita —
+  y además un ticket a GitHub para que limpie cachés y vistas. Opciones: (a)
+  autorizar la reescritura antes de abrir el repo, (b) anonimizar las páginas 2
+  (tapar firmas/cédulas) y re-empujar, (c) reemplazar los assets por fixtures
+  sintéticos, (d) declararlos documentos públicos y asumir las firmas visibles.
+  Ninguna se decidió aquí porque ninguna es reversible sin tocar el remoto.
 - Los JSON de benchmark contienen texto OCR de actas reales: **nunca** se
   versionan (ya están ignorados).
 - `public/vendor/onnxruntime/` y `public/scanner/capa0-qr.worker.js` se generan
