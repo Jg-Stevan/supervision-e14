@@ -53,3 +53,7 @@ yarn-error.log*
 .z-ai-config
 .claude
 local-*
+
+# Hub local de E2E (scripts/hub-local.mjs): actas REALES recibidas del
+# celular + certificados self-signed. Dato de sesión, jamás al repo.
+/.hub-local/

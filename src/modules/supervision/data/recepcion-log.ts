@@ -18,6 +18,8 @@
  *
  * ORÍGENES:
  *   · "carga-masiva"     — llegadas EN VIVO del módulo digitalizador.
+ *   · "puente-local"     — llegadas del hub local (`hub-local.ts`): el acta
+ *     vino por red desde un celular, no de la bandeja de este computador.
  *   · "ingesta-inicial"  — el ancla estático SUP-6 (manifest actas-reales):
  *     se siembra 1 vez perezosa (`asegurarSemilla`) con desfases fijos —
  *     misma disciplina determinística del mock (§0-7: nada aleatorio).
@@ -34,8 +36,19 @@ import { cargarActasReales } from "./actas-reales/actas-reales";
 /** Desenlace de la recepción (mismos términos del kit D27/PublicacionChip). */
 export type EstadoRecepcion = "PUBLICADA" | "BLOQUEADA" | "SIN_JOIN";
 
-/** De dónde llegó el acta. */
-export type OrigenRecepcion = "carga-masiva" | "ingesta-inicial";
+/** De dónde llegó el acta.
+ *  · `puente-local` — E2E local: llegó por red desde el digitalizador móvil,
+ *    traído del hub por `data/hub-local.ts` (mismo embudo, otro medio). */
+export type OrigenRecepcion = "carga-masiva" | "ingesta-inicial" | "puente-local";
+
+/** Los dos orígenes que cuentan como LLEGADA EN VIVO (destello de la fila y
+ *  badge del sidebar): la bandeja de este computador y el hub local del
+ *  celular. `ingesta-inicial` es el ancla estática del backlog — no es una
+ *  llegada, y por eso no cuenta. Un solo predicado para que el criterio no se
+ *  duplique en cada consumidor. */
+export function esLlegadaViva(origen: OrigenRecepcion): boolean {
+  return origen === "carga-masiva" || origen === "puente-local";
+}
 
 /** UNA página recibida (grano del pipeline: 1 foto = 1 entrada). */
 export interface EntradaRecepcion {

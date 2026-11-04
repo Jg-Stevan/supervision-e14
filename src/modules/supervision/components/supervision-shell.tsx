@@ -27,8 +27,12 @@ import {
 import { cn } from "@/lib/utils";
 import { SUPERVISOR } from "../data/mock-repository";
 // KIT recepcion-actas-v1 (D28): el badge del sidebar cuenta las llegadas
-// EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
-import { suscribirseRecepcion } from "../data/recepcion-log";
+// EN VIVO (origen carga-masiva o puente-local) que ocurren fuera de la vista
+// Recepción.
+import { esLlegadaViva, suscribirseRecepcion } from "../data/recepcion-log";
+// E2E local — el sondeo del hub vive en el SHELL (no en la vista): si viviera
+// en Recepción, cambiar de vista cortaría el feed del celular.
+import { iniciarHubLocal } from "../data/hub-local";
 import { StatusDot } from "./status-dot";
 import { Esqueleto } from "./esqueleto";
 import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
@@ -345,9 +349,16 @@ function ShellInterno() {
     vistaRef.current = vista;
   }, [vista]);
 
+  // E2E local — reanuda el sondeo del hub si el dueño lo dejó encendido
+  // (localStorage). Con el hub apagado es un no-op, y en GitHub Pages también:
+  // nunca se inicia un fetch que no existe.
+  useEffect(() => {
+    iniciarHubLocal();
+  }, []);
+
   useEffect(() => {
     return suscribirseRecepcion((entrada) => {
-      if (entrada.origen !== "carga-masiva") return; // la semilla no cuenta
+      if (!esLlegadaViva(entrada.origen)) return; // la semilla no cuenta
       if (vistaRef.current === "recepcion") return;
       setRecepcionesNuevas((n) => n + 1);
     });

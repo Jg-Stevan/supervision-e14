@@ -10,6 +10,7 @@ import { CLASE_CHIP } from "@/shared/ui/tono";
 import {
   asegurarSemilla,
   consultarRecepciones,
+  esLlegadaViva,
   suscribirseRecepcion,
   type EntradaRecepcion,
   type EstadoRecepcion,
@@ -17,6 +18,8 @@ import {
 import { tiempoRelativo } from "./tiempo";
 import { KpiCard } from "./kpi-card";
 import { Esqueleto } from "./esqueleto";
+// E2E local — la tarjeta que sondea el hub del celular (flujo cel → compu).
+import { HubLocalCard } from "./hub-local-card";
 // Ronda C (R2/R3/R5) — métricas del feed + reloj vivo canónico (1 s).
 import { calcularMetricasFeed, type TonoRitmo } from "../data/feed-metricas";
 import { useRelojSegundos } from "./reloj-vivo";
@@ -187,6 +190,14 @@ function FilaRecepcion({
           >
             {ETIQUETA_ESTADO[entrada.estado]}
           </span>
+          {entrada.origen === "puente-local" && (
+            <span
+              className="label-caps mt-1.5 ml-1 inline-block rounded-[4px] border border-(--outline-variant) px-1.5 py-0.5 text-muted-foreground"
+              title="Llegó por la red desde un celular, traída del hub local"
+            >
+              DEL CELULAR
+            </span>
+          )}
         </span>
 
         {/* Destino (idEnlace D22 · mesa) + lugar impreso */}
@@ -357,7 +368,7 @@ export function VistaRecepcion({
     const desuscribir = suscribirseRecepcion((entrada) => {
       if (!vivo) return;
       setEntradas(consultarRecepciones());
-      if (entrada.origen !== "carga-masiva") return;
+      if (!esLlegadaViva(entrada.origen)) return;
       setFrescas((prev) => new Set(prev).add(entrada.id));
       const t = setTimeout(() => {
         setFrescas((prev) => {
@@ -632,6 +643,9 @@ export function VistaRecepcion({
           }
         />
       </div>
+
+      {/* E2E local — el puente del celular entra al mismo embudo (D25/D22). */}
+      <HubLocalCard />
 
       {/* Filtro por formulario + búsqueda */}
       <div className="flex flex-wrap items-center gap-2">

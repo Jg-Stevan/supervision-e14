@@ -36,7 +36,7 @@ import { tieneActa } from "./actas-mock";
 import { validarJoinDivipola } from "./validacion-d25";
 // KIT recepcion-actas-v1 (D28): toda publicación deja su entrada en el
 // log de RECEPCIÓN (PUBLICADA/BLOQUEADA) — el embudo es este módulo.
-import { registrarRecepcion } from "./recepcion-log";
+import { registrarRecepcion, type OrigenRecepcion } from "./recepcion-log";
 
 /** Entrada de publicación que envía el adaptador del digitalizador
  * (store-e14.ts) tras un envío de la cola masiva. */
@@ -164,9 +164,15 @@ function medirFoto(src: string): Promise<{ ancho: number; alto: number }> {
 
 /** Publica (o fusiona) una página de acta del digitalizador. Merge por
  * clave `${idEnlace}::${mesa}` — cada página llega en un envío distinto
- * (una foto = una fila = una página en el pipeline masiva). */
+ * (una foto = una fila = una página en el pipeline masiva).
+ *
+ * `origen` (E2E local): el embudo es UNO solo, el MEDIO no. El lote local del
+ * digitalizador usa `carga-masiva` (el default) y el sondeo del hub local usa
+ * `puente-local`, para que el feed de Recepción distinga «llegó por red desde
+ * un celular» de «procesada en este computador» sin duplicar la validación. */
 export async function publicarActaMasiva(
-  entrada: EntradaActaMasiva
+  entrada: EntradaActaMasiva,
+  origen: OrigenRecepcion = "carga-masiva"
 ): Promise<ResultadoPublicacion> {
   const clave = `${entrada.idEnlace}::${entrada.mesa}`;
 
@@ -178,7 +184,7 @@ export async function publicarActaMasiva(
   if (motivoJoin) {
     registrarRecepcion({
       fecha: Date.now(),
-      origen: "carga-masiva",
+      origen,
       estado: "BLOQUEADA",
       idEnlace: entrada.idEnlace,
       mesa: entrada.mesa,
@@ -206,7 +212,7 @@ export async function publicarActaMasiva(
     const motivo = `(d) página ${entrada.paginaIndex} fuera de rango (total: ${entrada.paginaTotal})`;
     registrarRecepcion({
       fecha: Date.now(),
-      origen: "carga-masiva",
+      origen,
       estado: "BLOQUEADA",
       idEnlace: entrada.idEnlace,
       mesa: entrada.mesa,
@@ -284,7 +290,7 @@ export async function publicarActaMasiva(
   // vista Recepción y el badge del sidebar se alimentan de aquí).
   registrarRecepcion({
     fecha: Date.now(),
-    origen: "carga-masiva",
+    origen,
     estado: "PUBLICADA",
     idEnlace: entrada.idEnlace,
     mesa: entrada.mesa,
