@@ -45,6 +45,18 @@ operación; **P2** mejora deseable.
 
 ## 4. Higiene del repositorio
 
+- **El gate local no era reproducible en un clon limpio.** Ocho componentes
+  `src/components/ui/*` (andamiaje shadcn: calendar, carousel, chart, command,
+  drawer, form, input-otp, resizable) y `src/lib/db.ts` importaban `cmdk`,
+  `embla-carousel-react`, `input-otp`, `react-day-picker`, `react-hook-form`,
+  `react-resizable-panels`, `recharts`, `vaul` y `@prisma/client` — ninguno de
+  esos nueve paquetes está en `package.json` ni en `bun.lock`. En la máquina de
+  desarrollo pasaban porque `node_modules` heredaba los paquetes de un
+  `bunx shadcn add` antiguo; en CI (`bun install --frozen-lockfile` + `tsc`)
+  `bun run verificar` estaba rojo desde el primer commit. Los nueve archivos se
+  fueron: cero consumidores en `src`, `functions`, `scripts` y `native`, y no
+  hay `prisma/` (el `@prisma/client` de `db.ts` no era ni generable). Lección
+  para el gate: si algo se borra, hay que borrar también su import huérfano.
 - Los JSON de benchmark contienen texto OCR de actas reales: **nunca** se
   versionan (ya están ignorados).
 - `public/vendor/onnxruntime/` y `public/scanner/capa0-qr.worker.js` se generan
