@@ -1,0 +1,2155 @@
+/**
+ * RealCoreBridge — el motor REAL de @jg-stevan/scanner-core (SPEC-fase-logica §5).
+ * FASE LÓGICA L2: fuente ARCHIVO completa —
+ *   fileToCaptureDataUrl → detectDocumentEdges → processImage →
+ *   evaluateQuality → requestOcr → mapeo §4 → Acta.
+ * FASE LÓGICA L3 (§5 CAMARA): la fuente CÁMARA reusa EL MISMO pipeline con
+ *   dos entradas —
+ *   · `archivo` (foto ya capturada por ZSL / captureSmart / cámara nativa
+ *     iOS — la ruta del spec §7: "la foto entra al mismo pipeline (como
+ *     ARCHIVO, L2)");
+ *   · `frameActual` (video con stream vivo, último recurso) → grab síncrono
+ *     a canvas a RESOLUCIÓN DEL STREAM → dataUrl → pipeline. El grab debe
+ *     ocurrir ANTES de que React desmonte el visor (el stream se detiene al
+ *     cambiar a ANALIZANDO), por eso se hace en el arranque síncrono de
+ *     escanearActa.
+ * Mapeo de score §4.1 (techos por level), gate de legibilidad §4.2 (el OCR
+ * manda sobre el score: ILEGIBLE calca la rechazada v2) y timeout global de
+ * 15 s que RESUELVE un acta RECHAZADA (nunca congela la UI ni revienta el
+ * flujo de toasts del store). Etiquetas de etapa idénticas por fuente.
+ * FASE LÓGICA L5 (§7.5): `recortar` — re-ejecuta §5 sobre `fotoOriginal` con
+ * el QUAD MANUAL (F5-MANUAL del core: `manual: true` respeta el quad al
+ * píxel, sin refine) → fotoProcesada nueva → evaluateQuality + gate OCR →
+ * acta ACTUALIZADA. El rescate D20 NO consume intento (fuente/intento/
+ * maxIntentos/paginación se preservan por spread del acta de entrada).
+ *
+ * Lo que sigue simulado (votos/firmas/ubicación) se rellena del seed exacto
+ * (§0: no se presenta como extraído).
+ *
+ * UX-REAL F1 (SPEC-ux-real-bn-editor §F1, D35): SIMULACIÓN también pasa por
+ * este pipeline — la fuente carga el acta E-14 REAL incluida (§1) y la trata
+ * EXACTAMENTE como un `archivo` de IMPORTAR (mismo File → fileToCaptureDataUrl
+ * → F-IMPORT: EXIF/12MP). El mock de la fase gráfica se retiró.
+ *
+ * ── R7b — PARTICIÓN DEL BRIDGE (docs/revision-v1/03a-digitalizador-nucleo
+ *    §7; movimientos move-only, un commit por módulo) ─────────────────────
+ * Este archivo queda como FACHADA del núcleo: aquí viven el pipeline ×2, la
+ * clase RealCoreBridge y TODO lo público (RealCoreBridge,
+ * OpcionesEscaneoConTimeout, marcoPerdonadoPorLectura — get-bridge.ts,
+ * masiva/runner.ts y __tests__/gate.test.ts siguen importando de aquí SIN
+ * cambios). Lo auxiliar vive ahora en módulos por responsabilidad:
+ *   · gate.ts                    (R7a/M3)  — desenlace unificado (criterio)
+ *   · calidad.ts                 (R7b/M1)  — medición del acta + score §4.1
+ *   · ocr-escalonado-runner.ts   (R7b/M2)  — runner RapidOCR + banda dirigida
+ *   · sim-assets.ts              (R7b/M5a) — assets SIM + ciclo/caché §G/§D3
+ *   · acta-factory.ts            (R7b/M5b) — construirActa/firmas/capturarFrame
+ *   · auditoria.ts               (R7b/M4)  — payload del registro del desenlace
+ *   · qr-zxing.ts                (R7b/M10) — loader zxing-wasm (antes en masiva/)
+ *   · vendor/jsQR.js(.d.ts)      (R7b/M10-fin) — jsQR vendido byte-idéntico
+ *                                (git mv de masiva/vendor — 0 imports estáticos
+ *                                núcleo→masiva; qr-pixeles.ts lo consume vía
+ *                                ../vendor, dirección correcta masiva→núcleo)
+ *   · pipeline-comun.ts          (R7c/M6-fin) — los CUERPOS gemelos restantes
+ *                                de los 2 pipelines (banda dirigida, esquinas
+ *                                e71, señales de texto, evidencia-borde, cola
+ *                                del log de auditoría D51 y payload del
+ *                                diagnóstico) — diferencias del sitio EXPLÍCITAS
+ *                                como campos tipados (patrón EntradaDesenlace)
+ * PENDIENTE (dueño): el import DINÁMICO de rescate
+ * scanner-core-bridge→masiva/identidad-qr (decodificarQrDeCapture, e64-qr
+ * T-2.1 — moverlo exige arrastrar la cadena completa de tiers QR de masiva;
+ * lazy intencional, no es inversión de símbolos estática). RESUELTO en R10
+ * (M10-fin, ola 4): el decodificador llega INYECTADO por
+ * `OpcionesEscaneo.decodificadorQrCam` (tipo DecodificadorQrCam en types.ts
+ * — patrón R8 store-api); el bridge ya NO importa masiva (ver bloque
+ * e64-qr T-2.1 del pipeline). Los cuerpos gemelos de los pipelines quedaron
+ * unificados en pipeline-comun.ts (M6-fin, R7c) — ver mapa arriba.
+ */
+import {
+  detectDocumentEdgesDetail,
+  fileToCaptureDataUrl,
+  processImage,
+} from "@jg-stevan/scanner-core/image-processor";
+import type { OrigenQuad } from "@jg-stevan/scanner-core/image-processor";
+// KIT e14-masiva-ux-v1 (T1): mecanismo de warm-up del worker OpenCV que ya
+// expone el core (el mismo que ScanView.tsx:757 invoca al montar) — la
+// detección al importar espera al worker en vez de caer al Sobel de una.
+import {
+  getScannerWorker,
+  warmUpScannerWorker,
+} from "@jg-stevan/scanner-core/detector-client";
+import { ocrTextIsValid } from "@jg-stevan/scanner-core/ocr";
+// KIT e14-motor-rapidocr-v1 (PROD-2 §3): motor de OCR de producción — módulo
+// compartido con el informe (singleton de sesión ÚNICO, pitfall §9.6). El
+// requestOcr del core SOLO vive en motores.ts (celda «actual» de la matriz —
+// instrumento congelado, pitfall §9.2).
+import { defaultQuad } from "@jg-stevan/scanner-core/types";
+// (R7b M5b: PageQuality viaja con construirActa — acta-factory.ts.)
+import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
+// (R7b M5b: ACTA_MOCK viaja con construirActa — acta-factory.ts.)
+import { cargarDivipol } from "./divipol";
+import {
+  clasificarCabecera,
+  PATRON_CABECERA,
+  tituloYUbicacionDe,
+  type ClasificacionE14,
+} from "./clasificador";
+// KIT e14-optimizacion-v1 (T1): los decodes del bridge pasan por el memo
+// FIFO tope 2 de image-utils — misma imagen, una sola decodificación por
+// dataURL del acta en vuelo. (R7b M1/M2: loadImageMemo ya solo se consume
+// DENTRO de calidad.ts y ocr-escalonado-runner.ts — import local a cada uno.)
+import { procesadaVaciaDataUrl } from "./image-utils";
+// KIT identificacion-codigo-v1 (FASE F, Task 120): marcas fiduciales de
+// esquina sobre el crop ya enderezado — señal «sin recortar» que ve los
+// recortes SUPERIORES que faltaSeccionInferior (kit 118, solo inferior) no ve.
+// (R7c M6-fin: ESQUINAS_OK/cuatroEsquinasFaltan/ladoEsquinaFaltante/
+// trazaEsquinas viajan con la medición de esquinas y el veto e71 —
+// pipeline-comun.ts los consume; el bridge ya no los importa directo.)
+// GUARD-BORDE Rev. 2 (SPEC-e14-guard-borde §2-§3, D1/D3): la verificación de
+// completitud vive en helper ÚNICO (completitud.ts) — «la geometría sospecha,
+// la tinta condena» — usado por AMBOS pipelines (escaneo y recorte, AC11).
+import { verificarCompletitud, type ResultadoCompletitud } from "./completitud";
+// KIT e14-gate-v2 (FASE G2): marcador OBLIGATORIO de votos — helper ÚNICO
+// compartido con el guard de completitud (motorTinta, cero duplicación).
+import { medirZonaVotos } from "./marcadores";
+// D63-C — KIT e63c-quad-gate-escaneo-v1: detector del MARCO IMPRESO del E-14
+// para el gate de escaneos (T2) — fotos y SIM jamás lo invocan (guards).
+import { evaluarMarcoImpreso, type MarcoEscaneo, type MarcoImpreso } from "./marco-escaneo";
+// KIT e14-score-lectura-v1: señal de LECTURA del score v2 (módulo puro — §4-A).
+// (R7a: PISO_LECTURA_FUERTE/TECHO_LECTURA_DEBIL se consumen ahora DENTRO del
+// desenlace unificado — gate.ts. R7c M6-fin: lazoPerdonadoPorLectura y
+// senalDeLectura las consume pipeline-comun.ts; el bridge solo usa el TIPO
+// NivelLectura — firma de marcoPerdonadoPorLectura.)
+import type { NivelLectura } from "./senal-lectura";
+// R7a — M3 (revisión 03a-digitalizador-nucleo): DESENLACE unificado del gate.
+// pipeline() y pipelineRecorte() delegan en este módulo PURO (transcripción
+// literal de las ramas gemelas — pitfall §9.9): mismo orden de caps, mismo
+// gate, mismos tokens; el log de auditoría queda EN EL CALLER con el
+// resultado estructurado (SalidaDesenlace).
+import {
+  DETALLE_ILEGIBLE,
+  evaluarGate as evaluarGateCriterio,
+  resolverDesenlace,
+  type ResultadoGate,
+} from "./gate";
+// R7b (M1) — medición de CALIDAD y mapeo a score MOVIDOS a calidad.ts
+// (partición §7 del reporte 03a — helpers libres sin estado de módulo).
+// (R7c M6-fin: contrasteEfectivoDe/esquinasDeActa/scoreDeCalidad las consume
+// pipeline-comun.ts — el bridge mide calidad y arma el InfoCrop del sitio.)
+import { calidadDeActa, type InfoCrop } from "./calidad";
+// R7b (M5a) — assets y fetch de la SIMULACIÓN MOVIDOS a sim-assets.ts
+// (partición §7 del reporte 03a): tabla ACTAS_SIM, ciclo rotativo §G-2,
+// caché por índice y fetch por chip §D3 viajan con su estado de módulo.
+import { fetchActaSimPorScore, fetchActaSimulada } from "./sim-assets";
+import type { Acta, DiagnosticoActa, ProgresoAnalisis } from "./types";
+import type { E14Bridge, OpcionesEscaneo } from "./bridge";
+// R7b (M2) — runner del OCR ESCALONADO + banda dirigida MOVIDOS a
+// ocr-escalonado-runner.ts (partición §7 del reporte 03a): el bridge solo
+// orquesta (reconocerRapidOcr queda para reconocerTexto — mismo contrato).
+// (R7c M6-fin: ocrBanda la consume bandaDirigidaSiFalta — pipeline-comun.ts.)
+import { reconocerRapidOcr, reconocerRapidOcrEscalonado } from "./ocr-escalonado-runner";
+// Espera del turno OCR global, acumulada POR ACTA (ver EsperaOcrSink en
+// rapidocr). Solo el TIPO: se borra al compilar — cero dependencia runtime.
+import type { EsperaOcrSink } from "./ocr/rapidocr";
+// KIT e14-ocr-nativo-v1 (FASE 2): el tipo del prefetched del runner MASIVA.
+// Solo el TIPO — el cliente del sidecar vive en ocr/nativo.ts y su promise
+// LLEGA INYECTADA en `opciones.actaNativa` (patrón R10 de la frontera: el
+// núcleo no importa masiva, masiva no toca el gate).
+import type { ActaNativa } from "./ocr/nativo";
+// R7b (M5b) — fábrica del ACTA MOVIDA a acta-factory.ts (partición §7 del
+// reporte 03a): construirActa/firmasPorStatus eran métodos privados (el
+// contador de id era this.contador) — ahora funciones libres con contador de
+// módulo (equivalencia documentada en la cabecera de acta-factory.ts);
+// ParcialPipeline (acumulador) y capturarFrame (grab §5) viajan con ella.
+import {
+  capturarFrame,
+  construirActa,
+  firmasPorStatus,
+  type ParcialPipeline,
+} from "./acta-factory";
+// KIT e14-orientacion-auto-v1 (T-A2/A3): probe de orientación por confianza
+// de rec + anclas (§2.1) — corre ANTES del OCR completo en AMBOS pipelines
+// (escaneo y pipelineRecorte). SIM OMITIDO (guard — chips 8.2/7.0/4.3
+// intactos, §2.2); JAMÁS lanza (catch interno — el pipeline no depende, §5).
+import { probeOrientacion, rotarDataUrl } from "./orientacion";
+// KIT e14-orientacion-qr-v1 — la brújula QR decide la rotación por el
+// cuadrante del QR (bench v8.3: 4/4); el sondeo OCR queda como red de
+// seguridad cuando el QR no lee. leerFlags = kill-switch del dueño (§D).
+import { brujulaQrOrientacion, type BrujulaQr } from "./orientacion-qr";
+import { leerFlags } from "./flags";
+// KIT e14-proceso-lado-v1 — tope del lienzo de SALIDA del warp+enhance del
+// lote. `processImage` ya sabe hacer esto (`opts.maxLongSide`, default
+// PROCESSED_MAX_LONG_SIDE=4032): con cap < 4032 decodifica el JPEG YA
+// RESIZEADO (DCT ≈ ½ por octava, sin materializar los 12 MP) y el homografía
+// INTER_CUBIC + el enhance (modelo de sombras, Bradley, despeckle) corren
+// sobre ESE lienzo. Es el ítem CPU más pesado del lote medido — bench `gpu18`
+// (2026-11-03, WebGPU, 1 worker): `procesoBwMs` 34,5 s de 144,7 s de muro,
+// ~5,8 s por acta, y con el pool en 2 (`gpu19`) los dos warps se serializan en
+// UN solo worker OpenCV ⇒ es EL cuello. El quad son FRACCIONES 0-1 ⇒ bajar la
+// fuente NO cambia la geometría (invariante WYSIWYG del core, F3-A). Default
+// 4032 = sin opts = camino de hoy byte-idéntico.
+type OptsProceso = { maxLongSide?: number };
+
+function optsProceso(): OptsProceso | undefined {
+  try {
+    const v = leerFlags().procesoLadoMayor;
+    if (typeof v === "number" && v >= 1024 && v < 4032) return { maxLongSide: v };
+  } catch {
+    /* flags sin leer ⇒ el default del core (4032) */
+  }
+  return undefined;
+}
+// WAVE2 A1 — tipo del resultado del probe (para el diag de la mini descartada por el fallo seguro).
+import type { ProbeOrientacion } from "./orientacion";
+// (R7b M2: los caps del det-preprocess DET_CAP_PROD/DET_CAP_RAPIDO y la
+// decisión/elegir del módulo PURO (anclasDe/elegirMejor/necesitaSegunda)
+// viven ahora en ocr-escalonado-runner.ts — el runner es su único
+// consumidor en producción; el módulo puro sigue testeable headless — bun.)
+// R7c (M6-fin) — los CUERPOS GEMELOS restantes de pipeline()/pipelineRecorte()
+// viven en pipeline-comun.ts (una implementación; diferencias del sitio
+// explícitas como campos tipados — patrón EntradaDesenlace de R7a): banda
+// dirigida, esquinas e71, señales de texto, evidencia-borde, cola del log de
+// auditoría (formato D51 congelado) y payload del diagnóstico.
+import {
+  bandaDirigidaSiFalta,
+  caracterizarLectura,
+  construirDiagnosticoSitio,
+  evidenciaBordeDe,
+  medirEsquinasSitio,
+  trazaDesenlaceComun,
+  vetoCuatroEsquinas,
+} from "./pipeline-comun";
+// KIT e14-observabilidad-v1 (A1-C7, cambio QUIRÚRGICO): emisión perf
+// del desenlace — lazy import + catch total (el rastreo jamás rompe
+// el pipeline, §2.4), mapea SOLO campos ya en scope (§9.10: tiempos/
+// gate/ocrValido leídos de diag — nada re-evaluado). El actaId sale
+// SIEMPRE hasheado (FNV-1a dentro de emitirPerfDeActa, §2.5).
+import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
+
+/** KIT e14-masiva-tiempos-v1 (PR-2, prefetch): memo de decode POR INSTANCIA
+ *  de File (WeakMap — GC-friendly, no retiene blobs). El mismo File JAMÁS
+ *  se decodifica dos veces: el prefetch del runner MASIVA
+ *  (precargarDecodeArchivo) oculta el decode de N+1 tras el OCR de N y el
+ *  pipeline de N+1 golpea la memo (~0 ms — AC-P1). TRANSPARENTE para todos
+ *  los flujos existentes: misma promesa, mismo resultado; si el decode
+ *  falla, la entrada sale de la memo y el siguiente intento re-decodifica
+ *  (comportamiento de hoy — kit AC-P2 «jamás bloquea»). */
+const decodeMemo = new WeakMap<File, Promise<string>>();
+
+/** KIT e14-ocr-nativo-v1 (FASE 2): exportado para el prefetch del runner
+ *  MASIVA (masiva/prefacta.ts) — el acta-completa viaja al sidecar sobre LA
+ *  MISMA decodificación que el pipeline usará como `fotoOriginal` (memo por
+ *  instancia → un solo decode, fotogramas idénticos por construcción). */
+export function decodeArchivoMemo(file: File): Promise<string> {
+  let p = decodeMemo.get(file);
+  if (!p) {
+    p = fileToCaptureDataUrl(file);
+    decodeMemo.set(file, p);
+    void p.catch(() => {
+      if (decodeMemo.get(file) === p) decodeMemo.delete(file);
+    });
+  }
+  return p;
+}
+
+// SPRINT-A (perf/decode-once-v1) A5: el export precargarDecodeArchivo fue
+// eliminado — DEAD desde D66 (el prefetch del runner se re-apuntó a
+// asegurarMaestro; 0 anclas en scripts/, 0 usos en src). La memo interna
+// decodeArchivoMemo sigue viva (el pipeline la usa).
+
+/** Timeout de seguridad global §5 (worker colgado en gama baja).
+ *  KIT e67-watchdog-rescate-v1 (M-e67-0 / cambio A): 15_000 → 120_000 — el
+ *  plan del dueño pedía subirlo (asumía 30 s; el default REAL era 15 s desde
+ *  el split del repo — desviación documentada en el REPORTE). Evidencia:
+ *  un ARCHIVO real terminó VÁLIDO a los ~53.5 s y el watchdog de 15 s ya lo
+ *  había rechazado (resultado descartado en silencio). 120 s da colchón
+ *  frente al peor caso observado (53.5 s + 36 líneas OCR) sin esperar de
+ *  más a un colgaje real. MASIVA no cambia: pasa su propio presupuesto
+ *  (OpcionesEscaneoConTimeout.timeoutMs — WATCHDOG_MS del runner). El
+ *  RECORTE manual conserva su RECORTE_TIMEOUT_MS propio (ruta distinta). */
+const TIMEOUT_MS = 120_000;
+/** KIT e14-recorte-manual-v1 (T1): presupuesto del RECORTE manual — el warp
+ *  del editor mide 14–17.4 s en el equipo del dueño (OCR solo: 9.8–14.3 s),
+ *  al borde del límite de 15 s del escaneo. El timeout SIGUE RECHAZANDO
+ *  (gate/score intactos — §5); lo único que cambia es qué foto muestra el
+ *  acta resultante: el recorte ya horneado (parcial), no la foto vieja. */
+const RECORTE_TIMEOUT_MS = 30_000;
+/** KIT e14-recorte-manual-v1 (T1): lo que el pipeline del RECORTE ya horneó
+ *  cuando el presupuesto vence — campos del return normal que SOLO dependen
+ *  del warp (etapa 1). Vacío = el warp no alcanzó → acta vieja (igual a hoy). */
+type ParcialRecorte = {
+  fotoProcesada?: string;
+  procesadaVacia?: boolean;
+  quadDetectado?: Quad;
+  rotation?: number;
+};
+/** KIT e14-masiva-ux-v1 (T1): tope de cada espera del warm-up del worker
+ *  OpenCV en la detección (1ª espera antes del intento + 1ª antes del
+ *  reintento — §3-T1). Vencido el tope se continúa como hoy (fallback
+ *  Sobel): la espera JAMÁS bloquea el pipeline más de 5 s por paso. */
+const TOPE_ESPERA_WORKER_MS = 5_000;
+const DETALLE_TIMEOUT = "TIEMPO DE PROCESADO EXCEDIDO";
+// (R7a) Los copies/techos del DESENLACE (DETALLE_ILEGIBLE · DETALLE_GENERICO ·
+// DETALLE_INCOMPLETA(+_ESCANEO) · DETALLE_SIN_VOTOS · DETALLE_BAJO ·
+// TECHO_SIN_SENAL · TECHO_ESCUDO_FONDO) viven AHORA en lib/e14/gate.ts
+// (desenlace unificado, M3) — importados arriba. El bridge conserva SOLO los
+// que aún consume en rutas propias: DETALLE_TIMEOUT (watchdogs de abajo),
+// DETALLE_ILEGIBLE (catch de detección del pipeline — el detalle vive hoy
+// en gate.ts) y TECHO_SIN_SENAL (scoreDeCalidad). Los comentarios/valores
+// originales viajaron íntegros.
+
+// R7c (M6-fin): senalDeContenido vive en pipeline-comun.ts (era gemela ×2 —
+// R7a §10.2; el módulo común la consume dentro de caracterizarLectura).
+
+// GUARD-BORDE Rev. 2 (D1/D3): la función esActaCompleta del guard del PR #33
+// (geometría: esquina al filo ≤0.001/≥0.999 o área <30% → INCOMPLETA) VIVIÓ
+// aquí y hoy vive en ./completitud (verificarCompletitud) — la geometría
+// pasó de CONDENAR a SER SOSPECHA: la condena exige tinta impresa cortada al
+// filo del recorte (tabla de decisión §2 del spec). Historia completa del
+// guard y su calibración: comentario del helper + CHANGES 0-decimoquinto.
+// PATRON_CABECERA vive ahora en ./clasificador (§4.5: se mantiene como
+// constante para traza/log — ya NO decide sola el estado del gate).
+
+/** §D8.3 (SPEC-e14-score-ocr Rev. 3): quad IDENTIDAD — «el recorte es la
+ *  foto entera». Con sinRecorte la detección de bordes NO corre y el quad
+ *  (fracciones 0-1 de la foto) cubre TODO el encuadre: se imprime en el log
+ *  como hoy (traza de auditoría) y alimenta el editor (recorte manual real
+ *  sobre la foto completa) y revelar/filtros (mismo quad). */
+const QUAD_IDENTITY: Quad = [
+  { x: 0, y: 0 },
+  { x: 1, y: 0 },
+  { x: 1, y: 1 },
+  { x: 0, y: 1 },
+];
+
+/** KIT e14-ocr-nativo-v1 (FASE 2): los 4 pares normalizados que devuelve el
+ *  sidecar ([TL,TR,BR,BL], mismo orden que `orderPoints` del worker y
+ *  `_ordena_pts` del nativo) en el `Quad` del core. `null` = el sidecar no
+ *  encontró papel (manda `quad: null` cuando su cascada falla) → el llamador
+ *  usa QUAD_IDENTITY, igual que hoy con un plano sin bordes. */
+function quadDesdeNativo(q: [number, number][] | null): Quad | null {
+  if (!q || q.length !== 4) return null;
+  const [tl, tr, br, bl] = q;
+  return [
+    { x: tl[0], y: tl[1] },
+    { x: tr[0], y: tr[1] },
+    { x: br[0], y: br[1] },
+    { x: bl[0], y: bl[1] },
+  ];
+}
+
+
+/** Entrada del pipeline: File (ARCHIVO o foto CÁMARA) o dataUrl ya crudo.
+ *  §D8.2 (SPEC-e14-score-ocr Rev. 3): el flag «sin recorte automático» viaja
+ *  con el ASSET de SIMULACIÓN dentro de la entrada (parámetro interno
+ *  privado — OpcionesEscaneo queda INTACTO, nada público nuevo). */
+type EntradaPipeline = { archivo: File; sinRecorte?: boolean } | { dataUrl: string };
+
+
+function dosDigitos(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+
+/** KIT e14-masiva-ux-v1 (T1): ¿el worker OpenCV está listo para detectar?
+ *  Si no, espera su warm-up con TOPE (warmUpScannerWorker/waitReady del
+ *  core — nunca tumba el pipeline: false = continuar como hoy, fallback
+ *  Sobel manda). SSR/worker muerto → false inmediato. */
+async function esperarWorkerCaliente(topeMs: number): Promise<boolean> {
+  try {
+    const cliente = getScannerWorker();
+    if (cliente?.isReady) return true;
+    warmUpScannerWorker(); // crea/reanima el worker si no existe (idempotente)
+    const activo = getScannerWorker();
+    if (!activo) return false;
+    return await Promise.race([
+      activo.waitReady(),
+      new Promise<boolean>((res) => setTimeout(() => res(false), topeMs)),
+    ]);
+  } catch {
+    return false;
+  }
+}
+
+/** KIT e14-masiva-ux-v1 (T4): opciones con presupuesto de timeout OPCIONAL.
+ *  Intersección LOCAL — el kit §1 prohíbe tocar `bridge.ts` (casa de
+ *  OpcionesEscaneo): el default 15_000 sigue mandando (escaneo individual
+ *  INTACTO) y MASIVA pasa 120_000. La bivariance de métodos TS admite el
+ *  método con el parámetro más ancho (class implements E14Bridge sigue
+ *  compilando; los callers pasan la variable tipada — sin excess-check).
+ *  e67 (M-e67-0): el default real era 15_000 — ahora TIMEOUT_MS = 120_000
+ *  (cambio A del kit; el comentario T4 conservaba el valor histórico). */
+export type OpcionesEscaneoConTimeout = OpcionesEscaneo & {
+  /** Presupuesto total del pipeline para ESTA llamada (ms). Ausente =
+   *  TIMEOUT_MS (120_000 desde e67 — 15_000 antes). */
+  timeoutMs?: number;
+  /** e67-watchdog-rescate-v1 (cambio B — RESCATE post-timeout): el pipeline
+   *  NO se cancela al vencer el presupuesto — sigue vivo y su desenlace
+   *  llega DESPUÉS del acta RECHAZADA de timeout. Antes ese resultado
+   *  válido se DESCARTABA en silencio (`if (vencido) return`). Ahora viaja
+   *  por ESTE callback (SOLO se dispara tras un vencimiento — idempotente:
+   *  si el pipeline gana la carrera jamás se llama). El receptor decide:
+   *  el store individual rescata actas válidas (OPTIMA/ADVERTENCIA) y
+   *  revierte el rechazo; MASIVA no lo pasa (undefined → no-op byte a
+   *  byte — el watchdog D65 del runner manda igual). Firmas intactas.
+   *  `tiempoRealMs` = ms reales del pipeline completo (dato, jamás inventado). */
+  onRescateTardio?: (acta: Acta, tiempoRealMs: number) => void;
+  /** PARCHES P1/P2 del plan masiva (brief Agente A — kit de parches sobre
+   *  `5d08dd6`): true SOLO cuando el caller es el runner MASIVA
+   *  (`opcionesMasiva` del runner). La brújula QR (e14-orientacion-qr-v1)
+   *  queda OMITIDA en masiva: su payload ya NO se consume allí (guard qrCam
+   *  de arriba — `if (!esMasiva && !parcial.qrCam)`) y su rescate ZXing
+   *  cuesta 1.3–5.1 s en CADA foto donde jsQR falla (bench v8.3 del kit).
+   *  La rotación en masiva queda cubierta por: deskew D63-B (pre-proceso
+   *  escaneos) + probe de orientación e66/e70 (origenSenales — corre en el
+   *  else-if de abajo cuando la brújula no decidió) + rescate WAVE3 §B.
+   *  El flujo individual y SIM quedan byte-idénticos (campo ausente =
+   *  falsy). Intersección LOCAL — `bridge.ts` INTOCABLE (kit §1), mismo
+   *  patrón de `timeoutMs`/`OpcionesEscaneoConTimeout`. */
+  desdeMasiva?: boolean;
+};
+
+// R7c (M6-fin): fmtClasif vive en pipeline-comun.ts (solo lo consumían los
+// 2 logs de auditoría — ahora compone la cola común trazaDesenlaceComun).
+
+/**
+ * Emite progreso INTERPOLADO mientras una espera real del core está en vuelo
+ * (decode/detect/proceso no exponen avance interno; el OCR sí lo reporta
+ * real). La fracción se cap al 95% para que la resolución de la etapa
+ * siempre produzca un salto visible en ANALIZANDO.
+ */
+function conRampa<T>(
+  promesa: Promise<T>,
+  msEstimados: number,
+  evento: (fraccion: number) => ProgresoAnalisis,
+  emitir: (p: ProgresoAnalisis) => void,
+): Promise<T> {
+  const inicio = performance.now();
+  // FIX (auditoría 2-a #7): autolímite del ramp — si la promesa envuelta
+  // cuelga SIN resolver (worker OpenCV muerto), el intervalo seguía
+  // disparando indefinidamente (un timer fugado por pipeline colgado; el
+  // timeout externo recupera la UI pero no el timer). 20× el estimado es
+  // inalcanzable en operación normal y cubre el peor caso real.
+  let ticks = 0;
+  const maxTicks = Math.ceil((msEstimados * 20) / 140);
+  const timer = setInterval(() => {
+    if (++ticks > maxTicks) {
+      clearInterval(timer);
+      return;
+    }
+    const f = Math.min(1, (performance.now() - inicio) / msEstimados);
+    emitir(evento(f * 0.95));
+  }, 140);
+  return promesa.then(
+    (valor) => {
+      clearInterval(timer);
+      return valor;
+    },
+    (error) => {
+      clearInterval(timer);
+      throw error;
+    },
+  );
+}
+
+/** KIT e63d-escaneo-ya-recortado-v1 (F0.2) · hotfix e63d-rev2 (kit e63e ANEXO A
+ *  caso 4): la LECTURA perdona al marco «cortado» de un ESCANEO — mismo patrón
+ *  que lazoPerdonadoPorLectura (tabla §3-A del kit). El perdón exige el trío
+ *  COMPLETO: veredicto cortado + lectura FUERTE + secciones presentes
+ *  (faltaSeccionInferior false). Cualquier otro caso → false: la mutilación
+ *  real (falta una sección) y la lectura débil/media jamás se perdonan —
+ *  «la lectura perdona al marco, NO al contenido faltante». completo/ceñido/
+ *  no-encontrado nunca bloquean por construcción (el perdón no aplica).
+ *
+ *  REV.2 — el gate F0.2 rev.1 (d671c29) tenía la polaridad INVERTIDA: el
+ *  ternario del bridge negaba el trío (`!(FUERTE && !faltaSeccion)`), con lo
+ *  cual el caso P2 (cortado+FUERTE+secciones) quedaba RECHAZADA INCOMPLETA y
+ *  los MEDIA/DEBIL/SIN pasaban el gate del marco — exacto al revés de la
+ *  doctrina (comentario del sitio, REPORTE-e63d §F0.2 y tabla §3-A).
+ *  Exportado (patrón D-5) para el QA headless del kit e63e §4.2. */
+export function marcoPerdonadoPorLectura(
+  veredicto: MarcoImpreso,
+  nivelLectura: NivelLectura,
+  faltaSeccion: boolean,
+): boolean {
+  return veredicto === "cortado" && nivelLectura === "FUERTE" && !faltaSeccion;
+}
+
+
+export class RealCoreBridge implements E14Bridge {
+  async escanearActa(opciones: OpcionesEscaneoConTimeout): Promise<Acta> {
+    // Resolución de la entrada (L3 §5 CAMARA + F1 SIMULACIÓN):
+    //  · CAMARA + archivo (ZSL/captureSmart/iOS) → MISMO pipeline que ARCHIVO.
+    //  · CAMARA sin archivo + frameActual (video vivo) → grab síncrono.
+    //  · SIMULACIÓN sin archivo (D35) → el acta E-14 incluida, EXACTAMENTE
+    //    como un archivo de IMPORTAR (la foto real del dueño, EXIF incluido).
+    //  · Sin entrada → error explícito (el guard del store ya avisó).
+    let entrada: EntradaPipeline | null = null;
+    if (opciones.archivo) {
+      entrada = { archivo: opciones.archivo };
+    } else if (opciones.fuente === "CAMARA") {
+      const video = opciones.frameActual;
+      const dataUrl = video && video.readyState >= 2 && video.videoWidth
+        ? capturarFrame(video)
+        : null;
+      if (!dataUrl) {
+        throw new Error("SIN CAPTURA PARA ANALIZAR (fuente CÁMARA)");
+      }
+      entrada = { dataUrl };
+    } else if (opciones.fuente === "SIMULACION") {
+      // SIMULACIÓN = pipeline real sobre el acta E-14 incluida (D35).
+      // Mismo camino que IMPORTAR: File → fileToCaptureDataUrl (F-IMPORT: EXIF/12MP).
+      // §D3 (SPEC-e14-simulacion-scores): con `simular` el asset es el FIJO de
+      // la banda del chip (determinista) — el ciclo rotativo §G queda intacto
+      // para el disparo normal de la fuente. §D8.2 (Rev. 3): el flag
+      // sinRecorte del asset viaja con la entrada (parámetro interno privado).
+      const sim =
+        opciones.simular && opciones.scoreSimulado != null
+          ? await fetchActaSimPorScore(opciones.scoreSimulado)
+          : await fetchActaSimulada();
+      entrada = { archivo: sim.archivo, sinRecorte: sim.sinRecorte };
+    } else {
+      throw new Error("SIN IMAGEN PARA ANALIZAR (fuente ARCHIVO)");
+    }
+
+    // Acumulador de lo que ya se tiene (el acta de timeout rellena lo que
+    // alcance a conocer — p. ej. fotoOriginal si el decode alcanzó a correr).
+    const parcial: ParcialPipeline = {};
+    let vencido = false; // tras el timeout no se emite más progreso (§5)
+    const emitir = (p: ProgresoAnalisis) => {
+      if (!vencido) opciones.onProgreso?.(p);
+    };
+
+    // e67 (cambio B): reloj del rescate — ms REALES del pipeline completo
+    // (el callback de rescate viaja con este dato, jamás inventado).
+    const tInicioEscaneo = performance.now();
+    return new Promise<Acta>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        vencido = true;
+        // §5: el timeout NO rechaza la Promise — resuelve un acta RECHAZADA
+        // controlada (el toast crit sale del flujo normal del store).
+        resolve(
+          construirActa(opciones, parcial, {
+            score: 0,
+            status: "RECHAZADA",
+            rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_TIMEOUT },
+          }),
+        );
+        // KIT e14-masiva-ux-v1 (T4): presupuesto OPCIONAL por llamada —
+        // MASIVA pasa su presupuesto del watchdog (WATCHDOG_MS del runner);
+        // el default manda en el flujo individual (120_000 desde e67).
+      }, opciones.timeoutMs ?? TIMEOUT_MS);
+
+      this.pipeline(opciones, entrada, parcial, emitir).then(
+        (acta) => {
+          if (vencido) {
+            // e67 (cambio B) — RESCATE post-timeout: el pipeline siguió
+            // vivo tras el vencimiento y terminó con un desenlace REAL
+            // (gate/score del pipeline, no del watchdog). Ya no se
+            // descarta en silencio: viaja por onRescateTardio para que el
+            // receptor valide y revierta el rechazo si es válido. Sin
+            // callback (MASIVA) → no-op, comportamiento de siempre.
+            opciones.onRescateTardio?.(
+              acta,
+              Math.round(performance.now() - tInicioEscaneo),
+            );
+            return;
+          }
+          clearTimeout(timer);
+          resolve(acta);
+        },
+        (error) => {
+          if (vencido) {
+            // e67: el pipeline TARDÍO falló — traza honesta; el acta
+            // queda RECHAZADA por tiempo (correcto, caso C del kit).
+            logger.info("[e14] pipeline falló tras timeout", {
+              mensaje: error instanceof Error ? error.message : String(error),
+            });
+            return;
+          }
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error("ERROR DE PIPELINE"));
+        },
+      );
+    });
+  }
+
+  /** Pipeline §5 (ARCHIVO y CAMARA comparten etapas y mapeo; ms por etapa en consola). */
+  private async pipeline(
+    opciones: OpcionesEscaneo,
+    entrada: EntradaPipeline,
+    parcial: ParcialPipeline,
+    emitir: (p: ProgresoAnalisis) => void,
+  ): Promise<Acta> {
+    const ms = { decode: 0, detect: 0, proceso: 0, procesoBw: 0, procesoOcr: 0, calidad: 0, ocr: 0, total: 0 };
+    const inicio = performance.now();
+    // Espera del turno OCR global de ESTA acta (probe + pasadas + banda).
+    // Un sink POR PIPELINE, no de módulo: con pool 2 la espera de la vecina
+    // jamás debe facturarse aquí.
+    const esperaOcr: EsperaOcrSink = { ms: 0 };
+
+    // 1) Entrada → data URL crudo (F-IMPORT del core: HEIC/EXIF/12MP seguros;
+    //    en CAMARA sin archivo el dataUrl ya vino del grab del <video>).
+    emitir({ etapa: "DETECTANDO", progreso: 0 });
+    const fotoOriginal =
+      "archivo" in entrada
+        ? await conRampa(
+            // KIT e14-masiva-tiempos-v1 (PR-2): decode con memo POR FILE —
+            // el prefetch del runner MASIVA comparte esta instancia → HIT.
+            decodeArchivoMemo(entrada.archivo),
+            700,
+            (f) => ({ etapa: "DETECTANDO", progreso: f * 0.5 }),
+            emitir,
+          )
+        : entrada.dataUrl;
+    ms.decode = performance.now() - inicio;
+    parcial.fotoOriginal = fotoOriginal;
+
+    // e64-qr T-2.1 — CAPA 0 QR también en cámara (kit FASE 2 / hermano C-1):
+    // el MISMO decodificador de masiva, señal ADITIVA — jamás afecta
+    // score/gate/OCR ni consume intento. Se lanza EN PARALELO al pipeline
+    // (el tier base resuelve en ~0.3-0.5 s — mucho antes del OCR) y se
+    // ESPETA donde el acta se construye. tiers "base" — ADAPTACIÓN DECLARADA:
+    // la cadena completa (~15-17 s sin-QR, bloques sync) rompería el timeout
+    // 15 s del flujo individual; el rescate pesado queda en masiva (timeout
+    // 120 s).
+    // GUARD (D63-C): `origenActa` viaja SOLO en entradas de MASIVA — allí la
+    // capa 0 del runner (cadena COMPLETA a nivel registro, no acta) manda y
+    // la señal base-only del bridge sería redundante y doble-costo: OMITIDA.
+    // El catch es el fallback silencioso del kit: sin la señal, el flujo de
+    // cámara sigue intacto.
+    // R10 — M10-fin (fin de la ÚLTIMA dependencia invertida núcleo→masiva):
+    // el decodificador ya NO se importa aquí (antes: import DINÁMICO de
+    // masiva/identidad-qr — PENDIENTE heredado de R7b); llega INYECTADO en
+    // `opciones.decodificadorQrCam` (patrón R8 store-api — frontera
+    // bridge.ts/types.ts). El runner MASIVA lo inyecta SIEMPRE: filas con
+    // `origen=null` (duda honesta del detector D63-A) caen en esta rama hoy
+    // y su señal viaja al veto ya-enviada post-OCR del runner (H1) — la
+    // inyección de la MISMA función preserva ese comportamiento byte a byte;
+    // el cableado del flujo individual/CÁMARA vive en su repo anfitrión.
+    // Sin decodificador → null (la MISMA conducta del catch de abajo: sin
+    // señal, el flujo de cámara sigue intacto).
+    const esMasiva = opciones.origenActa != null;
+    const decodificadorQrCam = opciones.decodificadorQrCam;
+    const qrCamPromesa: Promise<ParcialPipeline["qrCam"]> = esMasiva
+      ? Promise.resolve(undefined) // la capa 0 del runner manda en masiva
+      : (async () => {
+          try {
+            if (!decodificadorQrCam) return null; // R10 — sin señal inyectada: flujo intacto
+            return await decodificadorQrCam(fotoOriginal, { tiers: "base" });
+          } catch {
+            return null; // sin-payload — el flujo de cámara sigue intacto
+          }
+        })();
+    const aterrizarQrCam = async (): Promise<void> => {
+      // idempotente y acotada (el tier base tiene techo propio ~0.5 s)
+      parcial.qrCam = await qrCamPromesa;
+    };
+
+    // 2) Detección de bordes (worker OpenCV → fallback Sobel del core).
+    //    §D8.3 (SPEC-e14-score-ocr Rev. 3): con sinRecorte la detección NO
+    //    corre — «el recorte es la foto entera»: QUAD_IDENTITY (se imprime
+    //    en el log como hoy, traza de auditoría). SOLO alcanzable desde la
+    //    rama SIMULACIÓN (ARCHIVO/CÁMARA corren detect byte a byte, AC15).
+    const sinRecorte = "archivo" in entrada && entrada.sinRecorte === true;
+    // D63-C — KIT e63c-quad-gate-escaneo-v1: origen del archivo (detector
+    // D63-A) viaja en opciones SOLO para MASIVA — SIM y el flujo individual
+    // JAMÁS lo traen (guard doble del kit T3: nada de escaneos les aplica).
+    const origenActa = opciones.origenActa ?? null;
+    // KIT e63d-escaneo-ya-recortado-v1 (F2.1): un ESCANEO es rectangular por
+    // construcción — la detección de quad es una herramienta de FOTOS (papel
+    // sobre fondo). En un escaneo ceñido el único rectángulo fuerte es el
+    // MARCO IMPRESO del formulario: dejar que el worker «lo encuentre» =
+    // re-recortar el escaneo (fallo A del plan: P1 → cabecera fuera →
+    // recortada=1 → techo 7.9). Identidad DESDE EL INICIO (sin worker, sin
+    // Sobel, sin espera fría) — el deskew D63-B ya endereza la rotación y el
+    // marco D63-C gobierna el gate. La detección sigue byte a byte para
+    // fotos (identidad ya es la convención de sinRecorte que consume el
+    // editor — plan F2.4).
+    const escaneoIdentidad = origenActa === "escaneo" && !sinRecorte;
+    let quad: Quad;
+    // KIT e14-quad-sobel-v1 (P1 §4-B): quién fabricó el quad de verdad —
+    // "worker" (la cascada ganó) o "sobel" (el fallback, incluido el catch del
+    // propio Sobel con rect por defecto). null SOLO si ni siquiera corrió una
+    // detección (n/d jamás miente — misma filosofía del T-A).
+    let quadOrigen: OrigenQuad | "pagina-completa" | null = null;
+    // KIT e14-masiva-ux-v1 (T1): trazabilidad del arreglo en el log — si
+    // corrió el reintento (§3-T1.2). Solo AÑADIR campos al final del
+    // formato (los instrumentos del dueño lo parsean).
+    let detectReintento = false;
+    const tDetect = performance.now();
+    // KIT e14-ocr-nativo-v1 (FASE 2): el sidecar YA corrió detect → warp →
+    // sonda de orientación → b/n → QR → OCR sobre SU decodificación del mismo
+    // archivo (el runner MASIVA dispara el prefetch al tomar la fila). Si la
+    // ida resolvió, el pipeline CONSUME esos artefactos y se omite el trabajo
+    // duplicado — los tres pasos más caros del WASM. Lo que el JS conserva
+    // INTACTO sobre su propia copia de la foto: calidad, esquinas fiduciales,
+    // completitud, marcadores, score, gate, dedup y envío — la DECISIÓN sigue
+    // siendo del producto, nunca del sidecar. `null` (flag apagado, sidecar
+    // mudo, timeout, JSON raro, SIM o escaneo) = byte-idéntico a hoy. El coste
+    // del await cae en DETECCIÓN: es el mismo trabajo, hecho en otro sitio.
+    const nat: ActaNativa | null =
+      opciones.actaNativa && !sinRecorte && !opciones.simular && origenActa !== "escaneo"
+        ? await opciones.actaNativa
+        : null;
+    if (sinRecorte) {
+      quad = QUAD_IDENTITY;
+    } else if (escaneoIdentidad) {
+      // KIT e63d (F2.1): página completa SIN correr detección — el paso
+      // entero se omite (detect medio ≈ 0 ms en escaneos; el informe
+      // DETECCION contará quadOrigen "pagina-completa" por la vía normal).
+      // La clase entera de quads falsos queda eliminada POR CONSTRUCCIÓN,
+      // no por parche.
+      quad = QUAD_IDENTITY;
+    } else if (nat) {
+      // KIT FASE 2: el quad llega NORMALIZADO (0..1) desde el sidecar — mismo
+      // sistema de referencia del worker (fracciones sobre la foto, clampRect →
+      // toFractions) y MISMO orden de puntos [TL,TR,BR,BL] (orderPoints del
+      // worker y _ordena_pts del nativo son la misma convención). Normalizado
+      // es además INDEPENDIENTE del tamaño: el sidecar y el navegador pueden
+      // decodificar el JPEG con alturas distintas sin desalinearse.
+      // `quad: null` = la cascada nativa no encontró papel (igual que el
+      // "sobel" de abajo en un plano sin bordes) → el recorte es la foto entera.
+      const quadNat = quadDesdeNativo(nat.quad);
+      if (quadNat) {
+        quad = quadNat;
+        quadOrigen = nat.quadOrigen === "sobel" ? "sobel" : "worker";
+      } else {
+        quad = QUAD_IDENTITY;
+        quadOrigen = "pagina-completa";
+      }
+    } else {
+      try {
+        // T1.1: worker frío → esperar su warm-up con tope de 5 s (mecanismo
+        // del core — el mismo que ScanView invoca al montar). Si a los 5 s
+        // no está listo, continuar como hoy (no bloquear más).
+        await esperarWorkerCaliente(TOPE_ESPERA_WORKER_MS);
+        let detalle = await conRampa(
+          detectDocumentEdgesDetail(fotoOriginal),
+          900,
+          (f) => ({ etapa: "DETECTANDO", progreso: 0.5 + f * 0.4 }),
+          emitir,
+        );
+        // T1.2: el fallback Sobel FABRICÓ el quad (worker frío/ocupado) →
+        // esperar de nuevo (tope 5 s) y reintentar UNA sola vez. Si el
+        // reintento viene del worker, manda ese quad; si no, conservar el
+        // quad original (comportamiento actual — kit §3-T1.2).
+        if (detalle.origen === "sobel") {
+          const caliente = await esperarWorkerCaliente(TOPE_ESPERA_WORKER_MS);
+          if (caliente) {
+            detectReintento = true;
+            try {
+              const reintento = await detectDocumentEdgesDetail(fotoOriginal);
+              if (reintento.origen === "worker") detalle = reintento;
+            } catch {
+              /* reintento falló → quad original (kit §3-T1.2) */
+            }
+          }
+        }
+        quad = detalle.quad;
+        quadOrigen = detalle.origen;
+        // D63-C (T1): en ESCANEOS sin quad real — el worker falló y sobel
+        // fabricó (un escaneo plano sin bordes no tiene quad que encontrar;
+        // evidencia: 3/8 del informe cayeron a sobel) — la PÁGINA COMPLETA
+        // es el acta: sin warp de perspectiva (la rotación recta ya la trajo
+        // D63-B). Las FOTOS no cambian (T1.3: quad sobel de siempre).
+        // KIT e63d (F0.1): generalizado a TODO escaneo — un quad del worker
+        // sobre un escaneo es un re-recorte en potencia (el marco impreso es
+        // el único rectángulo fuerte y warp-earlo corta el escaneo). Hoy es
+        // camino MUERTO para escaneos (F2.1 ya no corre detección para
+        // ellos) — queda como defensa en profundidad: si la detección
+        // volviera a correr para un escaneo, el desenlace sigue siendo
+        // página completa.
+        if (origenActa === "escaneo") {
+          quad = QUAD_IDENTITY;
+          quadOrigen = "pagina-completa";
+        }
+      } catch {
+        // El core SIEMPRE devuelve Quad; una EXCEPCIÓN aquí = imagen no
+        // detectable → RECHAZADA ILEGIBLE inmediata (§5 paso 1, spec §7.5).
+        // El piso escénico D16 de ANALIZANDO completa la animación solo.
+        await aterrizarQrCam(); // e64-qr T-2.1: la señal QR viaja si terminó
+        return construirActa(opciones, parcial, {
+          score: 0,
+          status: "RECHAZADA",
+          rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_ILEGIBLE },
+        });
+      }
+    }
+    ms.detect = performance.now() - tDetect;
+    emitir({ etapa: "DETECTANDO", progreso: 1 });
+
+    // GUARD-BORDE Rev. 2 (§3b, D1/D3/D4): la señal de ACTA COMPLETA ya NO se
+    // decide aquí con la geometría (el falso positivo del dueño: quad al filo
+    // con la imagen perfecta — score 6.4). El cálculo se MUEVE a DESPUÉS del
+    // paso 3 (recorte): la condena exige analizar la TINTA del recorte al
+    // filo («la geometría sospecha, la tinta condena»). Helper ÚNICO
+    // verificarCompletitud (AC11) — con `simular` la verificación SE OMITE
+    // (completa = true forzado): la foto del chip MEDIO ES una acta cortada a
+    // propósito y jamás debe caer INCOMPLETA desde un chip (AC3/AC6 de
+    // simulacion-scores; AC7 del guard).
+
+    // 3) Recorte + realce (warp real INTER_CUBIC + filtro default "bw").
+    //    §D8.3 (SPEC-e14-score-ocr Rev. 3): con sinRecorte se OMITE
+    //    processImage — fotoProcesada = fotoOriginal (sin warp, sin filtro
+    //    "bw", sin realce: la b/n del dueño YA trae su filtro · la borrosa
+    //    queda original), motor "canvas" (solo traza) y el acta nace con
+    //    filtro "original" (veracidad en el editor — al elegir B/N aplica
+    //    sobre la foto completa). Los ramps RECORTANDO/REALZANDO se
+    //    CONSERVAN (misma animación de ANALIZANDO — la etapa resuelve al
+    //    instante). El editor (recortar/cambiarFiltro) sigue operando normal
+    //    con quadDetectado = identidad.
+    emitir({ etapa: "RECORTANDO", progreso: 0.2 });
+    const tProceso = performance.now();
+    let fotoProcesada: string;
+    let filtroActa: PageFilter;
+    let motor: "worker" | "canvas";
+    // KIT e14-ocr-lee-original-v1 (PROD-1 §4.1): variante de ENTRADA del OCR +
+    // traza de su origen (§4.4). "original" = crudo del warp (warp sin realce,
+    // misma geometría que la bw — §3 del kit) · "original-as-is" = SIM (la
+    // original YA es la entrada) · "bw-fallback" = la variante nueva falló y
+    // el OCR lee la bw (comportamiento de hoy — §5: el pipeline JAMÁS muere
+    // por la variante nueva, pitfall §9.6).
+    let fotoOcr: string;
+    let ocrIn: "original" | "original-as-is" | "bw-fallback";
+    if (sinRecorte) {
+      fotoProcesada = fotoOriginal;
+      filtroActa = "original";
+      motor = "canvas";
+      // PROD-1 (§4.1): SIM as-is — la entrada del OCR YA era la original:
+      // cero llamadas nuevas (chips SIM 8.2/7.0/4.3 intactos por construcción).
+      fotoOcr = fotoOriginal;
+      ocrIn = "original-as-is";
+      emitir({ etapa: "REALZANDO", progreso: 1 });
+    } else if (nat) {
+      // KIT FASE 2: el acta ya viene recortada, enderezada y en b/n del
+      // sidecar (misma cascada de quad, mismo shrink 3.5 px, mismo warp
+      // INTER_CUBIC con tope 4032, mismo Bradley+despeckle). Los DOS warps del
+      // worker WASM — el de presentación y el de lectura — no se pagan.
+      // `fotoOcr` queda = la procesada SOLO a efectos de traza: el texto ya
+      // vino del recorte SIN realce del sidecar (regla del dueño, la misma
+      // variante "original") y el det+rec del navegador no corre.
+      fotoProcesada = nat.procesada;
+      filtroActa = "bw";
+      motor = "worker";
+      fotoOcr = nat.procesada;
+      ocrIn = "original";
+      emitir({ etapa: "RECORTANDO", progreso: 1 });
+      emitir({ etapa: "REALZANDO", progreso: 1 });
+      // Línea PROPIA (el formato del log `pipeline` es congelado D51 — nada de
+      // tokens nuevos en la cola): trazabilidad de lo que el sidecar hizo.
+      logger.info(
+        `[e14-nativo] acta servida rot=${nat.rot} quad=${nat.quad ? nat.quadOrigen : "pagina-completa"} ` +
+          `lineas=${nat.nLineas} boxes=${nat.nBoxes} conf=${nat.conf.toFixed(3)} ` +
+          `nativo=${Math.round(nat.totalMs)}ms ${nat.alto}x${nat.ancho}`,
+      );
+    } else {
+      // PROD-1 (§4.1): DOS variantes bajo la MISMA conRampa — bw para
+      // MOSTRAR/GUARDAR (hoy) y "original" (warp sin realce) para LEER.
+      // .catch(() => null) DENTRO del Promise.all (aclaración final del kit):
+      // si processImage("original") rechaza, Promise.all NO rechaza — decide
+      // con el resultado null → bw-fallback (§5). El pipeline NUNCA muere por
+      // la variante nueva.
+      // D45 — pared individual de CADA warp (el core SERIALIZA: la 2.ª
+      // pared acumula la cola de la 1.ª — su coste propio es la DIFERENCIA
+      // entre ambas). Observador pasivo: mismas promesas, solo cronómetro.
+      let tProcesoBw = 0;
+      let tProcesoOcr = 0;
+      const [resultado, resultadoOcr] = await conRampa(
+        Promise.all([
+          // Fuente: apps/scanner-lab/src/components/scanner/CameraView.tsx L602-604
+          // (captura arranca en B/N adaptativo) + types.ts L50 (default del
+          // producto) — D36: e14 no tiene ajustes → el default fijo es "bw".
+          processImage(fotoOriginal, quad, "bw", undefined, optsProceso()).then((r) => {
+            tProcesoBw = performance.now();
+            return r;
+          }),
+          // PROD-1: la misma geometría (mismo warp, MISMA convención
+          // POST-warp — pitfall §9.5), solo cambia el filtro final.
+          processImage(fotoOriginal, quad, "original", undefined, optsProceso())
+            .catch(() => null)
+            .then((r) => {
+              tProcesoOcr = performance.now();
+              return r;
+            }),
+        ]),
+        // msEstimados 1400→2200 (§4.1): el segundo warp (~0.6-1.3 s, §1.4)
+        // se cubre con la MISMA rampa (el core serializa en su worker).
+        2200,
+        // RECORTANDO .2→.6 (warp) → REALZANDO .4→1 (enhance), interpolado.
+        (f) =>
+          f < 0.55
+            ? { etapa: "RECORTANDO", progreso: 0.2 + (f / 0.55) * 0.4 }
+            : { etapa: "REALZANDO", progreso: 0.4 + ((f - 0.55) / 0.45) * 0.6 },
+        emitir,
+      );
+      ms.proceso = performance.now() - tProceso;
+      // D45 — subs del muro (guard > 0 al exportar — jamás inventar).
+      if (tProcesoBw > 0) ms.procesoBw = Math.round(tProcesoBw - tProceso);
+      if (tProcesoOcr > 0) ms.procesoOcr = Math.round(tProcesoOcr - tProceso);
+      emitir({ etapa: "REALZANDO", progreso: 1 });
+      fotoProcesada = resultado.processed;
+      filtroActa = "bw";
+      motor = resultado.precision?.engine ?? "canvas";
+      // PROD-1 (§4.1) — entrada del OCR, con fallback que JAMÁS rompe el
+      // pipeline: fotoOcr queda = fotoProcesada (comportamiento de hoy).
+      fotoOcr = fotoProcesada;
+      ocrIn = "original";
+      if (resultadoOcr?.processed) {
+        fotoOcr = resultadoOcr.processed;
+      } else {
+        ocrIn = "bw-fallback";
+      }
+    }
+    // KIT e14-orientacion-auto-v1 (T-A2): probe de orientación DESPUÉS de fijar
+    // fotoOcr (tras el warp, §2.1) y ANTES del OCR completo y de TODA medición
+    // downstream (esquinas/completitud/visor ven el acta YA derecha). SIM:
+    // OMITIDO (§2.2 — mismo guard del banda/esquinas; chips 8.2/7.0/4.3
+    // intactos). sinRecorte solo existe en SIM en esta base → cubierto por el
+    // MISMO guard. Al aplicar se giran fotoOcr Y fotoProcesada (re-encode
+    // JPEG q0.92, §2.1 paso 4) para que el acta visible/guardada quede
+    // derecha; JAMÁS lanza (catch interno — el pipeline no depende, §5).
+    // D57 — KIT e14-instrumentos-espera-v1 (T2): coste del probe persistido
+    // en el diagnóstico (aditivo — la traza de consola D51 ya existe; esto la
+    // vuelve permanente en la ficha). null si el probe no corrió (SIM o error).
+    let probeMsOrientacion: number | null = null;
+    // WAVE2 A1 — sub-decisión de la miniatura descartada por el fallo seguro
+    // (datos para calibración wave 3 — jamás cambia la decisión de HOY).
+    let probeMiniOrientacion: ProbeOrientacion["orientacionProbeMini"] | null =
+      null;
+    // e66 (P4) → e70 (P4.1) — REVERSA PARCIAL del skip ciego por EXIF: el
+    // EXIF de cámara dice cómo estaba el TELÉFONO, no cómo quedó el acta
+    // (evidencia del dueño: 3 fotos landscape CON EXIF rechazadas score 4.9,
+    // anclas 0 y cabeceraE14 false — el core horneó la orientación del
+    // sensor, el acta física estaba de lado). La omisión del sondeo ahora
+    // exige CONFIRMACIÓN de la detección previa (modo confirmar del probe):
+    // quad del WORKER (el fallback sobel fabricó la geometría — «el quad se
+    // detectó mal» del criterio) + lectura a 0° con anclas >= 3 Y conf >=
+    // 0.7 (la pasada 0° del probe ES la primera pasada rápida del criterio:
+    // det cap rápido + rec — las sanas pagan det+rec0 y se saltan las
+    // challengers 90/180/270; las dudosas sondean 0/90/180/270 completas y
+    // el MARGEN decide la rotación antes del OCR principal). SIM jamás
+    // sondea (mismo guard §2.2 de siempre — SIM nunca trae origenSenales).
+    // Flujos individual/video sin la señal → rama de abajo (probe de
+    // siempre); recorte manual (pipelineRecorte) INTACTO (sin señal ahí).
+    // KIT e14-orientacion-qr-v1 (T-A) — QR-BRÚJULA PRIMERO: el cuadrante del
+    // QR (hogar del E-14: TL del acta derecha) manda la rotación SIN OCR
+    // (bench v8.3 del dueño: 4/4 con fotos arrugadas/blotchy donde jsQR
+    // sobre el warp daba 0/4 — el rescate hi-res guiado por el quad con
+    // ZXing rescató TODAS). El sondeo OCR de abajo SOLO corre si la brújula
+    // NO decidió (red de seguridad — comportamiento de HOY byte a byte).
+    // Kill-switch: flags.qrBrujulaOrientacion (OFF = byte-idéntico a hoy).
+    // Guards: SIM jamás (§2.2 — chips 8.2/7.0/4.3 intactos) · sinRecorte no
+    // tiene warp/quad real (SIM-only en esta base → cubierto igualmente).
+    let brujula: BrujulaQr | null = null;
+    // PARCHES P1/P2 (brief Agente A): `desdeMasiva` OMITE la brújula QR en
+    // el runner MASIVA (su payload no se consume allí — guard qrCam de
+    // arriba; la rotación queda en manos de deskew D63-B + probe e66/e70).
+    // Guards SIM/sinRecorte/flag intactos — flujo individual byte-idéntico
+    // (el kill-switch global `qrBrujulaOrientacion` NO cambia de sentido).
+    if (
+      // El campo viaja en la intersección LOCAL (mismo patrón del cast de
+      // `timeoutMs` en la etapa OCR de abajo — pipeline recibe la base).
+      !(opciones as OpcionesEscaneoConTimeout).desdeMasiva &&
+      !opciones.simular &&
+      !sinRecorte &&
+      // KIT FASE 2: el sidecar ya enderezó la página (su `rot`) — sondear dos
+      // veces no cambia el acta, la cuesta.
+      !nat &&
+      leerFlags().qrBrujulaOrientacion
+    ) {
+      brujula = await brujulaQrOrientacion(fotoOcr, fotoOriginal, quad);
+      if (brujula) {
+        if (brujula.rot !== 0) {
+          // Misma aplicación del probe (T-A2 §2.1 paso 4): se giran fotoOcr Y
+          // fotoProcesada (re-encode q0.92) para que el acta visible/guardada
+          // quede derecha. rotarDataUrl JAMÁS lanza (catch interno, §5).
+          fotoOcr = await rotarDataUrl(fotoOcr, brujula.rot);
+          fotoProcesada = await rotarDataUrl(fotoProcesada, brujula.rot);
+        }
+        // e64-qr T-2.1 — señal de identidad ADITIVA SOLO para flujos
+        // NO-masiva (cámara/individual): si la capa base no leyó y la
+        // brújula sí, el payload OPACA viaja como qrCam (mismo contrato de
+        // construirActa — SOLO presencia, red line 10). MASIVA intacto (la
+        // capa 0 del runner manda — guard del bloque qrCam de arriba).
+        if (!esMasiva && !parcial.qrCam) {
+          parcial.qrCam = { payload: brujula.payload };
+        }
+      }
+    }
+    if (
+      brujula === null &&
+      nat === null &&
+      !opciones.simular &&
+      opciones.origenSenales === "exif-camara"
+    ) {
+      const probe = await probeOrientacion(fotoOcr, {
+        confirmar: { quadWorker: quadOrigen === "worker" },
+        esperaSink: esperaOcr,
+      });
+      if (probe != null) probeMsOrientacion = probe.ms; // D57 T2
+      probeMiniOrientacion = probe?.orientacionProbeMini ?? null; // WAVE2 A1 — la mini que el fallo seguro descartó
+      if (probe?.aplicado) {
+        fotoOcr = await rotarDataUrl(fotoOcr, probe.rot);
+        fotoProcesada = await rotarDataUrl(fotoProcesada, probe.rot);
+      }
+    } else if (brujula === null && nat === null && !opciones.simular) {
+      const probe = await probeOrientacion(fotoOcr, { esperaSink: esperaOcr });
+      if (probe != null) probeMsOrientacion = probe.ms; // D57 T2
+      probeMiniOrientacion = probe?.orientacionProbeMini ?? null; // WAVE2 A1 — la mini que el fallo seguro descartó
+      if (probe?.aplicado) {
+        fotoOcr = await rotarDataUrl(fotoOcr, probe.rot);
+        fotoProcesada = await rotarDataUrl(fotoProcesada, probe.rot);
+      }
+    }
+    // KIT consenso-frankfurt-v1 (FASE 2, §3): esquinas fiduciales ANTES del
+    // guard — la marca presente es PRUEBA POSITIVA de que el papel está
+    // entero dentro del cuadro (ANALISIS §5.1) → verificarCompletitud la
+    // consulta y perdona la sospecha geométrica (§0-F2: Frankfurt 746 al
+    // filo condenaba INCOMPLETA 6.4 falso). UNA sola medición (helper único
+    // esquinasDeActa — §4.4); SOLO fuera de SIM (assets de la demo sin
+    // marcas calibradas — chips 8.2/7.0/4.3 intactos, MISMO guard del kit
+    // identificacion-codigo-v1). <80×120 → null (n/d — jamás condena).
+    // R7c (M6-fin): la medición vive en pipeline-comun (mismo criterio ×2 —
+    // pitfall §9.9); la diferencia del sitio (SIM → ESQUINAS_OK/traza sim)
+    // entra explícita como campo tipado.
+    const { esquinas, ladoEsquina, trazaEsq } = await medirEsquinasSitio({
+      fotoProcesada,
+      simular: opciones.simular === true,
+    });
+    // GUARD-BORDE Rev. 2 (§3b): la verificación de completitud corre DESPUÉS
+    // del paso 3 — fotoProcesada ya existe (la tinta al filo se mide SOBRE el
+    // recorte, no sobre la foto cruda). Helper ÚNICO (D3/AC11). El análisis
+    // SOLO arranca si la geometría sospecha (D4: quad sano → costo cero) y
+    // vuela EN PARALELO con CALIDAD/OCR: se espera justo antes del gate
+    // (presupuesto propio <30 ms p95 — §3d/AC9). Con `simular` NO corre
+    // (completa = true forzado — AC7). Nota sinRecorte: SOLO alcanzable desde
+    // la rama SIMULACIÓN (AC15 score-ocr) → también cubierto por el skip.
+    // FASE 2 (§3): recibe las esquinas — 4 fiduciales presentes → la
+    // sospecha geométrica NO condena (papel entero demostrado).
+    // KIT e63d (F2.3): verificarCompletitud NO corre para ESCANEOS — hoy
+    // corría y su `completa` se descartaba (el marco lo pisa SIEMPRE para
+    // escaneos: evaluarMarcoImpreso jamás devuelve null). El guard de fotos
+    // mide tinta al filo del warp — un escaneo no tiene warp (identidad) y
+    // su gate es el MARCO (D63-C). Menos trabajo muerto, misma decisión.
+    // EFECTO DECLARADO (plan §4): el escudo anti-fondo (fondo → techo 7.9 —
+    // vive en gate.ts/resolverDesenlace) tampoco aplica a escaneos — es un
+    // guard del WARP (fondo/sombra incluida por el encuadre), sin premisa en
+    // identidad. El veredicto del escaneo lo gobiernan marco + lectura +
+    // marcadores (honestos).
+    const verificacion: Promise<ResultadoCompletitud> | null =
+      opciones.simular || origenActa === "escaneo"
+        ? null
+        : verificarCompletitud(quad, fotoProcesada, esquinas);
+    // §D4 (SPEC-e14-score-ocr): visor nunca vacío — tinta de la PROCESADA
+    // (muestreo 64×64): un warp sin tinta (quad degenerado sobre superficie
+    // lisa → blanco puro del B/N adaptativo) marca el acta para que REVISIÓN
+    // muestre la ORIGINAL con su nota. Con tinta (aunque poca, p. ej. la
+    // borrosa B/N) se muestra la procesada como hoy — sin regresión.
+    const procesadaVacia = await procesadaVaciaDataUrl(fotoProcesada);
+
+    // 4) Calidad de la página (Laplaciano + contraste + brillo).
+    //    KIT visor-accion-score-v1 (FASE S): se evalúa el RECORTE del acta
+    //    (bbox del quad), NO el encuadre completo — la mesa oscura alrededor
+    //    ya no hunde el brillo global (§S.0; fallback al frame como hoy).
+    emitir({ etapa: "CALIDAD", progreso: 0 });
+    const tCalidad = performance.now();
+    const infoCrop: InfoCrop = { w: 0, h: 0, fallback: false };
+    const calidad = await calidadDeActa(fotoOriginal, quad, infoCrop);
+    ms.calidad = performance.now() - tCalidad;
+    emitir({ etapa: "CALIDAD", progreso: 1 });
+
+    // 5) OCR sobre la variante de ENTRADA del OCR (PROD-1 §4.1: el recorte
+    //    SIN filtro — regla del dueño; la bw pasa a ser SOLO la imagen de
+    //    presentación/guardado). KIT e14-ocr-escalonado-v1 (§2): OCR
+    //    ESCALONADO — 1.ª pasada det 1280 → re-OCR 1920 SOLO si la lectura
+    //    sale débil, el MEJOR manda (el gate JAMÁS ve un texto degradado si
+    //    el 1920 lo salva); SIM: flujo de hoy a 1920, 0 trazas (§3). Motor
+    //    RapidOCR PP-OCRv4 (PROD-2 §2-C2); progreso REAL por lotes de rec
+    //    (§2-C4) — la 2.ª pasada reusa el MISMO emit (§3).
+    const tOcr = performance.now();
+    const onProgresoOcr = (p: number): void => {
+      emitir({ etapa: "OCR", progreso: Math.min(1, Math.max(0, p)) });
+    };
+    // §3 presupuesto: el timeout EXISTENTE del pipeline manda (masiva pasa
+    // 120_000 por OpcionesEscaneoConTimeout; default 15 s).
+    const cfgOcr = {
+      simular: opciones.simular === true,
+      presupuestoMs: (opciones as OpcionesEscaneoConTimeout).timeoutMs ?? TIMEOUT_MS,
+      inicioMs: inicio,
+      esperaSink: esperaOcr,
+    };
+    // KIT FASE 2: con acta del sidecar el det+rec YA corrió allí sobre el
+    // recorte sin realce (misma variante de entrada, mismo TEXT_SCORE de
+    // aceptación → el MISMO formato de texto que el motor WASM). El escalonado
+    // del navegador no se paga; la pasada elegida es la que el sidecar hizo.
+    // Cualquier fallo del prefetch dejó `nat = null` → la línea de abajo, byte
+    // a byte como hoy.
+    const ocrEsc = nat
+      ? { texto: nat.texto, conf: nat.conf, detMs: nat.detMs, recMs: nat.recMs }
+      : await reconocerRapidOcrEscalonado(fotoOcr, onProgresoOcr, cfgOcr);
+    let texto = ocrEsc.texto;
+    ms.ocr = performance.now() - tOcr;
+    // PROD-2 (§4.2): conf/det/rec de la pasada ELEGIDA (SPRINT-A A4: la
+    // captura vive aquí — la dead store ultimoOcr* fue eliminada).
+    const confOcr = ocrEsc.conf;
+    const detOcr = ocrEsc.detMs;
+    const recOcr = ocrEsc.recMs;
+    emitir({ etapa: "OCR", progreso: 1 });
+    // KIT consenso-frankfurt-v1 (FASE 4, §5): banda dirigida — si el OCR
+    // completo no leyó la banda (sello blanco-sobre-negro, §0-F4), SEGUNDA
+    // pasada OCR del crop invertido ×2. UNA sola vez, ANTES de
+    // clasificarCabecera; el tiempo se suma a ms.ocr (es OCR). SIM: OMITIDO
+    // (AC6 — cero llamadas a ocrBanda en SIM; guard opciones.simular).
+    // R7c (M6-fin): UNA implementación en pipeline-comun (×2 — pitfall §9.9);
+    // el guard SIM del sitio entra explícito.
+    texto = await bandaDirigidaSiFalta({
+      texto,
+      fotoProcesada,
+      simular: opciones.simular === true,
+      ms,
+      esperaSink: esperaOcr,
+    });
+    ms.total = performance.now() - inicio;
+
+    // (motor/filtroActa calculados en el paso 3 — §D8.3: as-is → "canvas"/"original")
+
+    // 6) Mapeo §4 → status/score/rechazo + clasificación de cabecera
+    //    (SPEC-cabecera-clasificacion §4: RECHAZADA solo por CALIDAD;
+    //    cabecera sin clasificar → EN_REVISION_HUMANA con panel, NUNCA rechazo).
+    //    §X (SPEC-score-legible): la clasificación se calcula PRIMERO (barata:
+    //    regex + divipol cacheada) y alimenta el score — el OCR y la
+    //    identificación manda sobre las métricas globales del crudo.
+    const clasificacion = clasificarCabecera(texto, await cargarDivipol());
+    // (KIT consenso-frankfurt-v1 FASE 2: las esquinas se miden ANTES del
+    // guard — arriba; aquí solo consume ladoEsquina/trazaEsq.)
+    // KIT actas-vivas-paginas-v1 (FASE C): RECORTADA por OCR de secciones —
+    // P1 sin «SUMA TOTAL» / P≥2 sin «FIRMA» (faltaSeccionInferior);
+    // página DESCONOCIDA nunca condena. Techo 7.9 = ADVERTENCIA (NO
+    // rechazo — conservador en campo). FASE F: OR con la señal de esquinas.
+    // KIT e14-lectura-perdona-lazo-v1 (§4-B): la LECTURA perdona al lazo — un
+    // fiducial faltante cuyo lado está demostrado dentro por el OCR es falso
+    // positivo (margen corto/sombra). La señal de secciones NUNCA se perdona.
+    // En SIM esquinas=ESQUINAS_OK → helper false → recortada idéntica a
+    // hoy (chips 8.2/7.0/4.3 intactos — §2 del kit).
+    // R7c (M6-fin): la COMPOSICIÓN de señales vive UNA vez en pipeline-comun
+    // (caracterizarLectura — pitfall §9.9: era ×2 con las mismas fórmulas);
+    // el caller conserva las awaits del sitio (divipol/marcadores) y el
+    // scoreVisual = scoreBase ANTES de resolverDesenlace.
+    const { faltaSeccion, lazoPerdonado, recortada, ocrLegible, senalActa, senal, pisoPerfecto, scoreBase } =
+      caracterizarLectura({ texto, clasificacion, esquinas, ladoEsquina, calidad });
+    let score = scoreBase;
+    // KIT e14-diagnostico-autoenvio-v1 (§3-A): score visual = bruto de
+    // scoreDeCalidad ANTES de los caps del sitio (escudo-fondo/recortada/
+    // incompleta/sin-votos) — el `final` es el que imprime el log.
+    // ORDEN del merge (kit e14-diag-campos-aditivos-v1 §4-A.3):
+    // scoreDeCalidad → scoreVisual → bloque C3 → inyección SIM → caps.
+    const scoreVisual = score;
+    // R7a (M3): el C3 (piso/techo de LECTURA — kit e14-score-lectura-v1) y la
+    // inyección SIM (§D3 — los chips 8.2/7.0/4.3 mandan, pitfall §9.5) viven
+    // AHORA dentro de resolverDesenlace (lib/e14/gate.ts) — UNA implementación
+    // para AMBOS pipelines (pitfall §9.9). El desenlace completo se resuelve
+    // más abajo, tras las mediciones asíncronas (verificación/marco/votos):
+    // las esperas no alteran el score (observaciones puras) y el orden de
+    // aplicación de caps/gate se conserva byte a byte.
+    // §F-2 (SPEC-camara-funcional) + GUARD-BORDE Rev. 2: acta INCOMPLETA →
+    // resolución por la vía de rechazo SIN tocar evaluarGate (el veto sigue
+    // VIVIENDO FUERA del gate — §7 score-ocr intocado, D6/AC10). La decisión
+    // del guard llega aquí: la sospecha geométrica SOLO condena con tinta
+    // cortada al filo del recorte (D1 — el falso positivo del quad al filo
+    // con imagen perfecta queda curado). El resto del pipeline corrió igual
+    // (recorte/calidad/OCR) para que REVISIÓN muestre la imagen y el
+    // operador entienda el problema.
+    const verificacionResuelta = verificacion ? await verificacion : null;
+    // D63-C (T2): gate de ESCANEOS por MARCO IMPRESO del formulario — el
+    // guard de fotos («contenido al filo = cortada») queda NI UNA LÍNEA
+    // distinto para fotos/SIM (el marco solo consulta `origenActa ===
+    // "escaneo"`, que SIM/fotos jamás traen — kit T2.4/T3). Veredicto:
+    // completo → no bloquea · cortado → INCOMPLETA como hoy (el scanner SÍ
+    // cortó la hoja — honesto) · no-encontrado → no bloquea (lectura/score
+    // deciden como siempre). El RECT del marco alimenta la región de la
+    // zona de votos (el marco ES el borde del acta — mismo sistema de
+    // referencia que las fracciones ZONA_* de marcadores.ts).
+    const marcoEscaneo: MarcoEscaneo | null =
+      origenActa === "escaneo" && !opciones.simular ? await evaluarMarcoImpreso(fotoProcesada) : null;
+    // KIT e63d-escaneo-ya-recortado-v1 (F0.2): la LECTURA perdona al marco
+    // (mismo patrón que lazoPerdonadoPorLectura del kit lectura-perdona-lazo).
+    // Un marco «cortado» en un escaneo CEÑIDO demuestra un corte GEOMÉTRICO
+    // de la hoja, no pérdida de CONTENIDO (el marco vive insertado ~2%:
+    // cortar EN el marco no pierde ni un dato). La lectura FUERTE + secciones
+    // presentes = contenido probado → el veredicto del marco no condena.
+    // El gate sigue HONESTO: falta una sección inferior o lectura débil/media
+    // → «cortado» sigue condenando (la lectura perdona al marco, NO al
+    // contenido faltante — plan §3/§4). "ceñido" (F3) nunca bloquea por
+    // construcción (≠ "cortado"). senal y faltaSeccion ya están calculadas
+    // aquí (caracterizarLectura — pipeline-comun.ts) — costo cero.
+    let completa = opciones.simular ? true : (verificacionResuelta?.completa ?? true);
+    if (marcoEscaneo) {
+      // e63d F0.2 · rev.2: el perdón (tabla §3-A) decide si el marco cortado
+      // condena — rev.1 negaba el trío (bug ANEXO A caso 4, ver helper).
+      completa =
+        marcoEscaneo.veredicto === "cortado"
+          ? marcoPerdonadoPorLectura(marcoEscaneo.veredicto, senal.nivel, faltaSeccion)
+          : true;
+    }
+    // e71 (P10) — VETO 4/4 FIDUCIALES (kit e71-consolidación): la medición
+    // de integridad encontró LAS 4 esquinas ausentes (traza
+    // `esquinas=FALTA_tl+tr+bl+br`) → el papel NO está demostrado entero y
+    // el gate NO puede ser completa. Va DESPUÉS del perdón del marco (la
+    // lectura perdona al marco impreso, pero NUNCA a la ausencia total de
+    // fiduciales — evidencia física manda). En SIM esquinas=ESQUINAS_OK →
+    // el veto es inalcanzable (guard explícito, chips 8.2/7.0/4.3 intactos).
+    // R7c (M6-fin): criterio único vetoCuatroEsquinas — la diferencia del
+    // sitio (SIM del escaneo vs recorte siempre real) entra como `aplica`.
+    if (vetoCuatroEsquinas({ esquinas, aplica: !opciones.simular })) {
+      completa = false;
+    }
+    // GATE-MARCADORES (KIT e14-gate-v2, FASE G2) — marcador OBLIGATORIO de
+    // votos, FUERA de evaluarGate (MISMO patrón del veto INCOMPLETA: D6/
+    // AC10). Fallo del 2026-10-16: acta sin votos llegó OPTIMA y se
+    // auto-envió sin que nadie mirara la zona de votos. Medición sobre
+    // fotoProcesada (<30 ms p95, motor compartido motorTinta —
+    // marcadores.ts). Corre TAMBIÉN en `simular` (default del dueño —
+    // calibración: los 3 assets SIM pasan la zona 8.83-57.5% ≫ 0.8%, la
+    // demo no se rompe · docs/REPORTE-gate-marcadores-v2.md). INCOMPLETA
+    // manda primero: el veto de votos SOLO condena actas completas sin
+    // tinta en la zona de votos.
+    // D63-C: con RECT del marco impreso (escaneos «completo») la zona se
+    // mide RELATIVA AL FORMULARIO — las fracciones fijas ZONA_* asumen el
+    // recorte = acta (falso SIN_VOTOS en página-completa con márgenes).
+    const marcadores = await medirZonaVotos(fotoProcesada, marcoEscaneo?.rect ?? undefined);
+    // KIT actas-vivas-paginas-v1 (FASE C): gate de votos SOLO P1 — la pág 2
+    // (constancias) NO tiene zona de votos (hoy pasaba por la tinta de las
+    // líneas impresas: de la suerte). Página desconocida → se mide
+    // (conservador). Log: votos=skip-pag2 cuando aplique.
+    const votosSkipPag2 = clasificacion.pagina?.index === 2;
+    // R7a (M3) — DESENLACE unificado: caps del sitio (escudo-fondo D10 ·
+    // recortada) → gate (INCOMPLETA · SIN_VOTOS G2 · evaluarGate §4) → caps
+    // post-gate 6.4 → sustitución BAJO §D3 → techosDiag, TODO en
+    // resolverDesenlace (gate.ts — transcripción literal de esta rama; las
+    // diferencias legítimas con pipelineRecorte entran EXPLÍCITAS: escudo-
+    // manual=false, copy INCOMPLETA por origen, chip SIM).
+    const desenlace = resolverDesenlace({
+      score,
+      levelCalidad: calidad.level,
+      nivelLectura: senal.nivel,
+      senalActa,
+      ocrTexto: texto,
+      clasificacion,
+      intento: opciones.intento,
+      maxIntentos: opciones.maxIntentos,
+      scoreSimulado: opciones.simular ? (opciones.scoreSimulado ?? null) : null,
+      completa,
+      vetoIncompleta: !completa,
+      escudoManual: false,
+      fondo: verificacionResuelta?.fondo ?? false,
+      recortada,
+      origenEscaneo: origenActa === "escaneo",
+      votosSkipPag2,
+      hayVotos: marcadores.hayVotos,
+    });
+    score = desenlace.score;
+    const marcadoresOk = desenlace.marcadoresOk;
+    const rechazoFinal: Acta["rechazo"] = desenlace.rechazo;
+
+    const evidenciaSim =
+      opciones.simular && opciones.scoreSimulado != null ? ` sim=${opciones.scoreSimulado}` : "";
+    // §D8.3: traza de auditoría del as-is (solo cuando sinRecorte).
+    const evidenciaAsis = sinRecorte ? " recorte=as-is" : "";
+    // §3c (GUARD-BORDE) — log de auditoría del guard: SOLO cuando hubo
+    // sospecha geométrica se añaden los campos nuevos (AC8: sin sospecha el
+    // log queda como hoy). `borde=` lados sospechosos ("S|E"), `tintaFilo=`
+    // condena, `franja=` densidades de tinta en % por lado sospechoso (mismo
+    // orden que borde) y `fondo=` escudo D10.
+    // KIT e14-esquinas-suaves-v1 (Q1): token `perdon=` añadido AL FINAL del
+    // segmento (tokens NUEVOS solo al final — la línea `senal=` queda byte a
+    // byte; perdón por PAR fiducial del lado — Q1).
+    // R7c (M6-fin): el segmento vive UNA vez en pipeline-comun (evidencia-
+    // BordeDe — era ×2 con la misma fórmula; null → "" como hoy).
+    const evidenciaBorde = evidenciaBordeDe(verificacionResuelta);
+    // KIT e14-diagnostico-autoenvio-v1 (C1/§6-B): techos capturados con las
+    // MISMAS condiciones que ya aplicaron los caps — orden real de aplicación
+    // (techo-fair/poor/sin-senal de scoreDeCalidad → escudo-fondo → recortada
+    // → incompleta → sin-votos). Los de lectura-DEBIL/piso-FUERTE llegan con
+    // score-lectura (PR #13, §8 — campos aditivos).
+    // R7a (M3): la lista nace AHORA en resolverDesenlace (gate.ts) — mismas
+    // condiciones y MISMO orden que los caps que aplicó (antes duplicado aquí
+    // y en pipelineRecorte — pitfall §9.9).
+    const techosDiag: string[] = desenlace.techosDiag;
+    // C1: el registro nace junto al log (todo en scope — §9.6). SIM nunca
+    // (§9.2). Observación PASIVA: si falla, el desenlace NO se toca (§9.7).
+    let diag: DiagnosticoActa | null = null;
+    if (!opciones.simular) {
+      try {
+        // R7b (M4) + R7c (M6-fin): payload del desenlace UNA vez en
+        // pipeline-comun (construirDiagnosticoSitio) — las ~35 líneas de
+        // campos idénticos de los 2 call-sites viven allí; las diferencias
+        // de ESTE sitio entran explícitas (actaId "" se parcha luego;
+        // gateMarco D63-C; decode/detect medidos). SIM nunca (§9.2).
+        diag = construirDiagnosticoSitio({
+          desenlace,
+          rechazoFinal,
+          scoreVisual,
+          scoreFinal: score,
+          techosDiag,
+          calidad,
+          texto,
+          ocrLegible,
+          senal,
+          senalActa,
+          completa,
+          recortada,
+          ladoEsquina,
+          marcadores,
+          marcadoresOk,
+          votosSkipPag2,
+          procesadaVacia,
+          motor,
+          infoCrop,
+          quad,
+          quadOrigen,
+          ms,
+          sitio: {
+            actaId: "", // se parcha con el id REAL tras construirActa
+            intento: opciones.intento,
+            maxIntentos: opciones.maxIntentos,
+            // D63-C (T2.3): veredicto del marco impreso (null en fotos/SIM).
+            gateMarco: marcoEscaneo?.veredicto ?? null,
+            fondo: verificacionResuelta?.fondo ?? false,
+            filtro: filtroActa,
+            // D61 — decode/detect YA se medían (traza de consola) — ahora
+            // PERSISTEN. null honesto si la fase no corrió (video-grab sin
+            // archivo → decode=0; sinRecorte → detect=0) — jamás inventar.
+            decodeMs: ms.decode > 0 ? Math.round(ms.decode) : null,
+            detectMs: ms.detect > 0 ? Math.round(ms.detect) : null,
+          },
+        });
+      } catch {
+        diag = null;
+      }
+    }
+    // D57 — KIT e14-instrumentos-espera-v1 (T2): orientacionProbeMs al
+    // diagnóstico — asignación DEFENSIVA (jamás lanza; sin diagnóstico → se
+    // omite — kit §4-T2). ADITIVO: no toca score/status/gate/tiempos.
+    if (diag != null && probeMsOrientacion != null) {
+      diag.orientacionProbeMs = probeMsOrientacion;
+    }
+    // Lo que ESTA acta esperó el turno OCR (FIFO del singleton ORT). NO es
+    // trabajo: `ocrMs` lo incluye, así que compite con él, no con las barras
+    // de trabajo del informe. Guard > 0 = ausente cuando no esperó o cuando
+    // el OCR fue del sidecar nativo (sin cola que esperar) — jamás inventar.
+    if (diag != null && esperaOcr.ms > 0) {
+      diag.tiempos.ocrEsperaMs = Math.round(esperaOcr.ms);
+    }
+    // WAVE2 A1 — sub-decisión de la miniatura descartada por el fallo seguro
+    // (asignación DEFENSIVA — jamás lanza; sin diagnóstico o sin mini → se
+    // omite — jamás inventar). Datos de calibración wave 3.
+    if (diag != null && probeMiniOrientacion != null) {
+      diag.orientacionProbeMini = probeMiniOrientacion;
+    }
+    // R7c (M6-fin): la COLA del log (del token votos= hasta ClasifDebil) se
+    // compone en pipeline-comun (trazaDesenlaceComun) — UNA implementación
+    // para ambos sitios: el orden de los tokens comunes (formato D51 —
+    // CONGELADO, solo añadir al final) queda garantizado por el compilador
+    // (los extras del sitio entran tipados: evidenciaSitio/extrasSim/
+    // extrasDeteccion). El head conserva los tokens propios del escaneo
+    // (decode/detect) — es la parte genuinamente distinta.
+    logger.info(
+      `[e14] pipeline ${opciones.fuente}/${"archivo" in entrada ? "file" : "video-grab"} ` +
+        `total=${Math.round(ms.total)}ms ` +
+        `(decode=${Math.round(ms.decode)} detect=${Math.round(ms.detect)} ` +
+        `proceso=${Math.round(ms.proceso)} calidad=${Math.round(ms.calidad)} ` +
+        `ocr=${Math.round(ms.ocr)} motor=${motor} ocrValido=${ocrTextIsValid(texto)} ` +
+        `cabeceraE14=${PATRON_CABECERA.test(texto)} completa=${completa} ` +
+        `senal=${senalActa} vacia=${procesadaVacia} ` +
+        trazaDesenlaceComun({
+          votosSkipPag2,
+          densidadVotosPct: marcadores.densidadVotosPct,
+          marcadoresOk,
+          recortada,
+          ladoEsquina,
+          lazoPerdonado,
+          trazaEsq,
+          evidenciaSitio: `${evidenciaAsis}${evidenciaBorde}`,
+          quad,
+          quadOrigen,
+          pisoPerfecto,
+          score,
+          filtro: filtroActa,
+          ocrIn,
+          confOcr,
+          detOcr,
+          recOcr,
+          senal,
+          desenlace,
+          infoCrop,
+          calidad,
+          ocrLegible,
+          extrasSim: evidenciaSim,
+          // KIT e14-masiva-ux-v1 (T1.3): quién fabricó el quad EN la detección
+          // del pipeline + si corrió el reintento post-Sobel (campos AÑADIDOS
+          // al final — formato previo intacto).
+          extrasDeteccion:
+            `${quadOrigen ? ` detectOrigen=${quadOrigen}` : ""}${detectReintento ? " detectReintento=1" : ""}`,
+          diag,
+        }),
+    );
+
+    // KIT e14-diagnostico-autoenvio-v1 (C1): adjuntar el registro con el id
+    // REAL del acta (el id nace en construirActa — parche post-hoc).
+    await aterrizarQrCam(); // e64-qr T-2.1: la señal QR ya aterrizó (corrió en paralelo al OCR)
+    const acta = construirActa(opciones, parcial, {
+      fotoProcesada,
+      procesadaVacia,
+      // KIT actas-vivas-paginas-v1 (FASE C): el acta lleva la bandera del
+      // OCR de secciones para la píldora de REVISIÓN.
+      recortada,
+      // KIT identificacion-codigo-v1 (FASE F): LADO de la esquina faltante
+      // (píldora «ACTA RECORTADA · SUP-IZQ») — null si vino SOLO del OCR
+      // de secciones o 4/4 presentes.
+      recorteLado: ladoEsquina,
+      quadDetectado: quad,
+      calidad,
+      ocrTexto: texto,
+      motor,
+      // §D8.3 (SPEC-e14-score-ocr Rev. 3): as-is nace "original" (veracidad
+      // en el editor — el acta NO pasó por filtro); pipeline normal "bw".
+      filtro: filtroActa,
+      score,
+      status: desenlace.status,
+      rechazo: rechazoFinal,
+      clasificacion: desenlace.clasificacion,
+    });
+    if (diag) {
+      diag.actaId = acta.id;
+      acta.diagnostico = diag;
+      // KIT e14-observabilidad-v1 (A1-C7, cambio QUIRÚRGICO): emisión perf
+      // del desenlace — lazy import + catch total (el rastreo jamás rompe
+      // el pipeline, §2.4), mapea SOLO campos ya en scope (§9.10: tiempos/
+      // gate/ocrValido leídos de diag — nada re-evaluado). El actaId sale
+      // SIEMPRE hasheado (FNV-1a dentro de emitirPerfDeActa, §2.5).
+      void import("./obs/captura")
+        .then((m) =>
+          m.emitirPerfDeActa({
+            actaId: acta.id,
+            status: acta.status,
+            intento: acta.intento,
+            tiempos: {
+              procesoMs: diag.tiempos.procesoMs,
+              calidadMs: diag.tiempos.calidadMs,
+              ocrMs: diag.tiempos.ocrMs,
+              totalMs: diag.tiempos.totalMs,
+            },
+            scoreVisual,
+            scoreFinal: score,
+            gate: desenlace.status,
+            ocrValido: diag.ocrValido,
+          }),
+        )
+        .catch(() => {});
+    }
+    return acta;
+  }
+
+  /**
+   * L5 (§7.5) — RECORTE MANUAL (rescate D20): re-ejecuta el pipeline §5 sobre
+   * `fotoOriginal` con el quad del editor (F5-MANUAL: `manual: true` respeta
+   * el quad al píxel, sin refine) y devuelve el acta ACTUALIZADA. El acta
+   * conserva IDENTIDAD (fuente/intento/maxIntentos/paginación/título…) — el
+   * rescate NO es una captura nueva, no consume intento. Timeout 15 s igual
+   * que escanearActa: resuelve un acta RECHAZADA ILEGIBLE controlada.
+   * F4/D37: `rotacionOverride` (4º parámetro) hornea la rotación LOCAL del
+   * editor — el retorno de pipelineRecorte fija `rotation: rotacionUsada`.
+   * KIT e14-esquinas-suaves-v1 (Q2): `manual` (6º parámetro, default false)
+   * marca el recorte del EDITOR (decisión CON VISTA — escudo-manual: la tinta
+   * al filo del crop manual nunca RECHAZA). Solo lo pasa el store
+   * (aplicarRecorte); mejorarResolución conserva el default (conservador).
+   */
+  recortar(
+    acta: Acta,
+    quad: Quad,
+    onProgreso?: (p: ProgresoAnalisis) => void,
+    rotacionOverride?: number,
+    // KIT e14-quad-sobel-v1 (P1 §4-B): origen del quad cuando la detección
+    // corrió (mejorarResolución). El recorte MANUAL del editor (store) no lo
+    // pasa — el quad lo puso el usuario, ninguna detección corrió → undefined
+    // → token ausente (n/d no miente).
+    quadOrigen?: OrigenQuad | "pagina-completa" | null,
+    // KIT e14-esquinas-suaves-v1 (Q2): recorte del editor = decisión CON VISTA.
+    manual = false,
+  ): Promise<Acta> {
+    const fotoOriginal = acta.fotoOriginal;
+    if (!fotoOriginal) {
+      return Promise.reject(new Error("SIN FOTO ORIGINAL PARA RECORTAR"));
+    }
+    const rotacion = rotacionOverride ?? acta.rotation ?? 0;
+    // KIT e14-recorte-manual-v1 (T1): acumulador del recorte YA HORNEADO —
+    // pipelineRecorte lo llena apenas el warp completa (patrón `parcial` del
+    // escaneo §5, A7); el timeout lo usa para que el acta RECHAZADA por
+    // tiempo muestre EL RECORTE NUEVO del dueño y no la foto anterior. Si el
+    // warp no alcanzó, parcial queda vacío → comportamiento actual.
+    const parcial: ParcialRecorte = {};
+    let vencido = false; // tras el timeout no se emite más progreso (§5)
+    const emitir = (p: ProgresoAnalisis) => {
+      if (!vencido) onProgreso?.(p);
+    };
+
+    return new Promise<Acta>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        vencido = true;
+        // §5: el timeout NO rechaza la Promise — resuelve el acta RECHAZADA
+        // controlada (el toast sale del flujo normal del store).
+        // KIT e14-recorte-manual-v1 (T1): `...parcial` trae el recorte ya
+        // horneado si el warp alcanzó a correr — el dueño ve SU recorte
+        // (puede re-aplicar/reintentar), no la foto anterior. Gate y score
+        // INTACTOS: sigue RECHAZADA ILEGIBLE por tiempo.
+        resolve({
+          ...acta,
+          ...parcial,
+          score: 0,
+          status: "RECHAZADA",
+          rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_TIMEOUT },
+          firmas: firmasPorStatus(acta.firmas, "RECHAZADA"),
+          // FIX (auditoría 2-a #8): el invariante del gate (RECHAZADA ⇒
+          // clasificación descartada) también en el timeout del recorte —
+          // el spread conservaba una clasificación AUTO previa (p. ej. de
+          // un acta ADVERTENCIA que se re-recortaba) y el título/historial
+          // mostraban mesa/tipo/página de una identificación que el propio
+          // gate acaba de descartar (undefined = sin clasificación, mismo
+          // convenio del contrato Acta).
+          clasificacion: undefined,
+        });
+      }, RECORTE_TIMEOUT_MS);
+
+      void this.pipelineRecorte(acta, fotoOriginal, quad, rotacion, emitir, quadOrigen, manual, parcial).then(
+        (actaNueva) => {
+          if (vencido) return; // ya resolvió el timeout: el resultado se descarta
+          clearTimeout(timer);
+          resolve(actaNueva);
+        },
+        (error) => {
+          if (vencido) return;
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error("ERROR DE PIPELINE"));
+        },
+      );
+    });
+  }
+
+  /**
+   * KIT camara-visor-v1 (G3 — upgrade silencioso del lab L1789-1842):
+   * RE-PROCESA el acta con una foto NUEVA a máxima resolución (la toma
+   * full-res del sensor que aterrizó en segundo plano tras el disparo
+   * rápido por escalera). REUTILIZA el pipeline existente (mismo patrón de
+   * `recortar`: re-proceso sin consumir intento — el acta conserva
+   * identidad de captura: fuente/intento/maxIntentos/paginación) con dos
+   * diferencias obligatorias frente al recorte: (1) el QUAD se RE-DETECTA
+   * sobre la foto nueva (los quads son normalizados 0-1 y el aspecto del
+   * sensor 4:3 ≠ preview 16:9 — re-usar el quad del preview desplazaría el
+   * warp; el lab hace exactamente esto con applyAutoQuad) y (2) la
+   * `fotoOriginal` del acta queda REEMPLAZADA por la nueva. El gate se
+   * re-evalúa COMPLETO (pipelineRecorte: completitud + marcadores + OCR +
+   * clasificación — helper único §4.4).
+   */
+  async mejorarResolucion(
+    acta: Acta,
+    fotoNueva: string,
+    onProgreso?: (p: ProgresoAnalisis) => void,
+  ): Promise<Acta> {
+    // 1) Detección del quad sobre la foto NUEVA (worker OpenCV → fallback
+    //    Sobel del core — MISMA vía del pipeline de escaneo). Si no detecta
+    //    (imagen sin bordes), quad identidad: la foto entera es el acta —
+    //    degradación honesta (§0: sin datos reales no se inventa).
+    //    KIT e14-quad-sobel-v1 (P1 §4-B): el origen viaja con el quad — y en
+    //    el catch el origen es null (ni siquiera corrió el Sobel — n/d no
+    //    miente, misma filosofía del T-A).
+    let quad: Quad;
+    let quadOrigen: OrigenQuad | "pagina-completa" | null = null;
+    try {
+      const detalle = await detectDocumentEdgesDetail(fotoNueva);
+      quad = detalle.quad;
+      quadOrigen = detalle.origen;
+    } catch {
+      quad = defaultQuad();
+    }
+    // 2) Pipeline de RECORTE existente sobre la foto nueva (calidad + OCR +
+    //    gate completo, timeout 15 s igual que recortar). El acta conservada
+    //    es la ORIGINAL del disparo (identidad); su fotoOriginal pasa a ser
+    //    la full-res que aterrizó.
+    const actaBase: Acta = { ...acta, fotoOriginal: fotoNueva };
+    return this.recortar(actaBase, quad, onProgreso, undefined, quadOrigen);
+  }
+
+  /** Pipeline §5 del RECORTE (sin decode/detección: la foto y el quad ya son
+   *  conocidos). Reusa los helpers del pipeline L2 — conRampa (bridge),
+   *  PATRON_CABECERA (clasificador) y scoreDeCalidad (calidad.ts, vía
+   *  pipeline-comun.ts desde R7c M6-fin) — y el mapeo §4.1 + gate §4.2
+   *  idénticos. */
+  private async pipelineRecorte(
+    acta: Acta,
+    fotoOriginal: string,
+    quad: Quad,
+    rotacion: number,
+    emitir: (p: ProgresoAnalisis) => void,
+    // KIT e14-quad-sobel-v1 (P1 §4-B): origen del quad — null/undefined si la
+    // detección NO corrió (recorte manual del editor, catch de mejorar).
+    quadOrigen: OrigenQuad | "pagina-completa" | null = null,
+    // KIT e14-esquinas-suaves-v1 (Q2): true SOLO desde el editor del store
+    // (aplicarRecorte) — activa el ESCUDO-MANUAL del gate (abajo).
+    manual = false,
+    // KIT e14-recorte-manual-v1 (T1): acumulador del recorte horneado — el
+    // timeout de recortar() resuelve con él (patrón `parcial` del escaneo).
+    parcial: ParcialRecorte,
+  ): Promise<Acta> {
+    const ms = { proceso: 0, procesoBw: 0, procesoOcr: 0, calidad: 0, ocr: 0, total: 0 };
+    const inicio = performance.now();
+    // Espera del turno OCR de ESTE recorte — mismo instrumento del escaneo
+    // (ver `EsperaOcrSink`), sink propio por pipeline.
+    const esperaOcr: EsperaOcrSink = { ms: 0 };
+    // F2/D36: el recorte conserva el filtro del acta (default del producto "bw").
+    const filtro: PageFilter = acta.filtro ?? "bw";
+
+    // 1) Recorte + realce (warp real INTER_CUBIC + filtro del acta, F5-MANUAL).
+    //    KIT e14-ocr-lee-original-v1 (PROD-1 §4.2): MISMO patrón del escaneo —
+    //    DOS variantes bajo la MISMA conRampa: la del filtro del acta
+    //    (MOSTRAR/GUARDAR) y "original" para LEER. Si el acta YA está en
+    //    "original", la procesada ES la entrada del OCR (UNA sola llamada —
+    //    pitfall §9.4: NO duplicar el warp; la promesa se comparte).
+    //    .catch(() => null): la variante nueva jamás rechaza el rescate
+    //    (fallback bw-fallback §5). msEstimados 1400→2200 (2.º warp, §1.4).
+    emitir({ etapa: "RECORTANDO", progreso: 0.2 });
+    const tProceso = performance.now();
+    // D45 — pared individual de CADA warp (misma doctrina de la zona
+    // principal): el core serializa → la 2.ª pared acumula la cola. Cuando
+    // pOcr === pBw (filtro ya-original) el segundo cronómetro queda a 0.
+    let tProcesoBw = 0;
+    let tProcesoOcr = 0;
+    const pBw = processImage(fotoOriginal, quad, filtro, rotacion, { manual: true }).then((r) => {
+      tProcesoBw = performance.now();
+      return r;
+    });
+    const pOcr =
+      filtro === "original"
+        ? pBw
+        : processImage(fotoOriginal, quad, "original", rotacion, { manual: true })
+            .catch(() => null)
+            .then((r) => {
+              tProcesoOcr = performance.now();
+              return r;
+            });
+    const [resultado, resultadoOcr] = await conRampa(
+      Promise.all([pBw, pOcr]),
+      2200,
+      // RECORTANDO .2→.6 (warp) → REALZANDO .4→1 (enhance), interpolado.
+      (f) =>
+        f < 0.55
+          ? { etapa: "RECORTANDO", progreso: 0.2 + (f / 0.55) * 0.4 }
+          : { etapa: "REALZANDO", progreso: 0.4 + ((f - 0.55) / 0.45) * 0.6 },
+      emitir,
+    );
+    ms.proceso = performance.now() - tProceso;
+    // D45 — subs del muro (guard > 0 al exportar — jamás inventar).
+    if (tProcesoBw > 0) ms.procesoBw = Math.round(tProcesoBw - tProceso);
+    if (tProcesoOcr > 0) ms.procesoOcr = Math.round(tProcesoOcr - tProceso);
+    emitir({ etapa: "REALZANDO", progreso: 1 });
+    // KIT e14-orientacion-auto-v1 (T-A3): let — el probe puede reemplazarla
+    // por la YA derecha (§2.1 paso 4); el horneado `parcial` de abajo consume
+    // la final.
+    let fotoProcesada = resultado.processed;
+    // KIT e14-recorte-manual-v1 (T1): el warp COMPLETÓ — horneado al
+    // acumulador (el timeout de recortar() ya puede mostrar este recorte
+    // aunque calidad/OCR/gate no alcancen dentro del presupuesto).
+    parcial.fotoProcesada = fotoProcesada;
+    parcial.quadDetectado = quad;
+    parcial.rotation = rotacion;
+    // PROD-1 (§4.2): entrada del OCR con fallback idéntico al escaneo (§5).
+    // Con filtro "original" la procesada ES la entrada (ocrIn=original — reuse).
+    let fotoOcr = fotoProcesada;
+    let ocrIn: "original" | "bw-fallback" = "original";
+    if (resultadoOcr?.processed) {
+      fotoOcr = resultadoOcr.processed;
+    } else {
+      ocrIn = "bw-fallback";
+    }
+    // KIT e14-orientacion-auto-v1 (T-A3): MISMO probe del escaneo (§2.1) —
+    // en recorte MANUAL el usuario puede no haber corregido la rotación.
+    // Aquí no hay SIM (el recorte siempre es real). Al aplicar se giran
+    // fotoOcr Y fotoProcesada y el acumulador `parcial` (horneado temprano,
+    // kit recorte-manual) se actualiza con la YA derecha.
+    // D57 — KIT e14-instrumentos-espera-v1 (T2): MISMO instrumento del escaneo
+    // — coste del probe persistido en el diagnóstico (aditivo, defensivo).
+    let probeMsOrientacion: number | null = null;
+    // WAVE2 A1 — sub-decisión de la miniatura descartada por el fallo seguro
+    // (datos para calibración wave 3 — jamás cambia la decisión de HOY).
+    let probeMiniOrientacion: ProbeOrientacion["orientacionProbeMini"] | null =
+      null;
+    {
+      const probe = await probeOrientacion(fotoOcr, { esperaSink: esperaOcr });
+      if (probe != null) probeMsOrientacion = probe.ms; // D57 T2
+      probeMiniOrientacion = probe?.orientacionProbeMini ?? null; // WAVE2 A1 — la mini que el fallo seguro descartó
+      if (probe?.aplicado) {
+        fotoOcr = await rotarDataUrl(fotoOcr, probe.rot);
+        fotoProcesada = await rotarDataUrl(fotoProcesada, probe.rot);
+        parcial.fotoProcesada = fotoProcesada;
+      }
+    }
+    // §D4 (SPEC-e14-score-ocr): tinta de la procesada re-recortada — mismo
+    // criterio del pipeline (un crop sobre zona sin tinta → ORIGINAL).
+    const procesadaVacia = await procesadaVaciaDataUrl(fotoProcesada);
+    // KIT e14-recorte-manual-v1 (T1): la tinta del recorte ya se midió —
+    // también al acumulador (ReviewView decide el swap de display con esto;
+    // el swap permanece — T3 solo cambia el aviso bajo la tarjeta).
+    parcial.procesadaVacia = procesadaVacia;
+
+    // 2) Calidad de la página.
+    //    KIT visor-accion-score-v1 (FASE S): MISMO cambio que el escaneo —
+    //    el quad del editor está en coordenadas de `fotoOriginal` (misma
+    //    unidad): el score mide el RECORTE pedido, no la mesa (§S.0).
+    emitir({ etapa: "CALIDAD", progreso: 0 });
+    const tCalidad = performance.now();
+    const infoCrop: InfoCrop = { w: 0, h: 0, fallback: false };
+    const calidad = await calidadDeActa(fotoOriginal, quad, infoCrop);
+    ms.calidad = performance.now() - tCalidad;
+    emitir({ etapa: "CALIDAD", progreso: 1 });
+
+    // 3) OCR sobre la variante de ENTRADA del OCR (PROD-1 §4.2: recorte SIN
+    //    filtro con fallback idéntico al escaneo; gate §4.2). KIT
+    //    e14-ocr-escalonado-v1 (§2): MISMO OCR ESCALONADO del escaneo — el
+    //    manual también merece el ahorro (§2). El recorte NO tiene SIM
+    //    (siempre real; guard fuente SIMULACION = mismo del diag §9.2).
+    //    Motor RapidOCR (PROD-2 §2-C2); progreso real por lotes (§2-C4).
+    const tOcr = performance.now();
+    const ocrEsc = await reconocerRapidOcrEscalonado(
+      fotoOcr,
+      (p) => {
+        emitir({ etapa: "OCR", progreso: Math.min(1, Math.max(0, p)) });
+      },
+      {
+        simular: acta.fuente === "SIMULACION",
+        // §3 presupuesto: el timeout EXISTENTE del recorte manda
+        // (RECORTE_TIMEOUT_MS — T1 recorte-manual); sin presupuestos nuevos.
+        presupuestoMs: RECORTE_TIMEOUT_MS,
+        inicioMs: inicio,
+        esperaSink: esperaOcr,
+      },
+    );
+    let texto = ocrEsc.texto;
+    ms.ocr = performance.now() - tOcr;
+    // PROD-2 (§4.2): conf/det/rec de la pasada ELEGIDA, antes de la banda.
+    const confOcr = ocrEsc.conf;
+    const detOcr = ocrEsc.detMs;
+    const recOcr = ocrEsc.recMs;
+    emitir({ etapa: "OCR", progreso: 1 });
+    // KIT consenso-frankfurt-v1 (FASE 4, §5): banda dirigida — MISMO helper
+    // del escaneo (§4.4); el recorte no tiene SIM (siempre real).
+    // R7c (M6-fin): UNA implementación en pipeline-comun (×2 — pitfall §9.9);
+    // el recorte pasa simular: false (no hay SIM en esta ruta).
+    texto = await bandaDirigidaSiFalta({
+      texto,
+      fotoProcesada,
+      simular: false,
+      ms,
+      esperaSink: esperaOcr,
+    });
+    ms.total = performance.now() - inicio;
+
+    const motor = resultado.precision?.engine ?? "canvas";
+
+    // 4) Mapeo §4 → status/score/rechazo + clasificación (idéntico al
+    //    escaneo — helper ÚNICO evaluarGate, §4.4: AMBOS pipelines con el
+    //    MISMO criterio). §X (SPEC-score-legible): clasificación primero,
+    //    score con señales de legibilidad.
+    // §F-3 (SPEC-camara-funcional) + GUARD-BORDE Rev. 2 (D3/AC11): el quad
+    // del editor está en coordenadas de `fotoOriginal` → la MISMA regla de
+    // completitud ANTES del gate — el helper ÚNICO verificarCompletitud
+    // (geometría sospecha, tinta condena: el rescate de un encuadre apretado
+    // con filo limpio ya NO muere por geometría sola). El rescate NO sirve
+    // de bypass: si el papel está cortado EN VERDAD (tinta al filo), ningún
+    // crop lo completa; si el acta SÍ está entera (detección falló por
+    // sombra), el recorte manual la rescata legítimamente.
+    // KIT consenso-frankfurt-v1 (FASE 2, §3): esquinas ANTES del guard — la
+    // marca presente es PRUEBA POSITIVA de papel entero (ANALISIS §5.1) →
+    // verificarCompletitud la consulta y perdona la sospecha geométrica
+    // (§0-F2). UNA sola medición (helper único esquinasDeActa — §4.4).
+    // <80×120 → null (n/d — jamás condena).
+    // R7c (M6-fin): la medición vive en pipeline-comun (mismo criterio ×2);
+    // el recorte mide SIEMPRE real → simular: false (sin ESQUINAS_OK).
+    const { esquinas, ladoEsquina, trazaEsq } = await medirEsquinasSitio({
+      fotoProcesada,
+      simular: false,
+    });
+    const verificacion = await verificarCompletitud(quad, fotoProcesada, esquinas);
+    // e71 (P10) — VETO 4/4 FIDUCIALES (mismo criterio del escaneo — helper
+    // ÚNICO cuatroEsquinasFaltan, pitfall §9.9): las 4 marcas ausentes →
+    // `completa` false. En el RECORTE MANUAL el veto NO rechaza (doctrina
+    // Q2 del kit esquinas-suaves: el operador VIO el papel) — degrada al
+    // escudo-manual (techo 7.9) vía vetoIncompleta/escudoManual de abajo;
+    // diag.gate.completa SÍ reporta false (kit P10 — coherencia del
+    // informe con la medición física).
+    // R7c (M6-fin): criterio único vetoCuatroEsquinas — el recorte siempre
+    // mide real → aplica: true (el escaneo pasa su guard SIM).
+    const completa =
+      verificacion.completa && !vetoCuatroEsquinas({ esquinas, aplica: true });
+    // KIT e14-esquinas-suaves-v1 (Q2): ESCUDO-MANUAL — `!completa` en un recorte
+    // MANUAL no rechaza: techo 7.9 (patrón del escudo D10). El operador VIO el
+    // papel; a lo sumo su crop cortó un poco de impresión y lo decide mirando.
+    // SIN_VOTOS y BAJO siguen mandando (contenido, no esquinas). Solo recorte:
+    // el escaneo conserva el veto completo (conservador en campo — Q1 lo relaja).
+    const vetoIncompleta = !completa && !manual;
+    const escudoManual = !completa && manual;
+    // GATE-MARCADORES (KIT e14-gate-v2, FASE G2) en el recorte — mismo
+    // marcador obligatorio y MISMO criterio que el escaneo (helper ÚNICO,
+    // §4.4): el recorte re-evalúa TODO el gate, los votos incluidos. Sin
+    // excepción: un recorte que deja la zona de votos fuera → SIN_VOTOS
+    // (vuelve a captura) — el recorte NUNCA rescata un acta sin votos.
+    // KIT actas-vivas-paginas-v1 (FASE C): clasificación ANTES de
+    // medirZonaVotos (solo depende de texto — ya está en vuelo): el gate de
+    // votos necesita la página (solo P1 tiene zona) y el recorte OCR de
+    // secciones se calcula de paso.
+    const clasificacion = clasificarCabecera(texto, await cargarDivipol());
+    // (KIT consenso-frankfurt-v1 FASE 2: las esquinas se miden ANTES del
+    // guard — arriba; aquí solo consume ladoEsquina/trazaEsq.)
+    // KIT actas-vivas-paginas-v1 (FASE C): RECORTADA por OCR de secciones —
+    // mismas señales que el escaneo (helper ÚNICO §4.4). FASE F: OR esquinas.
+    // KIT e14-lectura-perdona-lazo-v1 (§4-B): MISMO perdón del escaneo — la
+    // LECTURA perdona al lazo (falso positivo margen corto/sombra); la señal
+    // de secciones NUNCA se perdona. Mismo criterio en AMBOS pipelines
+    // (pitfall §9.9 del kit score-lectura — helper único).
+    // R7c (M6-fin): la COMPOSICIÓN de señales vive UNA vez en pipeline-comun
+    // (caracterizarLectura — pitfall §9.9: era ×2 con las mismas fórmulas).
+    // ADAPTACIÓN DECLARADA: el await de medirZonaVotos quedaba ENTRE las
+    // señales (recortada → ocrLegible); como TODO el bloque extraído es PURO
+    // y síncrono, ahora corre después — mismas salidas, las awaits del sitio
+    // (divipol/marcadores) conservan su orden relativo entre sí.
+    // (faltaSeccion no se desestructura aquí: el recorte no tiene perdón de
+    // marco — solo el escaneo lo consulta vía marcoPerdonadoPorLectura.)
+    const { lazoPerdonado, recortada, ocrLegible, senalActa, senal, pisoPerfecto, scoreBase } =
+      caracterizarLectura({ texto, clasificacion, esquinas, ladoEsquina, calidad });
+    // (el score BASE muta después con los caps — `score = desenlace.score`;
+    // scoreVisual queda capturado ANTES, misma convención del escaneo.)
+    let score = scoreBase;
+    const marcadores = await medirZonaVotos(fotoProcesada);
+    // KIT actas-vivas-paginas-v1 (FASE C): gate de votos SOLO P1 — la pág 2
+    // (constancias) NO tiene zona de votos. Página desconocida → se mide
+    // (conservador). Log: votos=skip-pag2 cuando aplique.
+    // (R7a: el `marcadoresOk` que vivía aquí nace ahora DENTRO de
+    // resolverDesenlace — gate.ts — y regresa como `desenlace.marcadoresOk`.)
+    const votosSkipPag2 = clasificacion.pagina?.index === 2;
+    // KIT e14-diagnostico-autoenvio-v1 (§3-A): score visual ANTES de los caps
+    // del sitio (misma convención que el escaneo). ORDEN del merge (kit
+    // e14-diag-campos-aditivos-v1 §4-A.3): scoreDeCalidad → scoreVisual → C3.
+    const scoreVisual = scoreBase;
+    // R7a (M3) — DESENLACE unificado (mismo criterio del escaneo, pitfall
+    // §9.9): C3 (piso/techo lectura) → caps del sitio (escudo-fondo D10 ·
+    // escudo-manual Q2 · recortada) → gate (INCOMPLETA · SIN_VOTOS G2 ·
+    // evaluarGate §4) → caps post-gate 6.4 → sustitución BAJO §D3 →
+    // techosDiag, TODO en resolverDesenlace (gate.ts — transcripción literal
+    // de esta rama). Las diferencias legítimas del recorte entran EXPLÍCITAS:
+    // sin chip SIM (scoreSimulado null), vetoIncompleta/escudoManual según
+    // `manual` (Q2 — el recorte MANUAL degrada el veto a escudo) y copy
+    // INCOMPLETA de cámara SIEMPRE (rama manual sin cambios: F2.4).
+    const desenlace = resolverDesenlace({
+      score,
+      levelCalidad: calidad.level,
+      nivelLectura: senal.nivel,
+      senalActa,
+      ocrTexto: texto,
+      clasificacion,
+      intento: acta.intento,
+      maxIntentos: acta.maxIntentos,
+      scoreSimulado: null,
+      completa,
+      vetoIncompleta,
+      escudoManual,
+      fondo: verificacion.fondo,
+      recortada,
+      origenEscaneo: false,
+      votosSkipPag2,
+      hayVotos: marcadores.hayVotos,
+    });
+    score = desenlace.score;
+    const marcadoresOk = desenlace.marcadoresOk;
+    const rechazoFinal: Acta["rechazo"] = desenlace.rechazo;
+
+    // §3c (GUARD-BORDE): log de auditoría del guard — SOLO con sospecha
+    // geométrica (AC8). Mismos campos que el pipeline de escaneo.
+    // KIT e14-esquinas-suaves-v1 (Q1): token `perdon=` añadido AL FINAL del
+    // segmento (tokens NUEVOS solo al final — líneas `senal=`/`level:`
+    // intocables byte a byte).
+    // R7c (M6-fin): el segmento vive UNA vez en pipeline-comun (evidencia-
+    // BordeDe — era ×2 con la misma fórmula; aquí la verificación es no-null).
+    const evidenciaBordeRecorte = evidenciaBordeDe(verificacion);
+    // KIT e14-diagnostico-autoenvio-v1 (C1/§6-B): techos con las MISMAS
+    // condiciones que aplicaron los caps (orden real) — sitio recorte.
+    // R7a (M3): la lista nace AHORA en resolverDesenlace (gate.ts) — mismas
+    // condiciones y MISMO orden que los caps que aplicó, escudo-manual
+    // incluido (antes duplicado aquí y en pipeline() — pitfall §9.9).
+    const techosDiag: string[] = desenlace.techosDiag;
+    // C1: registro del desenlace junto al log (§9.6). Guard extra §9.2: un
+    // recorte de un acta SIMULACION tampoco adjunta (doble guard con el store).
+    let diag: DiagnosticoActa | null = null;
+    if (acta.fuente !== "SIMULACION") {
+      try {
+        // R7b (M4) + R7c (M6-fin): payload del desenlace UNA vez en
+        // pipeline-comun (construirDiagnosticoSitio) — diferencias de ESTE
+        // sitio explícitas (actaId = acta.id — identidad conservada; SIN
+        // gateMarco — la clave viaja AUSENTE como hoy; decode/detect
+        // null/null — esta ruta no los mide).
+        diag = construirDiagnosticoSitio({
+          desenlace,
+          rechazoFinal,
+          scoreVisual,
+          scoreFinal: score,
+          techosDiag,
+          calidad,
+          texto,
+          ocrLegible,
+          senal,
+          senalActa,
+          completa,
+          recortada,
+          ladoEsquina,
+          marcadores,
+          marcadoresOk,
+          votosSkipPag2,
+          procesadaVacia,
+          motor,
+          infoCrop,
+          quad,
+          quadOrigen,
+          ms,
+          sitio: {
+            actaId: acta.id, // el acta existe — identidad conservada (spread)
+            intento: acta.intento,
+            maxIntentos: acta.maxIntentos,
+            gateMarco: undefined, // el recorte NO traía la clave (ver auditoria.ts)
+            fondo: verificacion.fondo,
+            filtro,
+            // D61 — esta ruta (recorte manual del editor) NO mide decode/detect
+            // (su `ms` local no los trae) — null honesto, jamás inventar.
+            decodeMs: null,
+            detectMs: null,
+          },
+        });
+      } catch {
+        diag = null;
+      }
+    }
+    // D57 — KIT e14-instrumentos-espera-v1 (T2): orientacionProbeMs al
+    // diagnóstico — asignación DEFENSIVA (jamás lanza; sin diagnóstico → se
+    // omite — kit §4-T2). ADITIVO: no toca score/status/gate/tiempos.
+    if (diag != null && probeMsOrientacion != null) {
+      diag.orientacionProbeMs = probeMsOrientacion;
+    }
+    // Lo que ESTA acta esperó el turno OCR (FIFO del singleton ORT). NO es
+    // trabajo: `ocrMs` lo incluye, así que compite con él, no con las barras
+    // de trabajo del informe. Guard > 0 = ausente cuando no esperó o cuando
+    // el OCR fue del sidecar nativo (sin cola que esperar) — jamás inventar.
+    if (diag != null && esperaOcr.ms > 0) {
+      diag.tiempos.ocrEsperaMs = Math.round(esperaOcr.ms);
+    }
+    // WAVE2 A1 — sub-decisión de la miniatura descartada por el fallo seguro
+    // (asignación DEFENSIVA — jamás lanza; sin diagnóstico o sin mini → se
+    // omite — jamás inventar). Datos de calibración wave 3.
+    if (diag != null && probeMiniOrientacion != null) {
+      diag.orientacionProbeMini = probeMiniOrientacion;
+    }
+    // R7c (M6-fin): la COLA del log (del token votos= hasta ClasifDebil) se
+    // compone en pipeline-comun (trazaDesenlaceComun) — UNA implementación
+    // para ambos sitios (formato D51 CONGELADO). El head conserva los tokens
+    // propios del recorte (sin decode/detect). Los extras del sitio entran
+    // tipados: evidenciaSitio = evidencia-borde + manual + escudo-manual.
+    logger.info(
+      `[e14] recorte ${acta.fuente} total=${Math.round(ms.total)}ms ` +
+        `(proceso=${Math.round(ms.proceso)} calidad=${Math.round(ms.calidad)} ` +
+        `ocr=${Math.round(ms.ocr)} motor=${motor} ocrValido=${ocrTextIsValid(texto)} ` +
+        `cabeceraE14=${PATRON_CABECERA.test(texto)} completa=${completa} ` +
+        `senal=${senalActa} vacia=${procesadaVacia} ` +
+        trazaDesenlaceComun({
+          votosSkipPag2,
+          densidadVotosPct: marcadores.densidadVotosPct,
+          marcadoresOk,
+          recortada,
+          ladoEsquina,
+          lazoPerdonado,
+          trazaEsq,
+          evidenciaSitio: `${evidenciaBordeRecorte}${manual ? " manual=1" : ""}${escudoManual ? " escudo-manual=1" : ""}`,
+          quad,
+          quadOrigen,
+          pisoPerfecto,
+          score,
+          filtro,
+          ocrIn,
+          confOcr,
+          detOcr,
+          recOcr,
+          senal,
+          desenlace,
+          infoCrop,
+          calidad,
+          ocrLegible,
+          extrasSim: "", // el recorte no tiene SIM (siempre real)
+          extrasDeteccion: "", // esta ruta no corre detección
+          diag,
+        }),
+    );
+
+    // Acta ACTUALIZADA: identidad intacta (spread), campos reales nuevos y
+    // rechazo LIMPIO si el rescate mejora el estado (D20). F4/D37: la
+    // rotación usada queda HORNEADA (rotation) — la respeta el PDF §6 y un
+    // eventual re-recorte/filtrado.
+    // §1.3 (SPEC-titulo-ubicacion): el recorte re-corre el gate → clasificación
+    // AUTO nueva → título/ubicación reales. ADAPTACIÓN de nombre: el spec llama
+    // `resultado` a esta constante, pero ese identificador ya vive arriba (el
+    // `conRampa` del paso 1) → `actaActualizada` (misma forma, cero lógica nueva).
+    const actaActualizada: Acta = {
+      ...acta,
+      fotoProcesada,
+      procesadaVacia,
+      // KIT actas-vivas-paginas-v1 (FASE C): bandera del OCR de secciones,
+      // re-evaluada en cada re-proceso (la más reciente manda).
+      recortada,
+      // KIT identificacion-codigo-v1 (FASE F): LADO de la esquina faltante,
+      // re-evaluado en cada re-proceso (null = vino SOLO del OCR de
+      // secciones o 4/4 presentes).
+      recorteLado: ladoEsquina,
+      quadDetectado: quad,
+      rotation: rotacion,
+      ocrTexto: texto,
+      metricas: {
+        sharpness: calidad.sharpness,
+        brightness: calidad.brightness,
+        contrast: calidad.contrast,
+      },
+      motor,
+      score,
+      status: desenlace.status,
+      rechazo: rechazoFinal,
+      clasificacion: desenlace.clasificacion ?? undefined,
+      firmas: firmasPorStatus(acta.firmas, desenlace.status),
+    };
+    const titUbi = tituloYUbicacionDe(desenlace.clasificacion ?? null);
+    if (titUbi) {
+      actaActualizada.titulo = titUbi.titulo;
+      actaActualizada.ubicacion = titUbi.ubicacion;
+    }
+    // KIT e14-diagnostico-autoenvio-v1 (C1): el desenlace del RECORTE viaja
+    // en el acta actualizada (el store decide ZIP/registro — C3).
+    if (diag) actaActualizada.diagnostico = diag;
+    // KIT e14-recorte-manual-v1 (T3): recorte MANUAL con foto SIN TINTA —
+    // el acta carga el flag y REVISIÓN cambia el aviso bajo la tarjeta a
+    // «TU RECORTE SE APLICÓ — …». El swap de display permanece (§D4) y el
+    // umbral de tinta NO se toca (image-utils intacto — prohibido §2-T3.3).
+    if (manual && procesadaVacia) actaActualizada.recorteManualSinTinta = true;
+    return actaActualizada;
+  }
+
+  /**
+   * Gate §4.2 REVISADO (SPEC-cabecera-clasificacion §4 + §7.2 SPEC-rediseno-
+   * revision) — helper ÚNICO para AMBOS pipelines (escaneo y recorte, §4.4):
+   *  1. RECHAZADA SOLO por CALIDAD (score < 6.5 vía statusDeScore, §4.1) —
+   *     la tarjeta «ACTA NO RECONOCIDA» queda reservada a este caso. Al
+   *     AGOTAR intentos la contingencia es AUTOMÁTICA (C4, sin botón manual).
+   *  2. Calidad suficiente + clasificación AUTO → status por score (OPTIMA/
+   *     ADVERTENCIA) como hoy + clasificación persistida (Fase B al envío).
+   *  3. Calidad suficiente + SUGERIDA/MANUAL (incluye OCR sin texto, §4.3) →
+   *     EN_REVISION_HUMANA: la pantalla distingue por intento (§7.3 — «repetir-
+   *     primero» antes de agotar; contingencia con panel al agotar).
+   * PATRON_CABECERA ya NO decide el estado (§4.5) — solo traza en el log.
+   * §X (SPEC-score-legible): la clasificación llega calculada desde el
+   * pipeline — alimenta el score (piso por identificación).
+   *
+   * R7a (M3): el CRITERIO vive ahora en gate.ts (export `evaluarGate`) y los
+   * pipelines llegan a él vía resolverDesenlace. Este método se conserva como
+   * SEAM de caracterización (__tests__/gate.test.ts lo compara contra el
+   * módulo puro — misma entrada → misma salida) y punto de anclaje para la
+   * partición R7b. SIN llamadores en producción.
+   */
+  private evaluarGate(
+    score: number,
+    ocrTexto: string,
+    clasificacion: ClasificacionE14,
+    intento: number,
+    maxIntentos: number,
+  ): ResultadoGate {
+    return evaluarGateCriterio(score, ocrTexto, clasificacion, intento, maxIntentos);
+  }
+
+  /**
+   * F2 (§F2.2, D36) — FILTRO: re-procesa la foto con el filtro elegido,
+   * IGUAL que setFilterOnPage del core (apps/scanner-lab/src/components/
+   * scanner/…/store.ts L644-669): SOLO processImage — sin re-OCR, sin
+   * re-calidad (el gate ya resolvió). Devuelve el acta con fotoProcesada y
+   * filtro actualizados. Sin timeout: es un ÚNICO processImage con fallback
+   * canvas (misma exposición al cuelgue que tiene el lab aquí — documentado
+   * en worklog como ADAPTACIÓN de la opción «timeout 15 s» del spec).
+   */
+  async revelar(acta: Acta, filtro: PageFilter): Promise<Acta> {
+    const fotoOriginal = acta.fotoOriginal;
+    if (!fotoOriginal) {
+      throw new Error("SIN FOTO ORIGINAL PARA FILTRAR");
+    }
+    // Fuente: apps/scanner-lab/…/store.ts L644-669 (setFilterOnPage) —
+    // processImage(original, quad, filter, rotation, { manual }).
+    const resultado = await processImage(
+      fotoOriginal,
+      acta.quadDetectado ?? defaultQuad(),
+      filtro,
+      acta.rotation ?? 0,
+      { manual: true },
+    );
+    return { ...acta, fotoProcesada: resultado.processed, filtro };
+  }
+
+  /**
+   * F-OCR del lab (EditorView.tsx L1360-1395): corre requestOcr sobre la
+   * imagen PROCESADA del acta y devuelve el texto crudo.
+   * KIT e14-ocr-lee-original-v1 (PROD-1 §4.3): coherencia con la regla del
+   * producto — el re-OCR manual del editor aplica la MISMA regla: lee el
+   * RECORTE SIN filtro ("original", el crudo del warp) cuando hay
+   * fotoOriginal + quadDetectado; fallback a la procesada (comportamiento de
+   * hoy). NOTA (documentada): el texto del editor puede diferir del histórico
+   * — ES la regla nueva del producto, NO un bug (en impresas con sello el
+   * crudo colapsa chars — §1.2 del kit, esperado).
+   * ADAPTACIÓN documentada: el lab elige imagen con prioridad
+   * `preview ?? procesada-fresca ?? original` (L1373-1376) porque tiene
+   * previewCache; en e14 la procesada SIEMPRE está fresca (todo cambio pasa
+   * por el pipeline) → se usa fotoProcesada directa. El guard `previewLoading`
+   * (L1364-1370) NO aplica (no hay preview en e14) → omitido. Sin timeout
+   * extra (igual que el lab L1379 — requestOcr se gobierna solo).
+   */
+  async reconocerTexto(acta: Acta): Promise<string> {
+    const fotoProcesada = acta.fotoProcesada;
+    if (!fotoProcesada) {
+      throw new Error("SIN FOTO PROCESADA PARA RECONOCER TEXTO");
+    }
+    // PROD-1 (§4.3): regla del producto en el re-OCR del editor — recorte
+    // "original" con el quad horneado (misma convención POST-warp); el catch
+    // cae al fallback de abajo (comportamiento de hoy, §5 del kit).
+    if (acta.fotoOriginal && acta.quadDetectado) {
+      try {
+        const r = await processImage(
+          acta.fotoOriginal,
+          acta.quadDetectado,
+          "original",
+          acta.rotation ?? 0,
+        );
+        // PROD-2 (§2-C2): el re-OCR del editor pasa por el ÚNICO motor.
+        return reconocerRapidOcr(r.processed);
+      } catch {
+        /* cae al fallback de abajo */
+      }
+    }
+    return reconocerRapidOcr(fotoProcesada); // comportamiento de hoy (fallback)
+  }
+
+  horaEnvio(): string {
+    const d = new Date();
+    return `${dosDigitos(d.getHours())}:${dosDigitos(d.getMinutes())}:${dosDigitos(d.getSeconds())}`;
+  }
+
+  horaHistorial(): string {
+    const d = new Date();
+    return `${dosDigitos(d.getHours())}:${dosDigitos(d.getMinutes())}`;
+  }
+}

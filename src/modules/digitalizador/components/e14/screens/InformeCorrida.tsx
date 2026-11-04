@@ -1,0 +1,722 @@
+"use client";
+
+/**
+ * KIT e14-metricas-corrida-v1 (D34) — INFORME DE CARGA MASIVA (pedido
+ * literal del dueño: «un informe de cómo se está comportando la carga
+ * masiva, cuánto está tardando, en qué está tardando para tener datos
+ * reales y poder diagnosticar bien los fallos»).
+ *
+ * · Datos: metricas.ts (IDB e14-masiva-metricas-v1 + espejo RAM de la
+ *   corrida viva). Sobrevive recargas y el REINICIAR ENVÍOS (D33 —
+ *   comparar corridas ES el punto).
+ * · Vista: corrida seleccionada (default: la VIVA o la última cerrada) —
+ *   clic en el historial para mirar una anterior.
+ * · Honesto: etapa sin dato no aparece (jamás inventar); acta sin
+ *   pipeline (ERROR temprano) pinta totalMs «—».
+ * · Cero ruido cuando no hay corridas: el panel NO se renderiza.
+ */
+
+import { Fragment, memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  corridaVivaEstado,
+  exportarInformeMetricas,
+  listarCorridasMetricas,
+  limpiarMetricas,
+  metricasDeCorrida,
+  suscribirseMetricas,
+  type CorridaMetrica,
+  type MetricaActa,
+} from "@/modules/digitalizador/lib/e14/masiva/metricas";
+// R6 — adopción de la capa shared (Ola 0, reporte 04 §B2 #9): fmtMs y hhmm
+// viven en @/shared/format/tiempo — COPIAS VERBATIM de ESTE archivo
+// (fmtMs:81-88 · hh:mm de fmtFechaRelativa:92-93). Mismo output byte a
+// byte; el test de paridad de shared lo fija.
+import { fmtMs, hhmm } from "@/shared/format/tiempo";
+
+// KIT e14-etapas-preocr-v1 (D43) — las etapas OCULTAS suben a las barras:
+// preOcr (runner: capa-0 QR + origen + deskew + master), proceso (warp ×2 +
+// realce del bridge), orientacionProbe (mini-OCR de rotación) y calidad
+// (Laplaciano). Orden de pipeline — el pre-OCR era invisible hasta hoy.
+type EtapaKey =
+  | "preOcrMs"
+  | "decodeMs"
+  | "detectMs"
+  | "procesoMs"
+  | "orientacionProbeMs"
+  | "calidadMs"
+  | "ocrMs"
+  | "persistMs"
+  | "envioMs";
+
+/** Etapas de TRABAJO en orden de presentación (la espera de cola y el
+ *  sondeo —ingesta, paralelo al pipeline— van aparte como info). */
+const ETAPAS_TRABAJO: { key: EtapaKey; label: string }[] = [
+  { key: "preOcrMs", label: "PRE-OCR" },
+  { key: "decodeMs", label: "DECODE" },
+  { key: "detectMs", label: "DETECCIÓN" },
+  { key: "procesoMs", label: "WARP+REALCE" },
+  { key: "orientacionProbeMs", label: "ORIENTACIÓN" },
+  { key: "calidadMs", label: "CALIDAD" },
+  { key: "ocrMs", label: "OCR" },
+  { key: "persistMs", label: "PERSISTENCIA" },
+  { key: "envioMs", label: "ENVÍO" },
+];
+
+// KIT e14-tiempos-v2 (D44-R1) — particiones del muro PRE-OCR (sub-barras
+// indentadas bajo su barra madre): NO son etapas — son segmentos del MISMO
+// muro (qr+origen+deskew+master ≤ preOcrMs). Su % es del PROPIO muro.
+type PreOcrSubKey = "preOcrQrMs" | "preOcrOrigenMs" | "preOcrDeskewMs" | "preOcrMasterMs";
+const PRE_OCR_SUBS: { key: PreOcrSubKey; label: string }[] = [
+  { key: "preOcrQrMs", label: "QR CAPA-0" },
+  { key: "preOcrOrigenMs", label: "ORIGEN" },
+  { key: "preOcrDeskewMs", label: "DESKEW" },
+  { key: "preOcrMasterMs", label: "MASTER" },
+];
+
+// KIT e14-medicion-faltante-v1 (D45) — particiones del muro PROCESO (los 2
+// warps SERIALIZADOS por el core): sub-barras indentadas bajo su barra madre.
+// La 2.ª pared acumula la cola de la 1.ª — el coste propio del segundo warp
+// es la DIFERENCIA entre ambas paredes.
+type ProcesoSubKey = "procesoBwMs" | "procesoOcrMs";
+const PROCESO_SUBS: { key: ProcesoSubKey; label: string }[] = [
+  { key: "procesoBwMs", label: "WARP BW" },
+  { key: "procesoOcrMs", label: "WARP LECTURA" },
+];
+
+// R6 — fmtMs adoptado de @/shared/format/tiempo (copia verbatim de aquí).
+
+function fmtFechaRelativa(ms: number): string {
+  const d = new Date(ms);
+  // R6 — las partes "HH:MM" son el patrón ×3 homeado como hhmm() en
+  // @/shared/format/tiempo (idéntico output: String().padStart(2, "0")).
+  return `${d.toLocaleDateString()} ${hhmm(d)}`;
+}
+
+function percentil(sorted: number[], p: number): number | null {
+  if (!sorted.length) return null;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[i];
+}
+
+const COLOR_DESENLACE: Record<string, string> = {
+  ENVIADA: "text-[#10b981] border-[#10b981]/40 bg-[#10b981]/10",
+  OPTIMA: "text-[#10b981] border-[#10b981]/40 bg-[#10b981]/10",
+  ADVERTENCIA: "text-amber-400 border-amber-400/40 bg-amber-400/10",
+  RECHAZADA: "text-rose-400 border-rose-400/40 bg-rose-400/10",
+  DUPLICADA: "text-sky-400 border-sky-400/40 bg-sky-400/10",
+  ERROR: "text-rose-400 border-rose-500/50 bg-rose-500/15",
+};
+
+function ChipDesenlace({ d }: { d: string }) {
+  const c = COLOR_DESENLACE[d] ?? "text-slate-300 border-slate-700 bg-slate-800/50";
+  return (
+    <span className={`px-1.5 py-0.5 rounded-md border font-mono text-[9px] font-bold uppercase tracking-wider ${c}`}>
+      {d}
+    </span>
+  );
+}
+
+/** P0.2 (informe-arquitectura-fluidez-2026-11-02 §6.2): memo — sin props y
+ *  con suscripción PROPIA a las métricas (suscribirseMetricas); los
+ *  re-renders del orquestador ya no reconcilian este panel. */
+export default memo(function InformeCorrida() {
+  const [corridas, setCorridas] = useState<CorridaMetrica[]>([]);
+  const [seleccionada, setSeleccionada] = useState<string | null>(null);
+  const [actas, setActas] = useState<MetricaActa[]>([]);
+  const [abierto, setAbierto] = useState(true);
+  const [escobaArmada, setEscobaArmada] = useState(false);
+  const [tick, setTick] = useState(0); // re-render del reloj EN CURSO
+
+  const viva = corridaVivaEstado();
+
+  const recargar = useCallback(async () => {
+    const cs = await listarCorridasMetricas();
+    setCorridas(cs);
+    // Default de vista: la VIVA (si hay) o la más reciente cerrada.
+    const objetivo = viva.corridaId ?? seleccionada ?? cs[0]?.id ?? null;
+    if (objetivo) {
+      if (objetivo === viva.corridaId) {
+        setSeleccionada(objetivo);
+        setActas([...viva.actas]);
+      } else {
+        setSeleccionada(objetivo);
+        setActas(await metricasDeCorrida(objetivo));
+      }
+    } else {
+      setSeleccionada(null);
+      setActas([]);
+    }
+  }, [viva.corridaId, seleccionada]);
+
+  // Carga inicial + suscripción al canal de métricas (updates en vivo).
+  useEffect(() => {
+    void recargar();
+    const off = suscribirseMetricas(() => {
+      // Corrida viva → espejo RAM al instante; cerrada → relectura IDB.
+      const lv = corridaVivaEstado();
+      if (lv.corridaId) {
+        setSeleccionada(lv.corridaId);
+        setActas([...lv.actas]);
+        void listarCorridasMetricas().then(setCorridas);
+      } else {
+        void recargar();
+      }
+    });
+    return off;
+  }, []);
+
+  // Desarme de la escoba (mismo patrón 2 toques de VACIAR/REINICIAR).
+  useEffect(() => {
+    if (!escobaArmada) return;
+    const t = window.setTimeout(() => setEscobaArmada(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [escobaArmada]);
+
+  // Reloj de la corrida EN CURSO (1 s — barato, solo mientras viva).
+  useEffect(() => {
+    if (!viva.corridaId) return;
+    const t = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [viva.corridaId]);
+
+  const seleccionadaInfo = useMemo(
+    () => corridas.find((c) => c.id === seleccionada) ?? null,
+    [corridas, seleccionada],
+  );
+
+  const agg = useMemo(() => {
+    const porDesenlace = new Map<string, number>();
+    for (const a of actas) porDesenlace.set(a.desenlace, (porDesenlace.get(a.desenlace) ?? 0) + 1);
+
+    const sumas = new Map<EtapaKey, number>();
+    // KIT e14-tiempos-v2 (D44) — sub-desglose del muro + trazas del despacho:
+    const preOcrSubSum = new Map<PreOcrSubKey, number>();
+    // KIT e14-medicion-faltante-v1 (D45) — subs del muro PROCESO + los 3
+    // faltantes del informe real (gap / publicación / dedup sin-match):
+    const procesoSubSum = new Map<ProcesoSubKey, number>();
+    let gapN = 0; // actas con residual medido
+    let gapPeor: number | null = null; // peor residual (valor absoluto)
+    let gapSobreUmbral = 0; // actas con gap > 50 ms (el "sin dueño" real)
+    let envioRoundSum = 0; // roundtrip REAL de la publicación al monitor
+    let envioRoundN = 0;
+    let envioBloqueadas = 0;
+    let dedupSinMatch = 0; // actas dedup:"sin-match"
+    let dedupDetalleN = 0; // de ellas, con diagnóstico de comparación
+    let dedupMejorDist: number | null = null; // mejor distancia vista (global)
+    let dedupCandidatasSum = 0; // candidatas totales comparadas (vivas + índice)
+    let qrHeredadas = 0; // capa-0 heredó qrPrevio (palanca ① — cobertura)
+    let conPreOcr = 0; // actas con muro medido (denominador honesto)
+    let reintentoActas = 0; // muro RE-ARMADO ≥ 1 vez (watchdog/rescate)
+    const intervalos: { ini: number; fin: number }[] = []; // [tsInicio, tsFin]
+    let trabajoTotal = 0;
+    let sondeoSum = 0;
+    let sondeoN = 0;
+    let thumbSum = 0;
+    let thumbN = 0;
+    let esperaSum = 0;
+    let esperaN = 0;
+    // 2026-11-03 — espera del TURNO OCR global (cola FIFO del singleton ORT).
+    // Es una PARTICIÓN del muro de OCR/ORIENTACIÓN de cada acta: nunca es un
+    // segmento nuevo del muro, así que NO suma al trabajo (doble contabilidad
+    // prohibida — mismo trato que sondeo/thumb/espera). Responde «¿esta acta
+    // es cara o el motor estaba ocupado?».
+    let ocrEsperaSum = 0;
+    let ocrEsperaN = 0;
+    const totales: number[] = [];
+    const ocrs: number[] = [];
+    for (const a of actas) {
+      for (const [k, v] of Object.entries(a.etapas)) {
+        if (k === "sondeoQrMs") {
+          sondeoSum += v;
+          sondeoN += 1;
+          continue; // ingesta paralela — NO compite por el trabajo del pipeline
+        }
+        if (k === "thumbMs") {
+          thumbSum += v;
+          thumbN += 1;
+          continue; // D35 — cosmético post-pipeline: línea propia, no barra
+        }
+        // 2026-11-03 — espera del turno OCR: partición del muro OCR, NO un
+        // segmento → línea propia, jamás suma al trabajo.
+        if (k === "ocrEsperaMs") {
+          ocrEsperaSum += v;
+          ocrEsperaN += 1;
+          continue;
+        }
+        // D44-R1 — particiones del muro PRE-OCR: línea propia bajo la barra
+        // madre (jamás suman al trabajo — sería DOBLE contabilidad del muro).
+        if (k !== "preOcrMs" && k.startsWith("preOcr")) {
+          const sk = k as PreOcrSubKey;
+          preOcrSubSum.set(sk, (preOcrSubSum.get(sk) ?? 0) + v);
+          continue;
+        }
+        // D45 — particiones del muro PROCESO (2 warps): ídem — línea propia.
+        if (k !== "procesoMs" && k.startsWith("proceso")) {
+          const sk = k as ProcesoSubKey;
+          procesoSubSum.set(sk, (procesoSubSum.get(sk) ?? 0) + v);
+          continue;
+        }
+        sumas.set(k as EtapaKey, (sumas.get(k as EtapaKey) ?? 0) + v);
+        trabajoTotal += v;
+      }
+      // D45 — gap sin dueño / publicación del envío / dedup sin-match:
+      if (typeof a.gapMs === "number") {
+        gapN += 1;
+        if (gapPeor === null || Math.abs(a.gapMs) > Math.abs(gapPeor)) gapPeor = a.gapMs;
+        if (a.gapMs > 50) gapSobreUmbral += 1;
+      }
+      if (typeof a.envioRoundMs === "number") {
+        envioRoundSum += a.envioRoundMs;
+        envioRoundN += 1;
+        if (a.envioEstado === "bloqueada") envioBloqueadas += 1;
+      }
+      if (a.dedup === "sin-match") {
+        dedupSinMatch += 1;
+        const dd = a.dedupDetalle;
+        if (dd) {
+          dedupDetalleN += 1;
+          dedupCandidatasSum += dd.candidatas + dd.indice;
+          if (
+            typeof dd.mejorDistancia === "number" &&
+            (dedupMejorDist === null || dd.mejorDistancia < dedupMejorDist)
+          ) {
+            dedupMejorDist = dd.mejorDistancia;
+          }
+        }
+      }
+      // D44 — trazas por acta (herencia / re-arms / solape):
+      if (a.etapas.preOcrMs != null) conPreOcr += 1;
+      if (a.qrHeredado === true) qrHeredadas += 1;
+      if ((a.reintentosPreOcr ?? 0) > 0) reintentoActas += 1;
+      if (typeof a.tsInicio === "number") intervalos.push({ ini: a.tsInicio, fin: a.tsFin });
+      if (a.esperaMs != null) {
+        esperaSum += a.esperaMs;
+        esperaN += 1;
+      }
+      if (a.totalMs != null) totales.push(a.totalMs);
+      if (a.etapas.ocrMs != null && a.etapas.ocrMs > 0) ocrs.push(a.etapas.ocrMs);
+    }
+    totales.sort((a, b) => a - b);
+    ocrs.sort((a, b) => a - b);
+    const lentas = [...actas]
+      .sort((a, b) => (b.totalMs ?? -1) - (a.totalMs ?? -1))
+      .slice(0, 5);
+    const fallos = actas.filter((a) => a.desenlace === "ERROR");
+    // D44-R3 — SOLAPE REAL (prueba D31 del pool): barrido de eventos sobre
+    // [tsInicio, tsFin]. En empate cierran primero (sin fantasma de 1 ms).
+    let maxSimultaneas = 0;
+    let solapadas = 0;
+    if (intervalos.length > 1) {
+      const eventos: { t: number; d: number }[] = [];
+      for (const iv of intervalos) eventos.push({ t: iv.ini, d: 1 }, { t: iv.fin, d: -1 });
+      eventos.sort((x, y) => x.t - y.t || x.d - y.d);
+      let cur = 0;
+      for (const ev of eventos) {
+        cur += ev.d;
+        if (cur > maxSimultaneas) maxSimultaneas = cur;
+      }
+      const enSolape = new Set<number>();
+      for (let i = 0; i < intervalos.length; i += 1) {
+        for (let j = i + 1; j < intervalos.length; j += 1) {
+          if (intervalos[i].ini < intervalos[j].fin && intervalos[j].ini < intervalos[i].fin) {
+            enSolape.add(i);
+            enSolape.add(j);
+          }
+        }
+      }
+      solapadas = enSolape.size;
+    }
+    return {
+      porDesenlace,
+      sumas,
+      preOcrSubSum,
+      // D45 — subs del proceso + los 3 faltantes:
+      procesoSubSum,
+      gapN,
+      gapPeor,
+      gapSobreUmbral,
+      envioRoundSum,
+      envioRoundN,
+      envioBloqueadas,
+      dedupSinMatch,
+      dedupDetalleN,
+      dedupMejorDist,
+      dedupCandidatasSum,
+      qrHeredadas,
+      conPreOcr,
+      reintentoActas,
+      maxSimultaneas,
+      solapadas,
+      nConTs: intervalos.length,
+      trabajoTotal,
+      sondeoSum,
+      sondeoN,
+      thumbSum,
+      thumbN,
+      esperaSum,
+      esperaN,
+      ocrEsperaSum,
+      ocrEsperaN,
+      p50Total: percentil(totales, 50),
+      p95Total: percentil(totales, 95),
+      p50Ocr: percentil(ocrs, 50),
+      p95Ocr: percentil(ocrs, 95),
+      lentas,
+      fallos,
+    };
+  }, [actas]);
+
+  const wallCorrida = seleccionadaInfo
+    ? (seleccionadaInfo.fin ?? Date.now()) - seleccionadaInfo.inicio
+    : null;
+  const enCurso = seleccionadaInfo?.fin == null;
+  void tick; // reloj — el valor solo dispara el re-render
+
+  if (!corridas.length) return null; // cero ruido sin datos
+
+  const exportar = () => {
+    void exportarInformeMetricas().then((json) => {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `informe-masiva-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  };
+
+  return (
+    <section
+      aria-label="Informe de carga masiva"
+      className="rounded-2xl border border-slate-800 bg-[#0c1219]"
+    >
+      {/* ——— cabecera ——— */}
+      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-slate-800">
+        <button
+          type="button"
+          onClick={() => setAbierto((v) => !v)}
+          aria-expanded={abierto}
+          aria-label={abierto ? "Colapsar informe" : "Expandir informe"}
+          className="min-h-[44px] px-2 -ml-2 rounded-xl font-mono text-[11px] font-black uppercase tracking-wider text-white flex items-center gap-2 hover:bg-white/5 transition cursor-pointer"
+        >
+          <span className={`text-[#10b981] transition-transform ${abierto ? "rotate-90" : ""}`}>▶</span>
+          INFORME DE CARGA
+        </button>
+        <span
+          className={`px-2 py-0.5 rounded-md border font-mono text-[10px] font-bold uppercase tracking-wider ${
+            enCurso
+              ? "border-[#10b981]/50 text-[#10b981] bg-[#10b981]/10"
+              : "border-slate-700 text-slate-300 bg-slate-800/40"
+          }`}
+          role="status"
+        >
+          {enCurso && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse mr-1.5 align-middle" />}
+          {/* D45 — el motivo de cierre viaja: "drenada" | "pausa" |
+              "recarga-o-abandono" — el fin=null sin dueño ya no existe. */}
+          {enCurso
+            ? `EN CURSO · ${fmtMs(wallCorrida)}`
+            : `COMPLETADA${seleccionadaInfo?.motivoCierre ? ` · cierre: ${seleccionadaInfo.motivoCierre}` : ""} · ${fmtMs(wallCorrida)}`}
+        </span>
+        <span className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+          {seleccionadaInfo ? fmtFechaRelativa(seleccionadaInfo.inicio) : ""}
+        </span>
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={exportar}
+            aria-label="Exportar informe JSON"
+            title="Descarga el informe completo (corridas + actas) en JSON"
+            className="min-h-[44px] px-3 rounded-xl border border-slate-800 bg-[#10161f] text-slate-300 font-mono text-[10px] font-bold uppercase tracking-wider hover:border-slate-600 hover:text-white transition cursor-pointer"
+          >
+            EXPORTAR JSON
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!escobaArmada) {
+                setEscobaArmada(true);
+                return;
+              }
+              setEscobaArmada(false);
+              void limpiarMetricas().then(() => recargar());
+            }}
+            aria-label={escobaArmada ? "Confirmar borrar todo el historial de métricas" : "Borrar historial de métricas"}
+            title="Borra TODO el historial de métricas (las actas enviadas NO se tocan)"
+            className={`min-h-[44px] px-3 rounded-xl border font-mono text-[10px] font-bold uppercase tracking-wider transition cursor-pointer ${
+              escobaArmada
+                ? "border-red-500 text-red-400 bg-red-500/20 animate-pulse"
+                : "border-slate-800 bg-[#10161f] text-slate-500 hover:border-slate-600 hover:text-white"
+            }`}
+          >
+            {escobaArmada ? "¿SEGURO?" : "LIMPIAR"}
+          </button>
+        </div>
+      </div>
+
+      {abierto && (
+        <div className="px-4 py-3 flex flex-col gap-4">
+          {/* ——— KPIs ——— */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <Kpi label="ACTAS" valor={String(actas.length)} />
+            {/* D43 — «TRABAJO ACTAS»: la suma ahora incluye preOcrMs (runner) —
+             *  llamarlo «pipeline» sería mentir (el pre-OCR es ANTES del bridge). */}
+            <Kpi label="TRABAJO ACTAS" valor={fmtMs(agg.trabajoTotal)} />
+            <Kpi label="OCR P50 / P95" valor={`${fmtMs(agg.p50Ocr)} / ${fmtMs(agg.p95Ocr)}`} />
+            <Kpi
+              label="DESENLACES"
+              valor={[...agg.porDesenlace.entries()].map(([d, n]) => `${d} ${n}`).join(" · ") || "—"}
+              small
+            />
+          </div>
+
+          {/* ——— etapas (barras del presupuesto del pipeline) ——— */}
+          <div className="flex flex-col gap-1.5">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+              ¿EN QUÉ SE VA EL TIEMPO? — sumas de la corrida (trabajo {fmtMs(agg.trabajoTotal)} — incluye PRE-OCR del runner, que NO está dentro de totalMs)
+            </p>
+            {ETAPAS_TRABAJO.filter(({ key }) => (agg.sumas.get(key) ?? 0) > 0).map(({ key, label }) => {
+              const ms = agg.sumas.get(key) ?? 0;
+              const pct = agg.trabajoTotal > 0 ? Math.round((ms / agg.trabajoTotal) * 100) : 0;
+              const preOcrSuma = agg.sumas.get("preOcrMs") ?? 0;
+              return (
+                <Fragment key={key}>
+                  <div className="flex items-center gap-2" role="row">
+                    <span className="w-28 shrink-0 font-mono text-[10px] uppercase tracking-wider text-slate-400">{label}</span>
+                    <div className="flex-1 h-3.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+                      <div
+                        className="h-full rounded-md bg-[#10b981]/70"
+                        style={{ width: `${Math.max(2, pct)}%` }}
+                        aria-hidden
+                      />
+                    </div>
+                    <span className="w-40 shrink-0 text-right font-mono text-[10px] text-slate-300" role="cell">
+                      {fmtMs(ms)} · {pct}%
+                    </span>
+                  </div>
+                  {/* KIT e14-tiempos-v2 (D44-R1) — sub-desglose del muro PRE-OCR:
+                      particiones del MISMO muro → % del PROPIO muro, no del trabajo. */}
+                  {key === "preOcrMs" &&
+                    PRE_OCR_SUBS.filter(({ key: sk }) => (agg.preOcrSubSum.get(sk) ?? 0) > 0).map(
+                      ({ key: sk, label: slabel }) => {
+                        const sMs = agg.preOcrSubSum.get(sk) ?? 0;
+                        const sPct = preOcrSuma > 0 ? Math.round((sMs / preOcrSuma) * 100) : 0;
+                        return (
+                          <div key={sk} className="flex items-center gap-2 pl-5" role="row">
+                            <span className="w-24 shrink-0 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                              └ {slabel}
+                            </span>
+                            <div className="flex-1 h-2.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+                              <div
+                                className="h-full rounded-md bg-[#10b981]/30"
+                                style={{ width: `${Math.max(2, sPct)}%` }}
+                                aria-hidden
+                              />
+                            </div>
+                            <span className="w-40 shrink-0 text-right font-mono text-[9px] text-slate-500" role="cell">
+                              {fmtMs(sMs)} · {sPct}% del PRE-OCR
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                  {/* KIT e14-medicion-faltante-v1 (D45) — sub-desglose del muro
+                      PROCESO (2 warps serializados): ídem — % del PROPIO muro. */}
+                  {key === "procesoMs" &&
+                    PROCESO_SUBS.filter(({ key: sk }) => (agg.procesoSubSum.get(sk) ?? 0) > 0).map(
+                      ({ key: sk, label: slabel }) => {
+                        const sMs = agg.procesoSubSum.get(sk) ?? 0;
+                        const sPct = ms > 0 ? Math.round((sMs / ms) * 100) : 0;
+                        return (
+                          <div key={sk} className="flex items-center gap-2 pl-5" role="row">
+                            <span className="w-24 shrink-0 font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                              └ {slabel}
+                            </span>
+                            <div className="flex-1 h-2.5 rounded-md bg-[#10161f] overflow-hidden" role="presentation">
+                              <div
+                                className="h-full rounded-md bg-[#10b981]/30"
+                                style={{ width: `${Math.max(2, sPct)}%` }}
+                                aria-hidden
+                              />
+                            </div>
+                            <span className="w-40 shrink-0 text-right font-mono text-[9px] text-slate-500" role="cell">
+                              {fmtMs(sMs)} · {sPct}% del WARP+REALCE
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                </Fragment>
+              );
+            })}
+            {agg.sondeoN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500 mt-0.5">
+                + SONDEO QR (ingesta, paralelo al pipeline): {fmtMs(agg.sondeoSum)} en {agg.sondeoN} acta(s)
+              </p>
+            )}
+            {agg.esperaN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + ESPERA EN COLA: {fmtMs(agg.esperaSum)} en {agg.esperaN} acta(s) (no es trabajo — es turno)
+              </p>
+            )}
+            {agg.ocrEsperaN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + ESPERA DEL TURNO OCR: {fmtMs(agg.ocrEsperaSum)} en {agg.ocrEsperaN} acta(s) — ya
+                está DENTRO de OCR/ORIENTACIÓN (partición, no trabajo extra)
+              </p>
+            )}
+            {agg.thumbN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + THUMBS DE BANDEJA (post-pipeline): {fmtMs(agg.thumbSum)} en {agg.thumbN} acta(s)
+              </p>
+            )}
+            {/* KIT e14-tiempos-v2 (D44) — trazas de los 4 ROJOS: herencia (①),
+                re-arms (④) y solape real (③ — prueba D31 del pool). */}
+            {agg.conPreOcr > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + QR HEREDADO (capa-0 sin ladder — sondeo/prescan): {agg.qrHeredadas} de {agg.conPreOcr} acta(s) · el resto pagó ladder
+              </p>
+            )}
+            {agg.reintentoActas > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + PRE-OCR RE-ARMADO (watchdog/rescate): {agg.reintentoActas} acta(s) — su PRE-OCR es la SUMA de pasadas
+              </p>
+            )}
+            {agg.nConTs > 1 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + SOLAPE REAL (tsInicio→tsFin): máx {agg.maxSimultaneas} acta(s) en vuelo a la vez · {agg.solapadas} compartieron turno
+              </p>
+            )}
+            {/* KIT e14-medicion-faltante-v1 (D45) — los 3 faltantes del
+                informe real: GAP sin dueño · PUBLICACIÓN (roundtrip real) ·
+                DEDUP sin-match (por qué no matcheó). */}
+            {agg.gapN > 0 && (
+              <p className={`font-mono text-[10px] ${agg.gapSobreUmbral > 0 ? "text-amber-400" : "text-slate-500"}`}>
+                + GAP SIN DUEÑO (muro − totalMs − preOcr − thumb − persist − envío): {agg.gapSobreUmbral} de {agg.gapN} acta(s) &gt; 50 ms · peor {fmtMs(agg.gapPeor)}
+              </p>
+            )}
+            {agg.envioRoundN > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + PUBLICACIÓN AL MONITOR (roundtrip real — envioMs de D61 solo media el dispatch): media {fmtMs(Math.round(agg.envioRoundSum / agg.envioRoundN))} en {agg.envioRoundN} acta(s){agg.envioBloqueadas > 0 ? ` · ${agg.envioBloqueadas} BLOQUEADA(S)` : ""}
+              </p>
+            )}
+            {agg.dedupSinMatch > 0 && (
+              <p className="font-mono text-[10px] text-slate-500">
+                + DEDUP SIN-MATCH: {agg.dedupSinMatch} acta(s){agg.dedupDetalleN > 0 ? ` · candidatas comparadas ${Math.round(agg.dedupCandidatasSum / agg.dedupDetalleN)}/acta · mejor distancia ${agg.dedupMejorDist ?? "—"} (umbral 6)` : " · sin diagnóstico de comparación (dhash omitido por gama o falló)"}
+              </p>
+            )}
+            {agg.trabajoTotal === 0 && (
+              <p className="font-mono text-[10px] text-slate-500">Sin etapas de trabajo registradas aún.</p>
+            )}
+          </div>
+
+          {/* ——— actas más lentas ——— */}
+          {agg.lentas.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                ACTAS MÁS LENTAS (top {agg.lentas.length} — las demás van en el export)
+              </p>
+              <ul className="flex flex-col gap-1 max-h-56 overflow-y-auto pr-1">
+                {agg.lentas.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center gap-2 rounded-lg border border-slate-800 bg-[#10161f] px-2.5 py-1.5"
+                  >
+                    <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-slate-200" title={a.nombre}>
+                      {a.nombre}
+                    </span>
+                    {a.copia && (
+                      <span className="px-1.5 py-0.5 rounded-md border border-sky-400/40 text-sky-400 bg-sky-400/10 font-mono text-[9px] font-bold uppercase">
+                        COPIA
+                      </span>
+                    )}
+                    <span className="shrink-0 font-mono text-[11px] font-bold text-white">{fmtMs(a.totalMs)}</span>
+                    {a.cuello && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded-md border border-amber-400/40 text-amber-400 bg-amber-400/10 font-mono text-[9px] font-bold uppercase tracking-wider">
+                        {a.cuello}
+                      </span>
+                    )}
+                    <span className="shrink-0 font-mono text-[10px] text-slate-400">{a.score != null ? a.score.toFixed(1) : "—"}</span>
+                    <ChipDesenlace d={a.desenlace} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* ——— fallos ——— */}
+          {agg.fallos.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-rose-400">
+                FALLOS ({agg.fallos.length})
+              </p>
+              <ul className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+                {agg.fallos.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/5 px-2.5 py-1.5"
+                  >
+                    <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-slate-200" title={a.nombre}>
+                      {a.nombre}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-rose-300">{a.error ?? "—"}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* ——— historial de corridas ——— */}
+          {corridas.length > 1 && (
+            <div className="flex flex-col gap-1.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                HISTORIAL ({corridas.length} corridas — p50 pipeline {fmtMs(agg.p50Total)} · p95 {fmtMs(agg.p95Total)} de la vista actual)
+              </p>
+              <ul className="flex flex-col gap-1 max-h-40 overflow-y-auto pr-1">
+                {corridas.slice(0, 10).map((c) => {
+                  const activa = c.id === seleccionada;
+                  return (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSeleccionada(c.id);
+                          void metricasDeCorrida(c.id).then(setActas);
+                        }}
+                        aria-label={`Ver corrida de ${fmtFechaRelativa(c.inicio)}`}
+                        className={`w-full flex items-center gap-2 rounded-lg border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider transition cursor-pointer text-left ${
+                          activa
+                            ? "border-[#10b981]/60 text-white bg-[#10b981]/10"
+                            : "border-slate-800 text-slate-400 bg-[#10161f] hover:border-slate-600 hover:text-white"
+                        }`}
+                      >
+                        <span className="flex-1">{fmtFechaRelativa(c.inicio)}</span>
+                        <span>{c.nActas} ACTAS</span>
+                        <span>{fmtMs((c.fin ?? Date.now()) - c.inicio)}</span>
+                        {c.fin == null && (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" aria-hidden />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+});
+
+function Kpi({ label, valor, small }: { label: string; valor: string; small?: boolean }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-[#10161f] px-3 py-2">
+      <p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">{label}</p>
+      <p className={`font-mono font-bold text-white truncate ${small ? "text-[10px]" : "text-sm"}`} title={valor}>
+        {valor}
+      </p>
+    </div>
+  );
+}

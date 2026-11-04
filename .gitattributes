@@ -1,0 +1,13 @@
+# Los activos vendidos por `public/` se sirven por su contenido EXACTO. Con
+# core.autocrlf=true (el default en Windows) git reescribe CRLF al checkout y
+# eso rompe dos cosas que ya mordieron: la alineación blank-first del dict del
+# rec PP-OCRv5 (test dict-v5, rojo SOLO en clones de Windows) y cualquier
+# .onnx/.wasm, que deja de ser un binario válido.
+public/models/** eol=lf
+public/vendor/** -text
+public/scanner/** eol=lf
+
+# El sidecar nativo: python y sus requirements se checkean tal cual.
+native/**.py eol=lf
+native/**.txt eol=lf
+native/**.md eol=lf

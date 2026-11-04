@@ -1,0 +1,63 @@
+# Cloudflare Pages — cabeceras globales (ver docs/DECISIONS.md D37)
+# COOP/COEP activan crossOriginIsolated → SharedArrayBuffer → hilos WASM
+# reales en los workers OCR/QR (onnxruntime-web / zxing-wasm). Todo el sitio
+# es same-origin (sin CDNs ni iframes externos), require-corp es seguro.
+# El panel «Perfil del dispositivo» muestra el estado en pantalla.
+#
+# UN SOLO BLOQUE /* A LO LARGO DEL ARCHIVO — Pages NO combina dos bloques que
+# casan con la misma ruta: gana el último y el anterior se tira a la basura.
+# Estando COOP/COEP en un bloque aparte (como estaba hasta hoy), producción
+# servía la CSP sin COOP/COEP ⇒ crossOriginIsolated=false ⇒ el OCR cae a 1 hilo.
+# Verificado el 2026-11-03 contra supervision-e14.pages.dev (los dos assets
+# devolvían Referrer-Policy —bloque SEC-3— y ningún Cross-Origin-*).
+# SEC-3 (INFORME-PRUEBAS-Y-AUDITORIA) — CSP + cabeceras de endurecimiento.
+# Todo el contenido es same-origin (assets vendidos en public/, sin CDNs de
+# terceros — fortaleza documentada del repo), así que 'self' cierra la
+# exfiltración a terceros. Aperturas explícitas del motor:
+#   · script-src 'unsafe-inline' → bootstrap/hidratación de Next.js (export
+#     estático: sin nonce por request en Pages).
+#   · 'wasm-unsafe-eval' → compilación WASM de ORT/zxing/zbar/tesseract.
+#   · blob: en worker/script → workers del motor creados desde Bundles.
+#   · img-src/connect-src data: blob: → fotos y miniaturas del pipeline
+#     (dataURLs) y fetching WASM/modelos por ORT.
+#   · connect-src http://127.0.0.1:* http://localhost:* → sidecar OCR nativo
+#     (KIT e14-ocr-nativo-v1). Solo BUCLE LOCAL: flags-schema rechaza
+#     cualquier otro host y el sidecar responde CORP: cross-origin (COEP).
+#   · frame-ancestors 'none' + X-Frame-Options → anti-clickjacking (la app
+#     procesa contenido no confiable: PDFs, imágenes, QR).
+# NOTA: en GitHub Pages _headers no aplica — la misma CSP viaja como <meta>
+# en src/app/layout.tsx (frame-ancestors ahí es ignorado por ser meta).
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# D39 — CACHE DEL MOTOR (prioridad gama baja / red móvil inestable):
+# el motor pesa ~40 MB (ORT wasm 14 MB, OpenCV 8.6 MB, modelos ONNX 16 MB).
+# Sin cabeceras de caché una recarga en red móvil podía re-bajarlos. Los
+# assets de public/ son versionados por convención (?v=N en workers) o
+# inmutables de facto (modelos/binarios que solo cambian con un commit del
+# motor), así que max-age de 1 año es seguro. /_next/static/ ya lleva hash
+# en el nombre de archivo. divipol.json es DATO (puede re-publicarse) →
+# 1 día con revalidación, no immutable.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/models/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/wasm/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/scanner/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/e14/*
+  Cache-Control: public, max-age=86400, must-revalidate

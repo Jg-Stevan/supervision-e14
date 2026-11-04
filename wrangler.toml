@@ -1,0 +1,22 @@
+# KIT e14-pages-wasm-partes-v1 — configuración del proyecto Cloudflare Pages que
+# despliega .github/workflows/cloudflare-pages.yml (ver D80, que sustituye a D77).
+#
+# Qué queda aquí y por qué: solo las dos claves que `wrangler pages deploy` no
+# puede pasar por bandera. En D77 este archivo además declaraba `[[r2_buckets]]`
+# para darle `env.R2_WASM` a la Pages Function; ya no hace falta — los wasm que
+# Pages rechaza por tamaño ahora se suben PARTIDOS desde out/ y la Function los
+# pega por la misma ruta, sin servicio de objetos ni consentimiento de cuenta ni
+# método de pago (habilitar R2 devolvía API 10042 con cualquier token).
+#
+# · `pages_build_output_dir` es la ruta del export de Next: el workflow sube con
+#   `wrangler pages deploy` SIN argumento de directorio para no pelearse con esta
+#   clave.
+# · `compatibility_date` rige el runtime de las Pages Functions de ./functions
+#   (modo avanzado, en la raíz del repo, no dentro de out/).
+#
+# NO es un archivo de Workers normal: no tiene `main` ni `[vars]`. Los secrets
+# del token de Cloudflare siguen en los secrets del workflow, pero ahora solo
+# los consume el paso de deploy.
+name = "supervision-e14"
+pages_build_output_dir = "./out"
+compatibility_date = "2026-11-03"

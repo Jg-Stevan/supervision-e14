@@ -1,0 +1,8 @@
+# Dependencias del sidecar nativo (KIT e14-ocr-nativo-v1).
+# Versiones MEDIDAS en el lote demo (2026-11-03): python 3.14.7, onnxruntime
+# 1.31.1, opencv 5.0.0, numpy 2.5.4, pillow 12.3.0. Se aceptan superiores: el
+# código no usa APIs exóticas, solo ORT + cv2 + PIL para EXIF.
+onnxruntime>=1.20
+opencv-python>=4.10
+numpy>=1.26
+pillow>=10

@@ -1,0 +1,105 @@
+name: Release sidecar nativo
+
+# KIT e14-sidecar-instalable-v1 (D81).
+#
+# Corre `scripts/empaquetar-sidecar.mjs` (PyInstaller --onedir + arrancar y
+# verificar /salud) y publica el ZIP resultante como asset de una GitHub
+# Release. La tarjeta «ACELERADOR NATIVO» de la vista CARGA MASIVA apunta a
+#   releases/latest/download/supervision-e14-sidecar-win-x64.zip
+# así que el NOMBRE del asset es parte del contrato de la UI: cambiarlo sin
+# cambiar `URL_DESCARGA_SIDECAR` en componentes/e14/screens/masiva/acelerador.tsx
+# deja el botón en un 404 — silencioso, porque es un link. Lo fija
+# `masiva/__tests__/acelerador-tarjeta.test.ts`, que lee este YAML.
+#
+# Corre en Windows porque PyInstaller NO cross-compila: un runner de Linux no
+# puede producir un .exe. El build local es el mismo script
+# (`node scripts/empaquetar-sidecar.mjs`); este workflow usa Node, no Bun, para
+# no depender de install en el runner — el script solo usa APIs de node:*.
+#
+# El exe se firma con la clave del repositorio? NO. Queda sin firmar y SmartScreen
+# lo va a interrumpir la primera vez; la tarjeta ya lo dice en su texto. Firmar
+# cuesta un EV code signing cert y no entra en esta decisión.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión del sidecar (semver, sin la 'v') — el tag será sidecar-v<version>"
+        required: true
+        default: "1.0.0"
+      prerelease:
+        description: "Marcar la release como prerelease (NO la muestra en /latest)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sidecar-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # El script lee CI para poner el venv dentro del workspace (.venv-sidecar)
+      # en vez de %LOCALAPPDATA% — así lo cachea Actions.
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12 y no 3.14: en la 3.14 el build local funciona, pero PyInstaller
+          # + opencv + onnxruntime sobre una Python recién salida tiene hooks que
+          # se están arreglando aún. El runner debe producir el binario aburrido.
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Empaquetar (venv + pip + PyInstaller + arrancar y verificar /salud)
+        run: node scripts/empaquetar-sidecar.mjs
+
+      - name: Publicar la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="sidecar-v${VERSION}"
+          ZIP="dist/supervision-e14-sidecar-win-x64.zip"
+          sha=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          mib=$(( $(wc -c <"$ZIP") / 1048576 ))
+          cat > cuerpo.md <<EOF
+          Sidecar nativo del digitalizador E-14: det+rec de RapidOCR en CPU con
+          onnxruntime, sobre los mismos \`.onnx\` del sitio. NO necesita Python.
+
+          Descomprime la carpeta y ejecuta \`supervision-e14-sidecar.exe\` (~${mib} MiB
+          descargados, 240 MiB en disco). \`GET http://127.0.0.1:8765/salud\`
+          responde cuando está vivo y la vista CARGA MASIVA lo detecta sola.
+
+          Primera corrida: 5-15 s (Defender escanea los 240 MiB recién escritos);
+          después, 4,5-6,3 s hasta \`/salud\`.
+
+          **SHA-256:** \`$sha\`
+
+          **SmartScreen:** binario sin firmar → «Más información → Ejecutar de
+          todas formas».
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+            gh release edit "$TAG" --notes-file cuerpo.md
+          else
+            args=(--title "Sidecar nativo $TAG" --notes-file cuerpo.md)
+            [ "$PRERELEASE" = "true" ] && args+=(--prerelease)
+            gh release create "$TAG" "$ZIP" "${args[@]}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supervision-e14-sidecar-win-x64
+          path: dist/supervision-e14-sidecar-win-x64.zip
+          retention-days: 30

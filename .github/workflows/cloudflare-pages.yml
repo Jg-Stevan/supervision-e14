@@ -1,0 +1,62 @@
+name: Deploy Cloudflare Pages
+
+# D37 (docs/adr/README.md): push a main → build estático (SIN basePath, CF sirve
+# en raíz) → wrangler pages deploy. Requiere los secrets CLOUDFLARE_API_TOKEN y
+# CLOUDFLARE_ACCOUNT_ID. El out/ incluye public/_headers (COOP/COEP → hilos WASM).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: cloudflare-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx next typegen
+      - run: bun run build
+      # KIT e14-pages-wasm-partes-v1 (D80) — Pages corta en 25 MiB POR ASSET
+      # SUBIDO y ahí se estrellaban los dos wasm que hacen falta para el camino
+      # rápido (jsep = EP WebGPU, asyncify = worker proxy del EP wasm). Se
+      # parten en trozos ≤20 MiB dentro de out/ y la Pages Function de
+      # functions/vendor/onnxruntime/ los devuelve pegados por la MISMA ruta, así
+      # que same-origin, CSP y _headers no se tocan. Sin esto el deploy sale rojo,
+      # y con ellos borrados el demo publicado corre a 218 s con una acta
+      # rechazada.
+      # Antes se subían a R2 (D77): R2 es consentimiento de cuenta en el dashboard
+      # (API 10042 con cualquier token) y ese paso llevaba 7 runs rojas seguidas.
+      # Este script es puramente de disco — no necesita token, y la byte-exactitud
+      # se verifica releyendo las partes antes de borrar el original.
+      # El script decide por RUTA: lo de vendor/onnxruntime se parte y el resto
+      # (el duplicado que Turbopack deja en _next/static/media/) se borra, porque
+      # ninguna Function lo sirve. NO se borra por glob — en media viven zbar.wasm
+      # (decodificador QR de capa 0) y unrar.wasm, que sí se piden.
+      - name: Partir los wasm que Pages rechaza
+        run: bun run scripts/cf-wasm-partes.mjs
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Versión FIJA de CLI, la misma razón que motivó D77: sin este pin la
+          # acción se trae su wrangler 3.90 (medido el 2026-11-03) y valida la
+          # configuración del proyecto con una API distinta de la que se usó para
+          # crearlo. Hoy ya no hay binding que validar, pero el pin sigue porque
+          # un cambio de CLI en un paso que no se prueba en CI es un deploy rojo.
+          wranglerVersion: "4.157.0"
+          # SIN argumento de directorio: la salida la toma de
+          # `pages_build_output_dir` en wrangler.toml (en 4.157.0 `pages deploy`
+          # no acepta banderas de bindings, y ya no hacen falta).
+          command: pages deploy --project-name=supervision-e14 --branch=main --commit-dirty=true

@@ -1,0 +1,492 @@
+"use client";
+
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
+import {
+  Activity,
+  Cpu,
+  Flag,
+  Inbox,
+  LogOut,
+  Menu,
+  Upload,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { SUPERVISOR } from "../data/mock-repository";
+// KIT recepcion-actas-v1 (D28): el badge del sidebar cuenta las llegadas
+// EN VIVO (origen carga-masiva) que ocurren fuera de la vista Recepción.
+import { suscribirseRecepcion } from "../data/recepcion-log";
+import { StatusDot } from "./status-dot";
+import { Esqueleto } from "./esqueleto";
+import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
+// R4-M7 — espejo de la sesión en location.hash (D11: espejo, NO router).
+import { escribirHashParcial, leerEstadoHash } from "./espejo-url";
+import { VistaMonitor } from "./monitor-global";
+import { VistaAnomalias } from "./vista-anomalias";
+// Ronda C — la recepción volvió: métricas r5 (KPI TOTAL, RITMO, FLUJO…).
+import { VistaRecepcion } from "./vista-recepcion";
+// KIT carga-masiva-supervision-v1 (D27) — la vista CARGA MASIVA es el módulo
+// digitalizador trasplantado (src/modules/digitalizador/**). ÚNICO seam de
+// UI supervision→digitalizador: la vista recibe `onVerEnMonitor` para
+// aterrizar un acta publicada en el visor (props, sin contexto cruzado).
+import { MasivaView as VistaCargaMasiva } from "@/modules/digitalizador/components/e14/screens/MasivaView";
+// KIT perfil-recursos-v1 — perfil de recursos del dispositivo (módulo
+// perfil-dispositivo): detección de gama/forma + panel de diagnóstico.
+// El provider monta UNA vez en el shell; la vista y el chip del header
+// consumen por el hook. (Paridad de tier con la capa de MASIVA §4.4.)
+import {
+  PerfilProvider,
+  usePerfilRecursos,
+} from "@/modules/perfil-dispositivo/perfil-provider";
+import { VistaPerfil } from "@/modules/perfil-dispositivo/components/panel-perfil";
+import { tonoTier } from "@/modules/perfil-dispositivo/lib/clasificador";
+import { etiquetaForma } from "@/modules/perfil-dispositivo/lib/senales";
+// R2 — mapa tono→token único (§B2 #8).
+import { colorDeTono } from "@/shared/ui/tono";
+
+/** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
+ * (el export estático sigue siendo trivial: una sola página).
+ *
+ * Ronda «reloj real» (pedido del dueño): «recepción debe ser el mismo que
+ * monitor global, ese se reemplaza (el de recepción)» — la vista de
+ * RECEPCIÓN quedó dormida y su lugar lo ocupó el visor del MONITOR GLOBAL.
+ *
+ * Ronda C (petición del dueño: «¿por qué se desactivó recepción?»): la
+ * vista VUELVE VIVA — revestida con las métricas del diseño r5 (R1–R7:
+ * KPI TOTAL, RITMO/throughput, FLUJO 60 s, pausar feed, latencia media,
+ * hora dual REC/ORIGEN).
+ *
+ * D82 — «Centro de notificaciones» y «Generar informes» se BORRARON (no se
+ * dormitan): eran 554 líneas inalcanzables. El dato de notificaciones sí
+ * sigue vivo en el repositorio (las anomalías y la carga masiva generan
+ * entradas) — lo que falta es la vista que las muestre. Ver docs/DEUDA.md. */
+export type VistaId =
+  | "monitor"
+  | "recepcion"
+  | "carga-masiva"
+  | "anomalias"
+  | "perfil";
+
+interface ItemNav {
+  Icono: LucideIcon;
+  etiqueta: string;
+  vista?: VistaId;
+  /** Ítem deshabilitado con tooltip (Carga Masiva — fuera de alcance). */
+  deshabilitado?: boolean;
+  tooltip?: string;
+  /** Clave del badge dinámico (contadores del store, kit T4/T5/T6).
+   * KIT recepcion-actas-v1 (D28): "recepcion" = llegadas fuera de la vista. */
+  badgeDe?: "anomalias" | "recepcion";
+}
+
+/** Ítems del sidebar. */
+const ITEMS_NAV: ItemNav[] = [
+  { Icono: Activity, etiqueta: "Monitor global", vista: "monitor" },
+  {
+    Icono: Inbox,
+    etiqueta: "Recepción de actas",
+    // D28 — log EN VIVO de las actas que van llegando (masiva + ingesta).
+    vista: "recepcion",
+    badgeDe: "recepcion",
+  },
+  {
+    Icono: Upload,
+    etiqueta: "Carga masiva",
+    // D27 — activada: el digitalizador (módulo masiva) vive en este repo.
+    vista: "carga-masiva",
+  },
+  {
+    Icono: Flag,
+    etiqueta: "Revisión de anomalías",
+    vista: "anomalias",
+    badgeDe: "anomalias",
+  },
+  // KIT perfil-recursos-v1 — diagnóstico de recursos del dispositivo
+  // (gama baja/media/alta · PC/móvil): detección + plan recomendado.
+  { Icono: Cpu, etiqueta: "Perfil del dispositivo", vista: "perfil" },
+];
+
+const CLASE_ITEM =
+  "label-caps flex h-11 w-full items-center gap-3 rounded-[4px] px-3 text-left text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)";
+
+function ItemNavBoton({
+  item,
+  activo,
+  badge,
+  onSelect,
+}: {
+  item: ItemNav;
+  activo: boolean;
+  badge?: number;
+  onSelect?: () => void;
+}) {
+  const { Icono, etiqueta } = item;
+  return (
+    <button
+      type="button"
+      className={cn(
+        CLASE_ITEM,
+        activo && "border-l-2 border-(--primary) bg-(--accent) text-foreground",
+        item.deshabilitado && "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground"
+      )}
+      aria-current={activo ? "page" : undefined}
+      aria-disabled={item.deshabilitado || undefined}
+      onClick={item.deshabilitado ? undefined : onSelect}
+    >
+      <Icono
+        className={cn("size-4 shrink-0", activo && "text-(--primary)")}
+        aria-hidden
+      />
+      <span className="flex-1 leading-4">{etiqueta}</span>
+      {/* T5/T6: badge = contador dinámico (sin número si es 0). */}
+      {typeof badge === "number" && badge > 0 && (
+        <span className="font-data rounded-[4px] border border-border bg-(--surface) px-1.5 py-0.5 text-[10px] leading-4 font-semibold normal-case tracking-normal text-muted-foreground">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function BloqueLogo({ onCerrar }: { onCerrar?: () => void }) {
+  return (
+    <div className="relative border-b border-border px-4 py-4">
+      <p className="headline-lg">E-14</p>
+      <p className="label-caps mt-1 text-muted-foreground">
+        Módulo de monitoreo y auditoría
+      </p>
+      {onCerrar && (
+        <button
+          type="button"
+          onClick={onCerrar}
+          aria-label="Cerrar menú de navegación"
+          className="absolute top-2 right-2 inline-flex size-11 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)"
+        >
+          <X className="size-5" aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Contenido de navegación (kit T1): la sidebar flotante conserva su
+ * contenido actual (logo, ítems, badges, CERRAR SESIÓN). Los ítems con
+ * vista cambian el estado del shell; Carga Masiva sigue deshabilitada con
+ * el tooltip del kit; el resto de tooltips "Próximamente" desaparecen
+ * porque ahora SÍ navegan.
+ */
+function ContenidoNav({
+  vista,
+  onVista,
+  badges,
+}: {
+  vista: VistaId;
+  onVista: (v: VistaId) => void;
+  badges: {
+    anomalias: number;
+    recepcion: number;
+  };
+}) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <nav aria-label="Navegación principal" className="flex flex-col gap-1 p-3">
+        {ITEMS_NAV.map((item) => {
+          const badge =
+            item.badgeDe === "anomalias"
+              ? badges.anomalias
+              : item.badgeDe === "recepcion"
+                ? badges.recepcion
+                : undefined;
+          const boton = (
+            <ItemNavBoton
+              key={item.etiqueta}
+              item={item}
+              activo={item.vista === vista}
+              badge={badge}
+              onSelect={item.vista ? () => onVista(item.vista as VistaId) : undefined}
+            />
+          );
+          if (!item.tooltip) return boton;
+          return (
+            <Tooltip key={item.etiqueta}>
+              <TooltipTrigger asChild>{boton}</TooltipTrigger>
+              <TooltipContent side="right" className="font-data text-xs">
+                {item.tooltip}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </nav>
+      <div className="mt-auto">
+        <Separator />
+        <div className="p-3">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className={CLASE_ITEM}>
+                <LogOut className="size-4 shrink-0" aria-hidden />
+                <span className="flex-1 leading-4">Cerrar sesión</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="font-data text-xs">
+              Próximamente
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+/**
+ * D11 — el shell elige la vista por estado, no por ruta (el export estático
+ * sigue siendo una sola página). Vista desconocida ⇒ monitor.
+ */
+function VistaActual({
+  vista,
+  onVerEnMonitor,
+}: {
+  vista: VistaId;
+  onVerEnMonitor?: ComponentProps<typeof VistaCargaMasiva>["onVerEnMonitor"];
+}) {
+  switch (vista) {
+    case "anomalias":
+      return <VistaAnomalias />;
+    case "carga-masiva":
+      return <VistaCargaMasiva onVerEnMonitor={onVerEnMonitor} />;
+    case "recepcion":
+      // Ronda C — recepción viva (R1–R7 del diseño r5).
+      return <VistaRecepcion onVerEnMonitor={onVerEnMonitor} />;
+    case "perfil":
+      // KIT perfil-recursos-v1 — diagnóstico del dispositivo.
+      return <VistaPerfil />;
+    default:
+      return <VistaMonitor />;
+  }
+}
+
+/**
+ * Shell del módulo (kit SUP-3 T1 / D14): la sidebar YA NO es fija en
+ * ningún viewport — por defecto OCULTA y el contenido ocupa todo el
+ * ancho. El botón ☰ del header (siempre visible) la abre como panel
+ * flotante ENCIMA del contenido, anclado a la izquierda, con scrim
+ * rgba(0,0,0,0.5) y borde derecho 1px outline-variant (sin sombras).
+ * Cierre: ✕, Escape y clic en el scrim. Móvil y desktop comparten el
+ * MISMO overlay (unificado, sin duplicar).
+ */
+/**
+ * Chip de gama del header (KIT perfil-recursos-v1): el supervisor SIEMPRE
+ * ve qué recursos tiene entre manos — `GAMA {tier} · {forma}` — y un clic
+ * lo lleva al panel completo. Se monta DESPUÉS de la hidratación (el perfil
+ * arranca PENDIENTE en SSR — cero mismatch) y abre la vista `perfil`.
+ */
+function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
+  const { perfil } = usePerfilRecursos();
+  if (!perfil.listo || perfil.tier === "PENDIENTE" || !perfil.senales) return null;
+  // R2 — mapa tono→token único (src/shared/ui/tono.ts, §B2 #8): reemplaza el
+  // ternario duplicado. Equivalencia exacta en el dominio real: tonoTier()
+  // jamás devuelve "neutral" para ALTO/MEDIO/BAJO (test de paridad lo fija).
+  const color = colorDeTono(tonoTier(perfil.tier));
+  return (
+    <button
+      type="button"
+      onClick={onAbrir}
+      className="font-data inline-flex h-9 items-center gap-1.5 rounded-[4px] border border-border bg-(--surface) px-2.5 text-[11px] font-semibold tracking-wide text-foreground hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+      title={`Gama ${perfil.tier} detectada${perfil.tierInferido ? " (inferida)" : ""} · dispositivo: ${perfil.senales.forma} — abrir el perfil del dispositivo`}
+      aria-label={`Gama ${perfil.tier} · ${etiquetaForma(perfil.senales.forma)} — abrir perfil del dispositivo`}
+    >
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+        aria-hidden
+      />
+      GAMA {perfil.tier} · {etiquetaForma(perfil.senales.forma)}
+    </button>
+  );
+}
+
+export function SupervisionShell() {
+  return (
+    <PerfilProvider>
+      <DatosProvider>
+        <ShellInterno />
+      </DatosProvider>
+    </PerfilProvider>
+  );
+}
+
+function ShellInterno() {
+  const { anomaliasAbiertas, cargando } = useDatos();
+  // R4-C6 — abrirVisor vive en el contexto de ACCIONES (el visor ya no
+  // viaja en el valor de datos).
+  const { abrirVisor } = useDatosAcciones();
+  const [vista, setVista] = useState<VistaId>("monitor");
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // D28 — llegadas mientras el supervisor NO está mirando la recepción
+  // (badge del sidebar; se anula al abrir la vista).
+  const [recepcionesNuevas, setRecepcionesNuevas] = useState(0);
+  const vistaRef = useRef<VistaId>(vista);
+
+  useEffect(() => {
+    vistaRef.current = vista;
+  }, [vista]);
+
+  useEffect(() => {
+    return suscribirseRecepcion((entrada) => {
+      if (entrada.origen !== "carga-masiva") return; // la semilla no cuenta
+      if (vistaRef.current === "recepcion") return;
+      setRecepcionesNuevas((n) => n + 1);
+    });
+  }, []);
+
+  // Escape cierra el overlay (kit T1) + bloqueo de scroll de fondo.
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuAbierto(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    const overflowPrevio = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = overflowPrevio;
+    };
+  }, [menuAbierto]);
+
+  // R4-M7 — restauración de la VISTA desde el espejo hash, UNA vez al
+  // montar (ref anti-doble-invoke). D11 intacto: no hay router ni escucha
+  // de hashchange — el hash se LEE aquí y se ESPEJA en cada cambio.
+  // setState diferido a microtask (misma regla de lint que C8: nada de
+  // setState sincrónico en el cuerpo del effect); el primer frame pinta
+  // monitor y el cambio cae pre-útil si el hash traía otra vista.
+  const vistaRestauradaRef = useRef(false);
+  useEffect(() => {
+    if (vistaRestauradaRef.current) return;
+    vistaRestauradaRef.current = true;
+    const { vista: vistaDelHash } = leerEstadoHash();
+    if (!vistaDelHash) return;
+    queueMicrotask(() => setVista(vistaDelHash));
+  }, []);
+
+  // R4-M7 — espejo de escritura de la vista (merge con las otras claves).
+  useEffect(() => {
+    escribirHashParcial({ vista });
+  }, [vista]);
+
+  const elegirVista = (v: VistaId) => {
+    setVista(v);
+    if (v === "recepcion") setRecepcionesNuevas(0); // D28 — leídas al abrir
+    setMenuAbierto(false); // el overlay cede el paso a la vista elegida
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Scrim del overlay (clic fuera cierra — kit T1). Sin sombras: la
+          separación es el borde derecho 1px outline-variant + scrim. */}
+      {menuAbierto && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50"
+          onClick={() => setMenuAbierto(false)}
+          aria-hidden
+        />
+      )}
+
+      {/* Panel flotante anclado a la izquierda, altura completa, ENCIMA */}
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menú de navegación"
+        tabIndex={-1}
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-y-auto border-r border-(--outline-variant) bg-card outline-none",
+          !menuAbierto && "hidden"
+        )}
+      >
+        <BloqueLogo onCerrar={() => setMenuAbierto(false)} />
+        <ContenidoNav
+          vista={vista}
+          onVista={elegirVista}
+          badges={{
+            anomalias: anomaliasAbiertas,
+            recepcion: recepcionesNuevas,
+          }}
+        />
+      </div>
+
+      {/* El contenido ocupa TODO el ancho (la sidebar ya no es fija). */}
+      <div className="flex min-h-screen flex-col">
+        <header className="sticky top-0 z-30 flex h-12 items-center justify-between gap-3 border-b border-border bg-card px-3 md:px-4">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <button
+              type="button"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-[4px] text-foreground hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+              aria-label="Abrir menú de navegación"
+              aria-expanded={menuAbierto}
+              onClick={() => setMenuAbierto(true)}
+            >
+              <Menu className="size-5" aria-hidden />
+            </button>
+            <h1 className="headline-md truncate">
+              SISTEMA DE MONITOREO ELECTORAL E-14
+            </h1>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2 md:gap-3">
+            <ChipGamaHeader onAbrir={() => elegirVista("perfil")} />
+            <span className="label-caps flex items-center gap-1.5 text-(--success)">
+              <StatusDot />
+              Online
+            </span>
+            <span className="hidden items-center gap-2 md:flex">
+              <span className="label-caps text-muted-foreground">
+                {SUPERVISOR.nombre}
+              </span>
+              <span className="body-md text-muted-foreground">
+                ID: {SUPERVISOR.id}
+              </span>
+            </span>
+          </div>
+        </header>
+
+        <main className="flex-1">
+          {cargando && vista !== "monitor" ? (
+            <div className="space-y-4 p-4 md:p-6">
+              <Esqueleto className="h-11 w-full max-w-md" />
+              <Esqueleto className="h-96 w-full" />
+            </div>
+          ) : (
+            <VistaActual
+              vista={vista}
+              onVerEnMonitor={(puestoId, mesaId, tipo) => {
+                // D27 — VER EN MONITOR: aterriza el acta publicada en el
+                // visor (cambia a MONITOR y abre el acta de esa mesa).
+                // T9 (KIT VISOR-MONITOR-GLOBAL-v1): el modo «limpio» quedó
+                // ABSORBIDO — el visor unificado ya es limpio y su única
+                // acción es REPORTAR ANOMALIA; aterrizaje idéntico al resto.
+                elegirVista("monitor");
+                abrirVisor(puestoId, mesaId, tipo ? { tipo } : undefined);
+              }}
+            />
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}

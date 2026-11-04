@@ -1,0 +1,261 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * TEMA — SOLO DARK (kit SUP-1 §2.1, fuente: DESIGN.md)
+ * Superficies verdosas oscuras + acento interactivo verde.
+ * PROHIBIDO azules/índigos. PROHIBIDAS sombras: la jerarquía es
+ * solo bordes 1px + capas tonales; hover = cambio de background.
+ */
+
+:root {
+  /* Superficies — T-02 (auditoría diseños): matiz carbono-teal del diseño
+     (#060d0d → #0a1314 → #0f1c1d). Antes #090f0f/#0e1414/#171d1d. */
+  --background: #0a1314; /* surface / background */
+  --foreground: #dee4e3; /* on-surface */
+  --card: #0f1c1d; /* surface-container-low */
+  --card-foreground: #dee4e3;
+  --popover: #14211f; /* surface-container */
+  --popover-foreground: #dee4e3;
+
+  /* Interacción — T-01: verde esmeralda sintético del diseño (#05f292 /
+     #00e388). Antes #3fe56c (más «fósforo»). */
+  --primary: #05f292; /* acento interactivo */
+  --primary-foreground: #0a1314;
+  --secondary: #2b3838; /* surface-container-highest */
+  --secondary-foreground: #dee4e3;
+  --muted: #1e2a2a; /* surface-container-high */
+  --muted-foreground: #bbcbb8; /* on-surface-variant */
+  --accent: #1e2a2a;
+  --accent-foreground: #dee4e3;
+
+  /* Estado (semántica del sistema, kit §2.1) — T-03/T-04: UN solo ámbar
+     (#ffb800, token del diseño) y el rojo crítico #ff4d4d alineados. */
+  --destructive: #93000a; /* error-container */
+  --success: #00c853; /* COMPLETO / OK */
+  --warning: #ffb800; /* PENDIENTE / EN PROCESO (ámbar del diseño) */
+  --amber: #ffb800; /* T-03 — token único de ámbar (score/historial/alertas) */
+  --danger: #ff4d4d; /* CRÍTICO / INCOMPLETO — rojo del diseño */
+  --neutral-state: #869583; /* NO INICIADO / neutral (outline) */
+  --error-text: #ff8d87; /* tertiary-container: texto/acentos de error */
+
+  /* T-09 — botón hazard unificado: fill #241215 del diseño (borde/texto
+     viajan con --danger). Consumidores: acta-acciones (REPORTAR ANOMALIA)
+     y los botones RECHAZAR de masiva (migración T-08). El hover vive en
+     SU token (revisión ronda auditoría: el literal #2d1719 de
+     acta-acciones salió de aquí; masiva usa --mz-hazard-hover porque su
+     hazard flota sobre --mz-head, no sobre --card). */
+  --hazard-bg: #241215;
+  --hazard-bg-hover: #2d1719;
+
+  /* R4 — visor de actas (D18): verde de aprobación y rojo de error del
+     visor. Antes hex sueltos (#003912 / #410004) en acta-header.tsx y
+     acta-acciones.tsx — mismos valores, ahora con nombre y un solo hogar. */
+  --acta-aprobada: #003912; /* fondo del toggle activo / texto sobre primary */
+  --acta-error: #410004; /* borde y fondo de páginas/chips de error */
+
+  /* Bordes e inputs */
+  --border: #233030; /* bordes de tabla/tarjetas (spec de componentes) */
+  --input: #0f1717; /* fondo del input */
+  --ring: #05f292; /* focus 1px */
+
+  /* Superficies adicionales del kit */
+  --surface-lowest: #060d0d; /* superficies hundidas (sub-tabla de mesas) */
+  --surface: #14211f; /* paneles */
+  --surface-high: #1e2a2a;
+  --surface-highest: #2b3838; /* hover de tarjetas */
+  --outline-strong: #869583; /* bordes destacados */
+  --outline-variant: #3c4a3c; /* bordes sutiles */
+  --hover-row: #162222; /* hover de filas */
+
+  /* T-08 — PALETA MASIVA tokenizada (antes hex sueltos en modal-revisor
+    .tsx): superficies/bordes del visor de revisión en UN solo hogar, para
+     que el cambio global (T-01…T-04) alcance a todo el sistema. */
+  --mz-bg: #070b0a; /* fondo del modal */
+  --mz-canvas: #060a09; /* canvas / cajas internas */
+  --mz-card: #080d0b; /* tarjeta de datos / textareas */
+  --mz-strip: #0b1310; /* franja de metadata */
+  --mz-aside: #0c1210; /* panel del auditor */
+  --mz-head: #0d1613; /* toolbar / cabecera del panel */
+  --mz-head-hover: #12201c; /* hover de botones flotantes */
+  --mz-border: #16231e; /* borde estándar masiva */
+  --mz-border-strong: #21362e; /* borde destacado masiva */
+  --mz-border-hover: #2a4037; /* borde de hover */
+  --mz-on-primary: #04120c; /* texto sobre verde sólido */
+  --mz-hazard-hover: #281315; /* hover del botón hazard */
+  --mz-amber-bg: #261e0b; /* fondo del chip SCORE ámbar */
+
+  --radius: 0.25rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-amber: var(--amber);
+  --color-danger: var(--danger);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Radio 4px en TODO (cards, botones, inputs, badges) — kit §2.3 */
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+
+  /* Fuentes: estructura = Hanken Grotesk, datos = JetBrains Mono.
+     PREVIEW: next/font/google no está disponible en este entorno — las
+     variables caen a stacks de sistema equivalentes (el día del merge al
+     repo real, next/font vuelve a definirlas y este bloque sobra). */
+  --font-hanken: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-jetbrains: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ============================================================
+   Tipografía del sistema (kit §2.2)
+   Estructura: Hanken Grotesk — Datos: JetBrains Mono.
+   Móvil: headline-lg 20px, stats-number 22px.
+   ============================================================ */
+@layer utilities {
+  /* KIT visor-masiva-redesign-v1 — retícula de puntos del canvas del visor
+     (verbatim del diseño Stitch: radial emerald 5% sobre 20×20). */
+  .grid-paper-bg {
+    background-size: 20px 20px;
+    background-image: radial-gradient(
+      circle,
+      rgba(16, 185, 129, 0.05) 1px,
+      transparent 1px
+    );
+  }
+  .headline-lg {
+    font-size: 24px;
+    line-height: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .headline-md {
+    font-size: 18px;
+    line-height: 24px;
+    font-weight: 600;
+  }
+  .label-caps {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .stats-number {
+    font-family: var(--font-jetbrains), ui-monospace, monospace;
+    font-size: 28px;
+    line-height: 32px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .body-lg {
+    font-family: var(--font-jetbrains), ui-monospace, monospace;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+  }
+  .body-md {
+    font-family: var(--font-jetbrains), ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 400;
+  }
+  .font-data {
+    font-family: var(--font-jetbrains), ui-monospace, monospace;
+  }
+  @media (max-width: 1023px) {
+    .headline-lg {
+      font-size: 20px;
+      line-height: 28px;
+    }
+    .stats-number {
+      font-size: 22px;
+      line-height: 28px;
+    }
+  }
+
+  /* ============================================================
+     KIT recepcion-actas-v1 (D28) — utilidades del log de recepción
+     ============================================================ */
+
+  /* Scroll fino para paneles con desplazamiento (log de recepción).
+     8px thumb sobre pista transparente + Firefox scrollbar-width. */
+  .scroll-panel {
+    scrollbar-width: thin;
+    scrollbar-color: var(--outline-strong) transparent;
+  }
+  .scroll-panel::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-panel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-panel::-webkit-scrollbar-thumb {
+    background: var(--outline-strong);
+    border-radius: 4px;
+  }
+  .scroll-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  /* KIT carga-masiva-redesign-v1 (diseño «CARGA MASIVA») — glow sutil del
+     sidebar (borde esmeralda tenue; al hover se aviva — DropzoneHero). */
+  .glow-border-emerald {
+    box-shadow: 0 0 10px rgba(0, 229, 153, 0.08);
+  }
+  .glow-border-emerald:hover {
+    box-shadow: 0 0 15px rgba(0, 229, 153, 0.18);
+  }
+
+  /* Destello de LLEGADA: la fila nueva entra con fondo acento que se
+     disuelve (1.6s) — feedback inmediato de "está llegando en vivo". */
+  @keyframes recepcion-llegada {
+    0% {
+      background-color: var(--surface-high);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+  .fila-llegada {
+    animation: recepcion-llegada 1.6s ease-out 1;
+  }
+}

@@ -1,0 +1,1609 @@
+/**
+ * rapidocr.ts — módulo compartido — motor de producción (PROD-2, kit
+ * e14-motor-rapidocr-v1) — MOVE literal desde informe/rapidocr.ts
+ * (pitfall §9.8 del kit: mismo código, sin «reordenar» ni «limpiar»).
+ * KIT e14-fuera-informes-v1 (R-1.5): fuera la instrumentación del informe
+ * (import ../informe/telemetria + TODAS las llamadas evento() — el console
+ * info de celda queda; cero efecto en el OCR).
+ *
+ * RapidOCR PP-OCRv4 en el navegador — puerto fiel de rapidocr_onnxruntime
+ * 1.4.4 (config del bench: det_limit_side_len=1920, det_limit_type='max').
+ * SIN OpenCV (el build vendored del repo es un binding custom sin
+ * minAreaRect): el postproceso de detección (DB) es JS puro —
+ * binarización 0.3 → dilate 2×2 → CCL 4-conectividad → convex hull →
+ * min-area rect por barrido de aristas → box_score_fast → unclip →
+ * esquinas TL,TR,BR,BL → mapeo inverso a coords de la fuente.
+ *
+ * Determinismo: executionProviders ["wasm"] (igual que el bench); WebGPU
+ * disponible en el dispositivo queda anotado en el log del entorno pero NO
+ * se usa.
+ */
+
+// KIT e14-observabilidad-v1 (A1-C7): tope de threads OCR = flag del dueño
+// (kill switch MANUAL — ocrThreadsTope, default 4 = el literal que vivía
+// aquí). La app NUNCA cambia reglas de negocio sola (D6).
+// KIT e14-gama-adaptativa-v1 (D74): la LECTURA es EFECTIVA — flagsMasiva-
+// Efectivos() baja el tope a 2 en gama BAJO adaptativa (deja un núcleo al
+// hilo UI); el override manual del dueño manda y el flag adaptativo OFF
+// devuelve el flag puro de siempre.
+import { flagsMasivaEfectivos } from "../gama";
+// KIT ocr-router-v1 fase 3 — el motor CONSUME el router (PR #10/#11): resuelve
+// QUÉ modelos corren (v4 = motor de siempre byte-idéntico · v5 = PP-OCRv5 del
+// benchmark, 100 % dígitos impresos) con la cadena flag ← override ←
+// gobernador ← sonda de carga ← sonda de CPU ← tier. El flag y el override
+// ya están registrados en FlagsApp (fase 2).
+import {
+  DIAS_NO_REINTENTAR,
+  ejecutarSondaCarga,
+  presionReciente,
+  reportarPresionMotor,
+  resolverMotor,
+  type MotorOcr,
+  type PerfilMinimo,
+  type ResolucionMotor,
+} from "./router-ocr";
+import { leerFlags } from "../flags";
+import { obtenerDispositivo } from "../obs/dispositivo";
+// R2 — PUBLIC_BASE único (src/shared/env.ts, era const local §B2 #10).
+import { PUBLIC_BASE } from "@/shared/env";
+
+// ─── R7c (M8) — INVENTARIO DEL ESTADO DE MÓDULO (los sobrevivientes) ────────
+// El postproceso DB salió a ./db-postprocess (módulo PURO — 0 estado). Este
+// módulo conserva el ESTADO DE SESIÓN del motor, auditado línea a línea:
+// cada sobreviviente tiene un rol DISTINTO y documentado — fusionarlos
+// cambia semántica observable (ver §6 del informe R7c):
+//  1. motorModelosActual   — set de modelos de la sesión ACTUAL; lo lee el
+//     gobernador reactivo de rapidOcrReiniciar (v5 muerto ⇒ degradar a v4).
+//  2. motorElegidoActual   — el motor ELEGIDO por el router en la última
+//     init; ramifica rapidOcrReconocer a Tesseract. DIFIERE de
+//     motorOcrVivo.motor en el fallo en vuelo (aquí cae al base; el vivo
+//     conserva la decisión para la auditoría — cero maquillaje).
+//  3. motorOcrVivo         — observador PASIVO del informe D34 (getter
+//     motorOcrActual): decisión del router + modelos REALES + motivo.
+//  4. rtSingleton          — promesa de init (singleton: el 2.º informe no
+//     re-descarga); reintentable en fallo; null al reiniciar.
+//  5. reconocimientosEnVuelo — contador del reinicio SEGURO del panel (no
+//     soltar sesiones bajo una inferencia).
+//  6. prewarmHecho         — promesa once del pre-warm (1 vez por carga de
+//     página); se invalida en rapidOcrReiniciar.
+//  7. detMemo (const Map, tope 2) — memo del det por identidad dataURL+cap
+//     (D62 T2): caché de EJECUCIÓN documentada; jamás decide score/gate.
+
+// ─── Tipos ORT mínimos (el módulo se importa dinámicamente) ─────────────────
+
+interface OrtValue {
+  dims: readonly number[];
+  data: Float32Array | Int32Array | Uint8Array | BigInt64Array;
+  type: string;
+}
+interface OrtSession {
+  inputNames: readonly string[];
+  outputNames: readonly string[];
+  run(feeds: Record<string, OrtValue>): Promise<Record<string, OrtValue>>;
+}
+interface OrtModule {
+  env: {
+    wasm: {
+      wasmPaths: string;
+      numThreads: number;
+      simd: boolean;
+      proxy: boolean;
+    };
+    /** Bundle /webgpu únicamente — el /wasm de siempre no lo expone. */
+    webgpu?: { powerPreference?: string };
+  };
+  Tensor: new (type: "float32", data: Float32Array, dims: number[]) => OrtValue;
+  InferenceSession: {
+    // KIT perf/fetch-unico-v1 (P0-2): acepta Uint8Array además de URL — ort-web
+    // real soporta ambos (el buffer viaja al proxy por postMessage, sin re-fetch).
+    create(
+      uri: string | Uint8Array,
+      opts?: { executionProviders: string[] },
+    ): Promise<OrtSession>;
+  };
+}
+
+export interface RapidOcrLinea {
+  texto: string;
+  conf: number;
+  box: { x: number; y: number }[];
+}
+
+export interface RapidOcrResultado {
+  lineas: RapidOcrLinea[];
+  texto: string;
+  confMedia: number;
+  msDet: number;
+  msCls: number;
+  msRec: number;
+  nBoxes: number;
+}
+
+interface RapidRuntime {
+  ort: OrtModule;
+  det: OrtSession;
+  cls: OrtSession;
+  rec: OrtSession;
+  dict: string[];
+  /** KIT ocr-ep-webgpu-v1 — EP REAL con el que corrieron las sesiones (el
+   *  informe de corrida lo estampa; «webgpu» = los mismos modelos sobre la
+   *  GPU, jamás un modelo distinto). */
+  ep: EpOcr;
+}
+
+// ─── KIT ocr-router-v1 fase 3 — sets de modelos por motor ───────────────
+// v4 = el motor de producción de siempre (PROD-2) — TODO lo que el router
+// resuelva como motor base usa estos modelos byte-idénticos a hoy.
+// v5 = PP-OCRv5 mobile del benchmark (results/metrics.json: 100 % de dígitos
+// impresos, 97,6 % solo-impreso > VLM cloud 94,4; inmune a rotación 1,5°;
+// ~487 MB pico) — SOLO cuando el router lo habilita (ALTO+SIMD u override
+// manual del dueño) Y la sonda de carga real pasa. El cls v2.0 mobile es
+// COMÚN (misma pieza en RapidOCR 1.4.4 para v4 y v5).
+const MODELOS = {
+  v4: {
+    det: "/models/rapidocr/ch_PP-OCRv4_det_infer.onnx",
+    cls: "/models/rapidocr/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    rec: "/models/rapidocr/ch_PP-OCRv4_rec_infer.onnx",
+    dict: "/models/rapidocr/ppocr_keys.txt",
+  },
+  v5: {
+    det: "/models/rapidocr/det_v5_mobile.onnx",
+    cls: "/models/rapidocr/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    rec: "/models/rapidocr/rec_v5_latin.onnx",
+    // FIX dict-ppocrv5-v2: latin_dict.txt (185 chars) era el dict latino
+    // v3/v4 — NO corresponde a este ONNX (latin_PP-OCRv5_rec_mobile,
+    // SHA256 b20bd37c…, C=504 clases: blank(0) + 502 chars + espacio(503)).
+    // Con el dict viejo el CTC decodifica corrido (garbage con conf ≥0.9)
+    // → 0 anclas → «sin señal» → score 4.9 → RECHAZADA (lote real 6/6,
+    // corrida 2026-11-03 02:23). El charset correcto vive EMBEBIDO en el
+    // ONNX (metadato «character») — regenerable con
+    // `bun scripts/regenerar-dict-v5.mjs`. El archivo se renombra
+    // (latin_dict_v2) porque /models/* va Cache-Control immutable 1 año
+    // (public/_headers D39) — el nuevo nombre garantiza fetch fresco en
+    // todos los dispositivos. El ctcDecode (blank-first, dict[mejor-1],
+    // else espacio) queda INTACTO — verificado contra el lote real:
+    // v5 arreglado lee «PAÍS: 335 - EGIPTO» y «El Cairo - Consulado»
+    // (v4: «PAIS:335-EGIPTO», «EI Cairo»), conf 0.91-0.98.
+    dict: "/models/rapidocr/latin_dict_v2.txt",
+  },
+} as const;
+
+type MotorModelos = keyof typeof MODELOS; // "v4" | "v5"
+
+/** El motor de producción de este repo es RapidOCR/PP-OCR: el
+ *  «tesseract-best-psm4» del benchmark (94,4 %, ~67 MB) representa al MOTOR
+ *  BASE de siempre — aquí, los modelos v4. Solo «ppocrv5» cambia modelos. */
+function motorADeModelos(m: MotorOcr): MotorModelos {
+  return m === "ppocrv5" ? "v5" : "v4";
+}
+
+/** Set de modelos de la sesión ACTUAL (el gobernador lo reporta al morir). */
+let motorModelosActual: MotorModelos = "v4";
+
+/** fase 5b — el motor ELEGIDO por el router en la última init (el funnel
+ *  rapidOcrReconocer ramifica a Tesseract REAL cuando el dueño lo fijó). */
+let motorElegidoActual: MotorOcr = "tesseract-best-psm4";
+
+// ─── KIT ocr-router-v1 fase 4 — resolución EN VIVO del motor (auditoría) ────
+/** Lo que el informe de corrida (D34) estampa para AUTO-IDENTIFICAR cada
+ *  A/B (hueco real del dueño 2026-10-28: dos informes del mismo kit donde
+ *  era imposible saber qué motor corrió en cada uno): la decisión del router
+ *  + los modelos que REALMENTE cargaron (pueden diferir: sonda de carga de
+ *  v5 fallida ⇒ v4) + origen y motivo auditable. Vive en el MÓDULO del motor
+ *  (misma fuente que la telemetría [ocr-router]) — null = aún no inició. */
+export interface MotorOcrVivo {
+  motor: MotorOcr;
+  /** Los modelos que REALMENTE cargaron — «tesseract-spa-best» = worker de
+   *  tesseract.js con spa.traineddata (fase 5b); v4 puede aparecer aunque la
+   *  decisión fuera otra (fallo de sonda/init — cero maquillaje). */
+  modelos: MotorModelos | "tesseract-spa-best";
+  origen: ResolucionMotor["origen"];
+  motivo: string;
+}
+let motorOcrVivo: MotorOcrVivo | null = null;
+
+/** Getter puro para el informe (exportarInformeMetricas) — jamás lanza. */
+export function motorOcrActual(): MotorOcrVivo | null {
+  return motorOcrVivo;
+}
+
+// ─── sonda WASM SIMD (módulo de bytes fijo — PARIDAD con perfil-dispositivo/
+// senales.ts; el módulo masiva ESPEJA señales, no importa el kit — D74) ───
+function wasmSimdDisponible(): boolean {
+  try {
+    return WebAssembly.validate(
+      new Uint8Array([
+        0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0,
+        253, 15, 253, 98, 11,
+      ]),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Renderer GPU (WEBGL_debug_renderer_info — paridad con senales.ts; solo
+ *  alimenta la ruta iOS del router: renderer Apple + RAM no informada). */
+function gpuRenderer(): string | null {
+  try {
+    if (typeof document === "undefined") return null;
+    const c = document.createElement("canvas");
+    const gl = (c.getContext("webgl2") ?? c.getContext("webgl")) as WebGLRenderingContext | null;
+    if (!gl) return null;
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const r = ext
+      ? (gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string | null)
+      : (gl.getParameter(gl.RENDERER) as string | null);
+    return r ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Perfil MÍNIMO del router, headless (sin React): tier §4.4 de
+ *  obs/dispositivo (la MISMA fuente que gama.ts — nunca discrepen) + probes
+ *  locales. benchmark.score = null HONESTO: el score del kit vive en el
+ *  provider React y NO viaja al motor — por eso la sonda de carga real
+ *  (inferencia de prueba) es el gate de v5 (protocolo v2 del router). */
+async function perfilMinimoHeadless(): Promise<PerfilMinimo> {
+  let tier: PerfilMinimo["tier"] = "MEDIO";
+  let memoriaGB: number | null = null;
+  let saveData: boolean | null = null;
+  let redTipo: string | null = null;
+  let storageLibreMB: number | null = null;
+  try {
+    const d = await obtenerDispositivo();
+    tier = d.tier;
+    memoriaGB = d.memoriaGB;
+    saveData = d.red.saveData;
+    redTipo = d.red.tipo;
+    storageLibreMB = d.storageLibreMB;
+  } catch {
+    /* señales default — resolverMotor jamás lanza y cae al motor seguro */
+  }
+  return {
+    tier,
+    benchmark: { ejecutado: false, score: null },
+    runtime: { wasmSimd: wasmSimdDisponible() },
+    sync: { memoriaGB, saveData, redTipo },
+    async: { storageLibreMB },
+    gpu: { renderer: gpuRenderer() },
+  };
+}
+
+// KIT perf/fetch-unico-v1 (P0-2 del REPORTE-perfil-medio-rendimiento-v1) —
+// FETCH ÚNICO de modelos: con proxy=true, InferenceSession.create(URL) bajaba
+// cada modelo DOBLE (una vez por el fetch de la sesión en main y OTRA por el
+// worker proxy de ORT — medido en el network log: ~32 MB duplicados al
+// arranque). Ahora los bytes se bajan UNA vez (cache por URL) y las sesiones
+// se crean desde Uint8Array — el proxy recibe el buffer por postMessage y NO
+// re-descarga. Copia fresca por sesión (slice(0)) para que un reintento tras
+// fallo nunca vea un buffer detachado por el transfer del proxy.
+const CACHE_BYTES_MODELO = new Map<string, Promise<ArrayBuffer>>();
+function bytesModelo(url: string): Promise<ArrayBuffer> {
+  let p = CACHE_BYTES_MODELO.get(url);
+  if (!p) {
+    p = fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`${url} HTTP ${r.status}`);
+      return r.arrayBuffer();
+    });
+    // fallo → sacar del cache para que el reintento de rapidOcrInit baje fresco
+    p.catch(() => CACHE_BYTES_MODELO.delete(url));
+    CACHE_BYTES_MODELO.set(url, p);
+  }
+  return p;
+}
+
+async function crearSesiones(
+  ort: OrtModule,
+  opts: { executionProviders: string[] },
+  m: MotorModelos,
+): Promise<RapidRuntime> {
+  const M = MODELOS[m];
+  const [detB, clsB, recB, dictResp] = await Promise.all([
+    bytesModelo(`${PUBLIC_BASE}${M.det}`),
+    bytesModelo(`${PUBLIC_BASE}${M.cls}`),
+    bytesModelo(`${PUBLIC_BASE}${M.rec}`),
+    fetch(`${PUBLIC_BASE}${M.dict}`),
+  ]);
+  // KIT ocr-ep-webgpu-v1 — con WebGPU las sesiones se crean EN SERIE y DESDE
+  // LA URL. Medido 2026-11-03 (bench aislado `scripts/ort-bench.mjs`, proxy=true,
+  // HD Graphics 520, `out/orttest`):
+  //  · `Promise.all` de los tres create() ⇒ «another WebGPU EP inference session
+  //    is being created» — el EP de GPU tiene UNA sola cola de carga.
+  //  · `create(Uint8Array)` con proxy ⇒ «memory access out of bounds» (el
+  //    buffer viaja al worker proxy y el EP lo lee como modelo). Es el fallo
+  //    exacto que tumbaba la init del producto y devolvía todo al wasm de
+  //    siempre: WebGPU NUNCA llegó a correr en el lote.
+  //  · `create(URL)` en la MISMA configuración corre y vale rec_v5 590 ms vs
+  //    4 400 (7,4×) y det_v5 850 vs 2 186 (2,8×).
+  // Los bytes SIGUEN bajándose primero (el `Promise.all` de arriba): deja el
+  // .onnx caliente en la caché HTTP, así que el fetch del proxy sale de cache
+  // y no de red — la gana de KIT perf/fetch-unico-v1 sobrevive. Con wasm todo
+  // queda byte-idéntico a hoy.
+  const enSerie = opts.executionProviders.includes("webgpu");
+  const crear = (bytes: ArrayBuffer, ruta: string) =>
+    ort.InferenceSession.create(
+      enSerie ? new URL(ruta, location.href).href : new Uint8Array(bytes.slice(0)),
+      opts,
+    );
+  const [det, cls, rec] = enSerie
+    ? [
+        await crear(detB, `${PUBLIC_BASE}${M.det}`),
+        await crear(clsB, `${PUBLIC_BASE}${M.cls}`),
+        await crear(recB, `${PUBLIC_BASE}${M.rec}`),
+      ]
+    : await Promise.all([
+        crear(detB, `${PUBLIC_BASE}${M.det}`),
+        crear(clsB, `${PUBLIC_BASE}${M.cls}`),
+        crear(recB, `${PUBLIC_BASE}${M.rec}`),
+      ]);
+  if (!dictResp.ok) throw new Error(`${M.dict} HTTP ${dictResp.status}`);
+  // `/\r?\n/` y NO `"\n"`: los tres .txt del repo están commiteados con CRLF.
+  // Partiendo solo por LF cada token sale con su `\r` pegado y el ctcDecode lo
+  // pega entre letra y letra («C\rO\rN\rS\rU\rL\rA\rD\rO»): el texto se ve
+  // perfecto pero NINGUNA de las 10 ANCLAS_LECTURA matchea → senal=false →
+  // techo 4.9 → 6/6 RECHAZADA en el camino navegador (lado nativo no lo sufría
+  // porque Python abre el dict en modo texto y normaliza los saltos).
+  const dict = (await dictResp.text()).split(/\r?\n/).filter((l) => l.length > 0);
+  return {
+    ort,
+    det,
+    cls,
+    rec,
+    dict,
+    ep: opts.executionProviders.includes("webgpu") ? "webgpu" : "wasm",
+  };
+}
+
+/** Soltar sesiones (extraído de rapidOcrReiniciar — reutilizado por la sonda
+ *  para NO dejar sesiones v5 huérfanas si el timeout la abandona). */
+async function soltarRuntime(rt: RapidRuntime): Promise<void> {
+  const sesiones = [rt.det, rt.cls, rt.rec] as Array<
+    OrtSession & { release?: () => unknown }
+  >;
+  for (const s of sesiones) {
+    try {
+      await s.release?.();
+    } catch {
+      /* sesión ya muerta — seguir con la siguiente */
+    }
+  }
+}
+
+/** KIT ocr-sonda-reutilizada-v1 — sesiones ya vivas que la sonda de carga
+ *  creó Y verificó (mismo ort, mismos opts, mismo modelo, dict ya parseado).
+ *  `initConEp` las consume en vez de volver a crearlas; null en cualquier
+ *  otro caso (fallo de sonda, timeout, v4). Se limpia al tomarlas. */
+let rtSondaReutilizable: RapidRuntime | null = null;
+
+/** KIT ocr-sonda-reutilizada-v1 — true SOLO mientras el runtime VIVO de este
+ *  EP sea el que la sonda creó y ya calentó (det+cls+rec reales sobre el
+ *  canvas «E14 SONDA»). El pre-warm de la cola (`rapidOcrPrecalentar`) es
+ *  entonces redundante: medido en gpu9 costaba 5 411 ms de GPU+CPU justo
+ *  encima de la primera acta. Se apaga en cada `initConEp` y al soltar el
+ *  runtime (D65), así que tras un reinicio de sesiones el pre-warm vuelve a
+ *  correr como hoy. */
+let sondaCaliente = false;
+
+/** Resuelve el set de modelos con el router + sonda de carga real para v5.
+ *  JAMÁS lanza: cualquier imprevisto ⇒ v4 (el motor de siempre). El flag
+ *  `ocrMotorAdaptativo=false` y el override manual del dueño viajan por la
+ *  cadena del router (fase 2 los registró en FlagsApp). */
+async function resolverModeloDeArranque(
+  ort: OrtModule,
+  opts: { executionProviders: string[] },
+): Promise<MotorModelos> {
+  try {
+    const flags = leerFlags();
+    const res = resolverMotor(await perfilMinimoHeadless(), {
+      flagOn: flags.ocrMotorAdaptativo !== false,
+      overrideManual: flags.ocrMotor ?? null,
+      presionReciente: presionReciente(),
+    });
+    const m = motorADeModelos(res.motor);
+    // fase 5b — el motor ELEGIDO queda visible para el reconocer (el funnel
+    // rapidOcrReconocer ramifica aquí) y para la auditoría del informe.
+    motorElegidoActual = res.motor;
+    // fase 4 — la resolución queda EN VIVO para el informe D34 (getters de
+    // módulo: observador pasivo, cero coste — mismo patrón del kit).
+    motorOcrVivo = { motor: res.motor, modelos: m, origen: res.origen, motivo: res.motivo };
+    logger.info(
+      `[ocr-router] motor=${res.motor} modelos=${m} origen=${res.origen} — ${res.motivo}`,
+    );
+    // fase 5b — Tesseract spa-best REAL: sin sonda aparte (motor ligero y
+    // benchmark-probado) — la init del worker ES la prueba (≤ 20 s). Fallo ⇒
+    // v4 honesto (mismo patrón que la sonda de v5: decisión visible, cero
+    // maquillaje). Las sesiones v4 siguen creándose abajo como red de
+    // seguridad (si Tesseract falla EN VUELO, la corrida no se tumba).
+    if (res.motor === "tesseract-spa-best-psm4") {
+      if (await tesseractInit()) {
+        logger.info(
+          "[ocr-router] Tesseract spa-best listo (worker WASM LSTM + psm 4 + spa.traineddata.gz)",
+        );
+        motorOcrVivo = {
+          motor: res.motor,
+          modelos: "tesseract-spa-best",
+          origen: res.origen,
+          motivo: `${res.motivo} · worker Tesseract listo (spa-best + psm 4).`,
+        };
+        return "v4"; // SOLO red de seguridad — el reconocer usa Tesseract
+      }
+      motorElegidoActual = "tesseract-best-psm4"; // fallback honesto de sesión
+      logger.info(
+        "[ocr-router] init de Tesseract FALLO — v4 de seguridad y castigo de decisión visible en el informe",
+      );
+      motorOcrVivo = {
+        motor: res.motor,
+        modelos: "v4",
+        origen: res.origen,
+        motivo: `${res.motivo} · init de Tesseract FALLO — v4 de seguridad (resto de la sesión).`,
+      };
+      return "v4";
+    }
+    if (m !== "v5") return m;
+    // La sonda de carga real es el gate de v5 — el deviceMemory NO garantiza
+    // los buffers del detector (protocolo v2; también cubre el override
+    // manual: el contrato del router exige sonda para ppocrv5).
+    let abandonada = false;
+    // fase 5 (selector-motor-v1) — cuando el DUEÑO fijó el motor a mano, la
+    // ventana de carga sube 8 s → 30 s: pidió esperar explícitamente (D6) —
+    // la valla de 8 s es la sospecha #1 del «se canceló por mucho tiempo»
+    // del A/B 21:26 (descarga de modelos + sesiones ONNX en frío). El modo
+    // automático conserva los 8 s del protocolo v2.
+    const timeoutSondaMs =
+      (res.origen === "override-manual" ? 30_000 : 8000) +
+      // KIT ocr-ep-webgpu-v1 — con WebGPU la PRIMERA inferencia compila los
+      // shaders del grafo: medido 4,7 s de init + 5,5 s del primer run en la
+      // HD Graphics 520 (luego 0,6 s por lote). Con la ventana de 8 s del modo
+      // automático la sonda condenaría a v4 un motor que va 4,7× más rápido.
+      (opts.executionProviders.includes("webgpu") ? 20_000 : 0);
+    const sonda = await ejecutarSondaCarga(async () => {
+      const rt = await crearSesiones(ort, opts, "v5");
+      if (abandonada) {
+        void soltarRuntime(rt); // timeout nos dejó huérfanos — limpiar
+        return false;
+      }
+      const c = canvasCon(320, 120);
+      const ctx = ctxDe(c);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, 320, 120);
+      ctx.fillStyle = "#000000";
+      ctx.font = "bold 28px monospace";
+      ctx.fillText("E14 SONDA 1234", 12, 70);
+      const r = await rapidOcrReconocer(rt, c.toDataURL("image/png"));
+      // KIT ocr-sonda-reutilizada-v1 — ANTES `void soltarRuntime(rt)` (la sonda
+      // NO era el runtime de producción) y `initConEp` volvía a crear las TRES
+      // sesiones detrás. Con WebGPU cada creación paga la compilación de los
+      // shaders: medido en el bench `gpu7`, sonda 37,8 s + re-creación ⇒ ~50 s
+      // de arranque del lote, con las MISMAS sesiones y el MISMO modelo.
+      // La sonda ya corrió det+cls+rec de verdad sobre esas sesiones y verificó
+      // el CONTENIDO leído (abajo) — reutilizarlas es exactamente el runtime que
+      // se crearía igual, con el dict ya parseado y sin bytes duplicados.
+      // Solo se guarda si la sonda PASÓ y el timeout NO nos abandonó; si no, se
+      // suelta como siempre.
+      // BLINDAJE dict-ppocrv5-v2 — se verifica el CONTENIDO leído, no solo que
+      // haya líneas con conf: un dict desalineado da GARBAGE con conf 0.9+ (la
+      // sonda vieja dejó pasar el de 185 chars ⇒ lote 6/6 RECHAZADA score 4.9).
+      // Espacios colapsados: v5 legítimo puede emitir espacios entre glifos.
+      const c2 = r.lineas
+        .map((l) => l.texto)
+        .join(" ")
+        .replace(/\s+/g, "");
+      const ok = r.lineas.length > 0 && r.confMedia >= 0.4 && /SONDA/i.test(c2);
+      if (ok && !abandonada) rtSondaReutilizable = rt;
+      else void soltarRuntime(rt);
+      return ok;
+    }, timeoutSondaMs);
+    abandonada = true;
+    if (sonda.ok) {
+      logger.info(`[ocr-router] sonda de carga v5 OK (${sonda.ms} ms) — modelos PP-OCRv5 activos`);
+      motorOcrVivo = {
+        motor: res.motor,
+        modelos: "v5",
+        origen: res.origen,
+        motivo: `${res.motivo} · sonda de carga OK (${sonda.ms} ms).`,
+      };
+      return "v5";
+    }
+    logger.info(
+      `[ocr-router] sonda de carga v5 FALLO (${sonda.ms} ms) — v4 y castigo ${DIAS_NO_REINTENTAR} días (localStorage)`,
+    );
+    // fase 4 — honesto en el informe: la decisión fue v5 pero los modelos
+    // REALES que cargaron son v4 (el informe muestra AMBOS campos).
+    motorOcrVivo = {
+      motor: res.motor,
+      modelos: "v4",
+      origen: res.origen,
+      motivo: `${res.motivo} · sonda de carga FALLO (${sonda.ms} ms) — v4 + castigo ${DIAS_NO_REINTENTAR} días.`,
+    };
+    return "v4";
+  } catch (e) {
+    logger.info(
+      `[ocr-router] fallo resolviendo motor (v4 por seguridad): ${e instanceof Error ? e.message : String(e)}`,
+    );
+    motorElegidoActual = "tesseract-best-psm4"; // cualquier imprevisto ⇒ motor base
+    motorOcrVivo = {
+      motor: "tesseract-best-psm4",
+      modelos: "v4",
+      origen: "tier",
+      motivo: "Fallo resolviendo motor — v4 por seguridad.",
+    };
+    return "v4";
+  }
+}
+
+// ─── Init (singleton — el 2.º informe no re-descarga nada) ──────────────────
+
+let rtSingleton: Promise<RapidRuntime> | null = null;
+
+export function rapidOcrInit(): Promise<RapidRuntime> {
+  if (!rtSingleton) {
+    rtSingleton = initReal().catch((e) => {
+      rtSingleton = null; // reintentable
+      throw e;
+    });
+  }
+  return rtSingleton;
+}
+
+// KIT selector-motor-v1 fase 5 — REINICIO SEGURO para la UI del panel: el
+// dueño aplica su elección de motor SIN recargar la página. Un contador de
+// reconocimientos en vuelo impide soltar las sesiones bajo los pies de una
+// inferencia. Los probes de ~centenas de ms (orientación/rec-lote) quedan
+// fuera del conteo a propósito: una carrera ahí se auto-repara (la próxima
+// init re-crea sesiones), una corrida NO se repara igual de barato — por eso
+// solo el reconocer completo cuenta.
+let reconocimientosEnVuelo = 0;
+
+/** true si hay una inferencia det→cls→rec en vuelo (consulta barata). */
+export function ocrEnVuelo(): boolean {
+  return reconocimientosEnVuelo > 0;
+}
+
+// ─── KIT ocr-cola-global-v1 ─────────────────────────────────────────────────
+// UN SOLO cliente ORT a la vez. Por qué: con `poolWorkers: 2` dos actas llaman
+// al MISMO singleton (rtSingleton) y sus `session.run()` se solapan. Bench
+// `gpu8` (sin WebGPU) y `gpu13` (con WebGPU, 2026-11-03) mueren IGUAL: la traza
+// se detiene justo después de un `det run OK` y la `celda` nunca aparece — la
+// segunda inferencia concurrente no regresa JAMÁS (el lote queda colgado hasta
+// el watchdog del bench). El EP de GPU ya tiene una sola cola de CREACIÓN de
+// sesiones (ver comentario de «is being created» arriba); le falta la de
+// EJECUCIÓN. Con la cola, el GPU queda serializado (es UN device: no pierde
+// nada) y el otro acta aprovecha para correr lo que sí es CPU — warp, decode y
+// QR — que es justamente el solapamiento que busca el pool 2.
+// Kill-switch: `ocrColaGlobal` false = sin cola (el default histórico, con el
+// COLGAJE de gpu8/gpu13).
+// KIT e14-cola-prio-v1 PROBADO Y RETIRADO (2026-11-03): dar carril preferente
+// al sondeo de orientación — el turno CORTO que decide la rotación de su acta y
+// que en FIFO se come la espera del rec de 49 cajas de la otra acta (gpu46:
+// orientacionProbeMs 10 798 ms, ~9 s de espera)— NO movió el muro: 62,3 y 58,8 s
+// con carril preferente vs 60,8 y 61,5 s en FIFO puro. El GPU es UN device
+// saturado: reordenar la cola reparte la espera, no la quita. Se queda el FIFO
+// simple (menos estado, mismo resultado medido).
+let turnoOcr: Promise<unknown> = Promise.resolve();
+
+/** Acumulador de ESPERA del turno FIFO, UNO POR ACTA (lo crea el pipeline y
+ *  lo pasa a cada llamada encolada; `sink.ms` queda con la suma de lo que ESA
+ *  acta esperó al GPU libre). Por qué un objeto y no un contador de módulo:
+ *  con `poolWorkers: 2` dos actas corren en el MISMO contexto JS — un
+ *  acumulador global le asignaría a la una la espera de la otra.
+ *  El dato existe porque la espera NO es trabajo del acta: sin él, un
+ *  `orientacionProbeMs` de 10,8 s (gpu46: ~9 s eran cola) se lee como «esta
+ *  foto es cara» y la palanca equivocada es el pre-proceso. */
+export interface EsperaOcrSink {
+  ms: number;
+}
+
+async function conTurnoOcr<T>(fn: () => Promise<T>, sink?: EsperaOcrSink): Promise<T> {
+  const tPedido = performance.now();
+  const arrancar = () => {
+    if (sink) sink.ms += performance.now() - tPedido;
+    return fn();
+  };
+  const turno = turnoOcr.then(arrancar, arrancar);
+  // La cola nunca se encona con un rechazo: el siguiente entra igual.
+  turnoOcr = turno.then(
+    () => undefined,
+    () => undefined,
+  );
+  return turno;
+}
+
+const colaOcrActiva = () => {
+  try {
+    return leerFlags().ocrColaGlobal;
+  } catch {
+    return false;
+  }
+};
+
+/** Reinicio del motor para la UI: rechaza si hay OCR corriendo (false — la
+ *  corrida manda); true = reiniciado o sin motor iniciado (la próxima init
+ *  nace con la elección vigente). Jamás lanza. */
+export async function reiniciarMotorOcrSiInactivo(): Promise<boolean> {
+  try {
+    if (reconocimientosEnVuelo > 0) return false;
+    if (!rtSingleton) return true; // nada que soltar — el arranque ya lee el override
+    await rapidOcrReiniciar();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// KIT e14-prowarm-ocr-v1 (T1): pre-warm REAL de la sesión RapidOCR —
+// rapidOcrInit() crea las sesiones pero NUNCA infiere; la 1.ª acta real
+// pagaba ~27 s de frío (35.9 s OCR vs 8.3 s caliente, informe 19/10).
+// Esto corre UNA inferencia dummy sobre canvas sintético por det+cls+rec
+// y DESCARTA el resultado (§0.2). NUNCA llamar aquí a reconocerRapidOcr
+// del bridge (contaminaría ultimoOcr* — §0.3): rapidOcrReconocer directo.
+let prewarmHecho: Promise<boolean> | null = null;
+
+export function rapidOcrPrecalentar(): Promise<boolean> {
+  if (prewarmHecho) return prewarmHecho; // 1 sola vez por carga de página
+  prewarmHecho = (async () => {
+    try {
+      const rt = await rapidOcrInit(); // MISMO singleton — el calor queda
+      // KIT ocr-sonda-reutilizada-v1 — si el runtime que quedó vivo es EL MISMO
+      // que la sonda de carga creó y ya usó (det+cls+rec reales sobre el canvas
+      // «E14 SONDA»), el pre-warm sería una SEGUNDA inferencia dummy sobre el
+      // mismo GPU: medido en gpu9, 5 411 ms clavados en el arranque de la 1.ª
+      // acta. Se omite SOLO cuando la sonda decidió; en cualquier otro caso
+      // (v4, sonda fallida, EP wasm sin sonda) el pre-warm corre como hoy.
+      if (sondaCaliente) {
+        logger.info(
+          "[e14-prowarm] omitido — la sonda de carga ya calentó las sesiones vivas",
+        );
+        return true;
+      }
+      const c = canvasCon(640, 480); // SPRINT-A A3 — factory
+      const ctx = ctxDe(c);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, 640, 480);
+      ctx.fillStyle = "#000000";
+      ctx.font = "bold 48px monospace";
+      ctx.fillText("E14 WARM-UP", 40, 120);
+      ctx.font = "bold 36px monospace";
+      ctx.fillText("PUESTO 01 20261019123055", 40, 240);
+      ctx.fillText("TRANSMISION 98.7% 15:30:22", 40, 340);
+      const dataUrl = c.toDataURL("image/png");
+      const r = await rapidOcrReconocer(rt, dataUrl); // resultado DESCARTADO
+      logger.info(
+        `[e14-prowarm] listo det=${r.msDet}ms cls=${r.msCls}ms rec=${r.msRec}ms · ${r.nBoxes} cajas · ${r.lineas.length} líneas`,
+      );
+      return true;
+    } catch (e) {
+      // Frío como hoy: el pipeline NO depende de esto (fallback honesto).
+      logger.info(
+        `[e14-prowarm] fallo (continua como hoy): ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return false;
+    }
+  })();
+  return prewarmHecho;
+}
+
+/** D65 — KIT e14-progreso-watchdog-dedup-v1 (T1): soltar el runtime OCR
+ *  cuando el watchdog mata y re-crea los workers del intento vencido.
+ *  Best-effort: release() de cada sesión (det/cls/rec) SI la build de ORT
+ *  lo expone (los tipos locales son mínimos), luego el singleton FUERA →
+ *  la próxima rapidOcrInit() re-crea TODO (sesiones y worker proxy nuevos).
+ *  El pre-warm también cae (puede volver a calentar si alguien lo llama).
+ *  NOTA honesta: si el cuelgue vive DENTRO del worker proxy compartido de
+ *  ORT, el runtime re-creado puede volver a colgarse → el watchdog vence
+ *  otra vez (~150 s totales) y manda el veredicto honesto de siempre.
+ *  NUNCA lanza: un fallo de limpieza no empeora el reintento. */
+export async function rapidOcrReiniciar(): Promise<void> {
+  // fase 5b — el worker Tesseract también muere (APLICAR AHORA cambia de
+  // motor limpio; en el watchdog de v5 es un no-op inocuo).
+  await tesseractReiniciar();
+  if (!rtSingleton) return;
+  try {
+    await soltarRuntime(await rtSingleton);
+  } catch {
+    /* el singleton ya estaba roto — nada que soltar */
+  }
+  // KIT ocr-router-v1 fase 3 — gobernador reactivo: si el runtime que murió
+  // era v5, el kill/OOM del watchdog cuenta como presión (patrón
+  // reportarPresionGama): 2 fallos en 3 min ⇒ la PRÓXIMA init degrada a v4
+  // por el resto de la sesión (resolverMotor paso 2, origen
+  // «gobernador-presion»).
+  if (motorModelosActual === "v5" && reportarPresionMotor("ppocrv5")) {
+    logger.info(
+      "[ocr-router] gobernador: 2 fallos de v5 en 3 min — la próxima init degrada a v4 (resto de la sesión)",
+    );
+  }
+  rtSingleton = null;
+  prewarmHecho = null;
+  // KIT ocr-sonda-reutilizada-v1 — sesiones muertas: el próximo arranque
+  // recalienta como hoy (el pre-warm vuelve a ser necesario).
+  sondaCaliente = false;
+}
+
+/** KIT ocr-ep-webgpu-v1 — los DOS bundles conviven: `/wasm` es el camino de
+ *  SIEMPRE (byte-idéntico, cero bytes nuevos) y `/webgpu` añade el EP de GPU
+ *  sobre los MISMOS modelos ONNX (la salida es el mismo OCR — solo cambia
+ *  dónde se multiplica). Medido 2026-11-03 en el portátil del dueño (Intel HD
+ *  Graphics 520, Chrome/D3D12, bench `out/orttest`): det_v4 5 954 → 1 244 ms
+ *  (4,8×), det_v5 2 186 → 794 (2,8×), rec_v5 lote-6 4 400 → 592 (7,4×). */
+type EpOcr = "wasm" | "webgpu";
+
+/** ¿Este navegador tiene una GPU REAL accesible por WebGPU? `isFallbackAdapter`
+ *  (SwiftShader por software) se RECHAZA a propósito: sobre CPU emulada el EP
+ *  webgpu es MÁS lento que el wasm de siempre y además paga 28 MB de wasm JSEP. */
+async function gpuRealDisponible(): Promise<boolean> {
+  try {
+    const gpu = (navigator as unknown as {
+      gpu?: { requestAdapter?(o?: unknown): Promise<unknown> };
+    }).gpu;
+    if (!gpu?.requestAdapter) return false;
+    const a = (await gpu.requestAdapter({ powerPreference: "high-performance" })) as
+      | { isFallbackAdapter?: boolean }
+      | null;
+    return !!a && a.isFallbackAdapter !== true;
+  } catch {
+    return false;
+  }
+}
+
+/** Decisión del EP (flag `ocrEp`): "wasm" = hoy · "webgpu" = FORZAR (aún sin
+ *  adapter — el try/catch de initReal vuelve a wasm) · "auto" = GPU real u nos
+ *  vamos. La sonda jamás lanza. */
+async function resolverEpOcr(): Promise<EpOcr> {
+  const f = flagsMasivaEfectivos().ocrEp;
+  if (f === "wasm") return "wasm";
+  if (f === "webgpu") return "webgpu";
+  return (await gpuRealDisponible()) ? "webgpu" : "wasm";
+}
+
+async function moduloOrt(ep: EpOcr): Promise<OrtModule> {
+  return (await (ep === "webgpu"
+    ? import("onnxruntime-web/webgpu")
+    : import("onnxruntime-web/wasm"))) as unknown as OrtModule;
+}
+
+/** El EP pedido + su reason legible para el log/registro. */
+let epOcrUltimo: { pedido: EpOcr; real: EpOcr | null } = {
+  pedido: "wasm",
+  real: null,
+};
+
+async function initReal(): Promise<RapidRuntime> {
+  const ep = await resolverEpOcr();
+  epOcrUltimo = { pedido: ep, real: null };
+  if (ep === "webgpu") {
+    try {
+      const rt = await initConEp("webgpu");
+      epOcrUltimo.real = "webgpu";
+      return rt;
+    } catch (e) {
+      // El bundle /webgpu puede fallar por tres vías (sin adapter, wasm JSEP no
+      // desplegado, op no implementado). Ninguna es motivo para tumbar la cola:
+      // se reintenta CON el runtime wasm de siempre — el camino probado.
+      logger.info(
+        `[e14-rapidocr] WebGPU no arrancó (${e instanceof Error ? e.message : String(e)}) — ` +
+          `reintento con el runtime wasm de siempre`,
+      );
+    }
+  }
+  const rt = await initConEp("wasm");
+  epOcrUltimo.real = "wasm";
+  return rt;
+}
+
+async function initConEp(ep: EpOcr): Promise<RapidRuntime> {
+  const ort = await moduloOrt(ep);
+  ort.env.wasm.wasmPaths = `${PUBLIC_BASE}/vendor/onnxruntime/`;
+  const hilosPedidos =
+    typeof SharedArrayBuffer !== "undefined" && self.crossOriginIsolated
+      ? // A1-C7: el `4` era el literal histórico — ahora flag del dueño
+        // (default 4 → comportamiento idéntico sin overrides).
+        // D74: lectura EFECTIVA — gama BAJO adaptativa ⇒ 2 hilos.
+        Math.min(flagsMasivaEfectivos().ocrThreadsTope, navigator.hardwareConcurrency || 1)
+      : 1;
+  ort.env.wasm.numThreads = hilosPedidos;
+  ort.env.wasm.simd = true;
+  if (ep === "webgpu") {
+    try {
+      if (ort.env.webgpu) ort.env.webgpu.powerPreference = "high-performance";
+    } catch {
+      /* env.webgpu ausente ⇒ el default del bundle sirve */
+    }
+  }
+  // KIT e14-optimizacion-v1 (T2, hallazgo #2 de AUDITORIA-e14-v1): proxy=true
+  // migra det/cls/rec al worker interno de ORT — la inferencia (9.8-14.3 s)
+  // deja de bloquear el main thread y el progreso de ANALIZANDO deja de
+  // congelarse. MISMO EP wasm (opts de abajo), MISMO wasm, MISMO resultado.
+  // numThreads queda como está: 1 en GH Pages (no hay SAB) — el proxy NO
+  // requiere SAB. Revertible en 1 línea si la verificación falla (kit §3-T2.2).
+  // NOTA merge D68-merge (AI Studio): el export de AI Studio trajo proxy=false
+  // («error de resolución dynamic import en bundler») — workaround AMBIENTAL de
+  // ese sandbox; producción (GH Pages/Vercel) verificada con proxy=true. Se
+  // restaura aquí; si AI Studio lo necesita, revertir SOLO en ese entorno.
+  // KIT ocr-ep-webgpu-v1 — CON WebGPU el proxy se APAGA (proxy=false). Es la
+  // causa real del «memory access out of bounds» que enterró el EP de GPU en el
+  // producto (benches `gpu5b`/`gpu6`/`gpu6b`, 2026-11-03): el worker proxy de
+  // ORT NO usa el módulo que el bundler metió en el bundle — se carga por su
+  // cuenta `ort-wasm-simd-threaded.asyncify.mjs` desde `wasmPaths` (el loader
+  // lo tiene fijado en duro), así que el hilo que ejecuta es un MÓDULO DISTINTO
+  // del que creó las sesiones y la memoria compartida no cuadra ⇒ OOB en la
+  // primera creación ⇒ caída silenciosa al wasm de siempre (WebGPU nunca corrió
+  // en el lote, ni siquiera con las sesiones creadas desde la URL).
+  // Medido en el banco aislado (`scripts/ort-bench.mjs`, rec_v5 lote-6, misma
+  // máquina): wasm 4 hilos 2 945 ms · wasm 1 hilo 3 563 ms (¡el threading
+  // interno de ORT vale 1,2×!) · webgpu proxy=1 612 · webgpu proxy=0 625 ms.
+  // Con GPU la MULTIPLICACIÓN sale del hilo UI de todos modos, así que el
+  // motivo por el que se encendió el proxy (T2 de AUDITORIA-e14-v1: 9,8-14,3 s
+  // de inferencia bloqueando el main) ya no existe en este EP.
+  ort.env.wasm.proxy = ep !== "webgpu";
+
+  // Con WebGPU el `wasm` del array NO es un adorno: es el EP al que ORT manda
+  // los nodos que el backend de GPU no implementa (y el fallback si el graph
+  // entero no carga). El pedido «webgpu» jamás significa «sin CPU».
+  const opts = {
+    executionProviders: ep === "webgpu" ? ["webgpu", "wasm"] : ["wasm"],
+  };
+  // KIT ocr-sonda-reutilizada-v1 — cualquier sonda de UN intento de EP anterior
+  // (p. ej. webgpu que luego tiró y `initReal` reintenta wasm) NO vale para
+  // este EP: se descarta antes de resolver el modelo, así que lo que se
+  // consuma abajo lo creó SIEMPRE la cadena ort+opts+modelo del intento actual.
+  rtSondaReutilizable = null;
+  sondaCaliente = false;
+  // KIT ocr-router-v1 fase 3 — resolver el set de modelos ANTES de crear
+  // sesiones: v4 byte-idéntico a hoy (flag OFF / motor base) o v5 (ALTO+SIMD
+  // u override) con sonda de carga real como gate. Jamás lanza.
+  const modelo = await resolverModeloDeArranque(ort, opts);
+  motorModelosActual = modelo;
+  // KIT ocr-sonda-reutilizada-v1 — la sonda de v5 YA creó las tres sesiones con
+  // este MISMO `ort`, estos MISMO `opts` y el MISMO modelo, y encima las
+  // verificó leyendo «E14 SONDA 1234». Volver a crearlas (como hacía hoy) paga
+  // por duplicado la descarga + parse del dict + la compilación de shaders de
+  // WebGPU: medido en el bench `gpu7`, dos creaciones = ~50 s antes del primer
+  // acta. Se gasta la sesión viva UNA sola vez (la variable se limpia aquí).
+  const rtSonda = rtSondaReutilizable;
+  rtSondaReutilizable = null;
+  if (rtSonda && modelo === "v5") {
+    sondaCaliente = true;
+    logger.info(
+      `[e14-rapidocr] arranque REUTILIZA las sesiones de la sonda (ep=${ep}) — sin segunda creación`,
+    );
+    return rtSonda;
+  }
+  // KIT perf/coi-fallback-v1 (verificación del REPORTE-perfil-medio-rendimiento-v1)
+  // — con COI activo el runtime arranca THREADED (numThreads>1). En entornos
+  // donde el backend wasm threaded no llega a inicializar (headless sin
+  // soporte real de hilos, drivers raros — el fallo «no available backend
+  // found. ERR: [wasm]» medido en sandbox), la init MORIRÍA con hilos y
+  // tumba TODA la cola. Red de seguridad: un reintento ÚNICO con numThreads=1
+  // (el camino mono-hilo de siempre — que la prueba del árbol limpio mostró
+  // RECUPERABLE tras reintentos). Coste: solo corre tras un fallo real.
+  try {
+    return await crearSesiones(ort, opts, modelo);
+  } catch (errorConHilos) {
+    // Con WebGPU NO se gasta la red mono-hilo ni la auto-recarga: `initReal`
+    // reintenta el INTENTO COMPLETO con el bundle wasm de siempre (que tiene
+    // sus propias dos redes ya probadas). Una recarga aquí castigaría al
+    // usuario por un fallo de GPU con un reload de toda la app.
+    if (ep === "webgpu") throw errorConHilos;
+    if (hilosPedidos <= 1) throw errorConHilos; // ya era mono-hilo — fallo real, propagar
+    logger.info(
+      "[e14-rapidocr] init threaded falló — reintento ÚNICO mono-hilo SIN proxy (fallback COI)",
+    );
+    // Sin proxy: el worker proxy de ORT (spawn bajo demanda) es el que falla
+    // cuando el entorno no soporta workers anidados con SAB (headless con
+    // COI). Sesiones en el HILO PRINCIPAL con wasm mono-hilo — la
+    // instanciación cruda del wasm bajo COI verificada OK.
+    // Inferencia bloquea el main (peor que threaded) pero SOLO como red de
+    // seguridad: en navegadores reales el camino threaded+proxy nunca entra aquí.
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.proxy = false;
+    try {
+      return await crearSesiones(ort, opts, modelo);
+    } catch (errorMono) {
+      // ÚLTIMA red (auto-reparación): este entorno NO soporta el runtime wasm
+      // bajo aislamiento COI (medido en sandbox headless: el backend de ORT
+      // rehúsa arrancar con COI aunque el wasm crudo instancia OK). Apagar el
+      // SW de aislamiento + recargar → la próxima carga es el camino
+      // mono-hilo de SIEMPRE (byte-idéntico al árbol sin COI — probado con
+      // lote demo 6/6 ENVIADA AUTO). El dueño puede reactivarlo limpiando
+      // localStorage.e14-coi-sw. Jamás tumba la cola: el throw sube al
+      // mecanismo de reintentos de rapidOcrInit como cualquier fallo.
+      try {
+        localStorage.setItem("e14-coi-sw", "off");
+        const regs = await navigator.serviceWorker?.getRegistrations?.();
+        if (regs) await Promise.all(regs.map((r) => r.unregister()));
+        sessionStorage.removeItem("coi-sw-recarga");
+      } catch {
+        /* storage bloqueado — solo recargar */
+      }
+      logger.info(
+        "[e14-rapidocr] wasm no inicializa bajo COI — SW de aislamiento APAGADO (e14-coi-sw=off) y recarga",
+      );
+      location.reload();
+      throw errorMono;
+    }
+  }
+}
+
+// ─── Utilidades de imagen ───────────────────────────────────────────────────
+
+// SPRINT-A (perf/decode-once-v1) A2: el loadImage privado (decode <img> sin
+// memo — usos en reconocerRapidOcr y rapidOcrCropsOrientacion) se SUSTITUYE
+// por loadImageMemo del repo: el probe de orientación y la pasada-1 del
+// escalonado consumen la MISMA dataUrl → decode UNA vez (el det ya hacía HIT
+// por D62 — ahora también el decode). Verificado contra la eviction tope 2:
+// entre probe → pasada-1 → pasada-2 del escalonado solo viven fotoOriginal y
+// fotoProcesada en la memo → la imagen del acta en vuelo NO se desaloja
+// (máx 2 entradas en la ruta del OCR); el re-OCR de la banda corre DESPUÉS
+// de la elección, sin dependencia con la entrada viva.
+import { canvasCon, loadImageMemo } from "../image-utils";
+import { logger } from "../../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
+// KIT tesseract-spa-best-v1 (fase 5b) — Tesseract REAL del benchmark como
+// motor ELEGIBLE (solo por override manual del dueño; el modo automático
+// jamás lo elige). La red de seguridad v4 sigue viva en todo momento.
+import { tesseractInit, tesseractReconocer, tesseractReiniciar } from "./tesseract-ocr";
+// R7c (M8) — postproceso DB como módulo PURO (sin estado de módulo): el tipo
+// de las ops de preDet y la función del postproceso completo (pasos 1-4).
+import { dbPostprocess, type OpsDet } from "./db-postprocess";
+
+// KIT perf/will-read-v1 (P1-5 del REPORTE-perfil-medio-rendimiento-v1) — el
+// canvas de canvasDe SIEMPRE se lee después (preDet → ctxDe().getImageData de
+// 1920² ≈ 17 MB/readback). getContext solo honra el PRIMER pedido: pedirlo
+// aquí con willReadFrequently hace el canvas software-backed (el hint
+// posterior de ctxDe era un NO-OP — mismo contexto sin hint). Menos coste de
+// GPU→CPU en Intel HD 520 (raster medido 19.3 ms = 2× la ref).
+function canvasDe(img: HTMLImageElement | HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
+  const c = canvasCon(w, h); // SPRINT-A A3 — factory
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h);
+  return c;
+}
+
+const round32 = (v: number) => Math.max(32, Math.round(v / 32) * 32);
+
+function ctxDe(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("canvas 2d no disponible");
+  return ctx;
+}
+
+// ─── KIT e14-ocr-escalonado-v1 (§2.1): cap del det-preprocess (op4) ──────────
+// La sesión det NO cambia (mismos pesos — el cap es del preprocess op4, NO del
+// modelo ni de una sesión nueva): DET_CAP_PROD=1920 es el comportamiento de
+// HOY byte a byte (config det_limit_side_len=1920, det_limit_type='max');
+// DET_CAP_RAPIDO=1280 es la 1.ª pasada del OCR escalonado (banco B3 GO:
+// det −56%, 120/120 votos, 0 cajas perdidas — tools/bench-det1280, PR #34).
+// op1 (reduce_max_side 1920) queda INTACTO: es el preprocess fijo del paquete,
+// det_limit_side_len es el parámetro que op4 implementa.
+export const DET_CAP_PROD = 1920;
+export const DET_CAP_RAPIDO = 1280;
+
+// ─── KIT e14-rec-wmax480-v1 (bench v8.5): cap del ancho del tensor rec ──────
+// El run() WASM del rec escala con n×wmax (floats del tensor [b,3,48,wmax]),
+// NO con los píxeles del crop — medido ~0.56 ms/unidad constante en Q2–Q4
+// (bench v8.5, 70 lotes). El techo 480 da: rec full media 10,733→8,729 ms
+// (−19%), RapidOCR full 12,150→10,093 ms (−17%), peor caso 16.0→11.8 s
+// (−26%), outliers 51.2s/41.2s/34.6s MUERTOS (max 1,760 ms) y calidad
+// 7/7 gt ×4/4 intacta — tensorDeCanvases hace squish horizontal (rw=
+// min(natural, targetW) con pad de ceros), NO truncado: líneas naturales
+// hasta 864 sobrevivieron sin pérdida. Aplicado en AMBOS rec (producción y
+// probe §2.1) para mantener el pre/post idéntico. Kill switch: REC_WMAX =
+// Infinity = comportamiento anterior byte a byte.
+export const REC_WMAX = 480;
+
+// ─── Pre-det (main.py fidelidad: reduce_max → increase_min → letterbox →
+//     det-preprocess round32) + registro de ops para mapear de vuelta ───────
+
+// R7c (M8): el TIPO de las ops y TODO el postproceso DB (binarizar → dilate
+// → CCL → hull/rect/score/unclip → esquinas → mapeo a la fuente) viven AHORA
+// en ./db-postprocess (módulo PURO, sin estado de módulo — tests de
+// caracterización commiteados ANTES de este cableado, patrón R7a).
+// `preDet` conserva su firma byte a byte (produce el registro OpsDet).
+
+// KIT e14-ocr-escalonado-v1 (§2.1): cap PARAMETRIZABLE — default DET_CAP_PROD
+// (byte a byte el flujo de hoy); el OCR escalonado pasa DET_CAP_RAPIDO en la
+// 1.ª pasada.
+function preDet(
+  src: HTMLImageElement,
+  cap: number = DET_CAP_PROD,
+): { canvas: HTMLCanvasElement; ops: OpsDet } {
+  let w = src.naturalWidth || src.width;
+  let h = src.naturalHeight || src.height;
+  let ratioW = 1;
+  let ratioH = 1;
+
+  // op1 — reduce_max_side(img, 1920): int(h*ratio) luego round32 cada lado
+  if (Math.max(h, w) > 1920) {
+    const ratio = 1920 / Math.max(h, w);
+    const nh = round32(Math.floor(h * ratio));
+    const nw = round32(Math.floor(w * ratio));
+    ratioW *= nw / w;
+    ratioH *= nh / h;
+    w = nw;
+    h = nh;
+  }
+
+  // op2 — increase_min_side(img, 30): idem con el lado menor
+  if (Math.min(h, w) < 30) {
+    const ratio = 30 / Math.min(h, w);
+    const nh = round32(Math.floor(h * ratio));
+    const nw = round32(Math.floor(w * ratio));
+    ratioW *= nw / w;
+    ratioH *= nh / h;
+    w = nw;
+    h = nh;
+  }
+
+  const imgEsc = canvasDe(src, w, h);
+
+  // op3 — maybe_add_letterbox: h ≤ 30 o w/h > 8 → pads arriba/abajo negros.
+  //   padding_h = int(abs(max(int(w/8), 30) * 2 − h) / 2)   [main.py L161-164]
+  let padTop = 0;
+  let canvasPadded = imgEsc;
+  const widthHeightRatio = 8;
+  const minHeight = 30;
+  if (h <= minHeight || w / h > widthHeightRatio) {
+    const newH = Math.max(Math.floor(w / widthHeightRatio), minHeight) * 2;
+    padTop = Math.floor(Math.abs(newH - h) / 2);
+    const padded = canvasCon(w, h + padTop * 2); // SPRINT-A A3 — factory
+    const pctx = ctxDe(padded);
+    pctx.fillStyle = "#000000";
+    pctx.fillRect(0, 0, padded.width, padded.height);
+    pctx.drawImage(imgEsc, 0, padTop);
+    canvasPadded = padded;
+    h = padded.height;
+  }
+
+  // op4 — det-preprocess (limit <cap> max + round32 SIEMPRE, mínimo 32) —
+  //   cap=DET_CAP_PROD (1920) = producción de hoy byte a byte; 1280 = 1.ª
+  //   pasada del escalonado (banco B3: −56% det, 0 votos perdidos).
+  const ratioDet = Math.max(h, w) > cap ? cap / Math.max(h, w) : 1;
+  const dh = round32(Math.floor(h * ratioDet));
+  const dw = round32(Math.floor(w * ratioDet));
+  const detIn = canvasDe(canvasPadded, dw, dh);
+
+  return {
+    canvas: detIn,
+    ops: { w: dw, h: dh, ratioW, ratioH, padTop, ratioWDet: dw / w, ratioHDet: dh / h },
+  };
+}
+
+// R7c (M8): mapearAFuente + las constantes DB_* y MIN_* (TEXT_SCORE se queda:
+// es del filtro del rec) + Rect/convexHull/minAreaRect/boxScoreFast/
+// esquinasRect/ordenarCajas viven en ./db-postprocess (módulo PURO). La
+// transcripción es verbatim y sus tests de caracterización ya corrían verdes
+// contra ella (commit test(r7c) anterior a este cableado).
+// Umbral del filtro del rec (conf mínima para aceptar una línea) — quedaba en
+// el bloque de constantes del post-det y NO viaja con él: es del rec, no del det.
+const TEXT_SCORE = 0.5;
+// ─── Crops, cls, rec ────────────────────────────────────────────────────────
+
+function cropLinea(
+  src: HTMLImageElement,
+  box: { x: number; y: number }[],
+): { canvas: HTMLCanvasElement; ratio: number } {
+  const d = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);
+  const [p0, p1, p2, p3] = box;
+  const cropW = Math.max(1, Math.round(Math.max(d(p0, p1), d(p2, p3))));
+  const cropH = Math.max(1, Math.round(Math.max(d(p0, p3), d(p1, p2))));
+  const theta = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const canvas = canvasCon(cropW, cropH); // SPRINT-A A3 — factory
+  const ctx = ctxDe(canvas);
+  // get_rotate_crop_image equivalente: la matriz del contexto transforma
+  // coords de la FUENTE → coords del CANVAS (inversa de [R|p0]): rotación
+  // −θ y traslación −R·p0 — así la caja queda pegada al origen del canvas
+  // y la imagen se dibuja 1:1 (la ventana cropW×cropH recorta el rect).
+  // (v1 tenía el transform al revés: el dibujo caía fuera del canvas →
+  // crops transparentes y rec vacío — bug v1.)
+  const e = -cos * p0.x - sin * p0.y;
+  const f = sin * p0.x - cos * p0.y;
+  ctx.setTransform(cos, -sin, sin, cos, e, f);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(src, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  return { canvas, ratio: cropW / cropH };
+}
+
+function tensorDeCanvases(
+  ort: OrtModule,
+  canvases: HTMLCanvasElement[],
+  targetW: number,
+): OrtValue {
+  const b = canvases.length;
+  const data = new Float32Array(b * 3 * 48 * targetW);
+  for (let i = 0; i < b; i++) {
+    const c = canvases[i];
+    const ctx = ctxDe(c);
+    const { width: cw, height: ch } = c;
+    const img = ctx.getImageData(0, 0, cw, ch);
+    // resize PaddleOCR: h=48 fijo, ancho objetivo min(ceil(48·ratio), targetW)
+    // (pad de ceros a la derecha — el buffer ya nace en 0).
+    const rw = Math.min(Math.max(1, Math.ceil((48 * cw) / ch)), targetW);
+    for (let y = 0; y < 48; y++) {
+      const sy = Math.min(ch - 1, Math.floor((y * ch) / 48));
+      for (let x = 0; x < rw; x++) {
+        const sx = Math.min(cw - 1, Math.floor((x * cw) / rw));
+        const idx = (sy * cw + sx) * 4;
+        const o = i * 3 * 48 * targetW + y * targetW + x;
+        data[o] = (img.data[idx + 2] / 255 - 0.5) / 0.5; // B
+        data[o + 48 * targetW] = (img.data[idx + 1] / 255 - 0.5) / 0.5; // G
+        data[o + 2 * 48 * targetW] = (img.data[idx] / 255 - 0.5) / 0.5; // R
+      }
+    }
+  }
+  return new ort.Tensor("float32", data, [b, 3, 48, targetW]);
+}
+
+function softmax2(a: number, b: number): [number, number] {
+  const m = Math.max(a, b);
+  const ea = Math.exp(a - m);
+  const eb = Math.exp(b - m);
+  return [ea / (ea + eb), eb / (ea + eb)];
+}
+
+/** CTC decode: argmax por t; colapsar repetidos; ignorar blank (0);
+ *  1..6622 → dict[idx-1]; 6623 → " "; conf = media de las probs softmax de
+ *  los tokens seleccionados (CTCLabelDecode del paquete). */
+function ctcDecode(
+  tensor: OrtValue,
+  dict: string[],
+): { texto: string; conf: number } {
+  const dims = tensor.dims;
+  const T = dims[1];
+  const C = dims[2];
+  const data = tensor.data as Float32Array;
+  let texto = "";
+  let sumaConf = 0;
+  let cuenta = 0;
+  let ultimo = -1;
+  for (let t = 0; t < T; t++) {
+    const base = t * C;
+    let mejor = 0;
+    let mejorV = -Infinity;
+    for (let c = 0; c < C; c++) {
+      const v = data[base + c];
+      if (v > mejorV) {
+        mejorV = v;
+        mejor = c;
+      }
+    }
+    if (mejor !== 0 && mejor !== ultimo) {
+      // conf = prob del token: el ONNX del rec ya sale con softmax (igual que
+      // el paquete: preds.max(axis=2) sin re-normalizar — el doble softmax
+      // con shift aplastaba la conf a ~0 y descartaba TODAS las líneas).
+      const prob = mejorV;
+      if (mejor <= dict.length) texto += dict[mejor - 1];
+      else texto += " ";
+      sumaConf += prob;
+      cuenta++;
+    }
+    ultimo = mejor;
+  }
+  return { texto, conf: cuenta === 0 ? 0 : sumaConf / cuenta };
+}
+
+// ─── Inferencia det ─────────────────────────────────────────────────────────
+
+interface DetSalida {
+  boxesFuente: { x: number; y: number }[][];
+  msDet: number;
+  nBoxes: number;
+  /** D62 T2 — SOLO en HIT del memo: ms de det que esta llamada NO pagó
+   *  (los pagó el probe sobre el MISMO bitmap). Ausente = miss/computo. */
+  memoMsAhorrado?: number;
+}
+
+// ─── KIT e14-probe-adaptativo-v1 (D62 T2): memo del det por identidad ────────
+// Cuando el probe NO aplica rotación (aplicado=0), el det a 1280 del probe
+// (rapidOcrCropsOrientacion) y el det a 1280 de la pasada-1 del escalonado
+// (rapidOcrReconocer con detCap=DET_CAP_RAPIDO) corren sobre el MISMO bitmap —
+// el segundo es gratis si se memoiza. Clave = el PROPIO string dataURL de
+// entrada (identidad exacta: rotar ⇒ re-encode ⇒ string distinto ⇒ miss
+// natural, cero ramas especiales) + cap (en producción 1920 la clave jamás
+// matchea la del probe 1280 ⇒ sin cambio de comportamiento). GUARD HONESTO:
+// el memo JAMÁS decide score/gate — devuelve el MISMO resultado que computaría
+// det (determinismo wasm: mismo bitmap + mismo cap ⇒ mismo boxesFuente/msDet;
+// se devuelve la MISMA referencia). Tope 2 entradas: insertar desplaza la más
+// vieja (probe y pasada-1 son consecutivos; nunca coexisten más). El memo es
+// solo de ejecución (no persiste) y no corre en SIM (el probe no corre allí —
+// guard del bridge; si otra vía alimenta el memo, devuelve lo mismo que
+// computaría — inofensivo).
+interface DetMemoEntrada {
+  cap: number;
+  boxesFuente: { x: number; y: number }[][];
+  msDet: number;
+  nBoxes: number;
+}
+
+const DET_MEMO_TOPE = 2;
+const detMemo = new Map<string, DetMemoEntrada>();
+
+function detMemoGuardar(clave: string, entrada: DetMemoEntrada): void {
+  if (detMemo.size >= DET_MEMO_TOPE) {
+    const masVieja = detMemo.keys().next().value; // 1.ª insertada = más vieja
+    if (masVieja !== undefined) detMemo.delete(masVieja);
+  }
+  detMemo.delete(clave); // si la clave ya estaba (otro cap), renueva posición
+  detMemo.set(clave, entrada);
+}
+
+async function inferDet(
+  rt: RapidRuntime,
+  src: HTMLImageElement,
+  cap: number = DET_CAP_PROD,
+  // D62 T2 — identidad del bitmap de origen (dataURL) para el memo; los 2
+  // callers la pasan (reconocer + cropsOrientacion). Ausente = sin memo.
+  claveOrigen?: string,
+): Promise<DetSalida> {
+  // D62 T2 — HIT: el probe ACABA de computar este mismo det (mismo dataURL +
+  // mismo cap, aplicado=0). Devuelve el MISMO resultado que computaría det —
+  // jamás decide score/gate. Los "det run" no se emiten (no corrió aquí).
+  if (claveOrigen != null) {
+    const hit = detMemo.get(claveOrigen);
+    if (hit !== undefined && hit.cap === cap) {
+      return {
+        boxesFuente: hit.boxesFuente,
+        msDet: hit.msDet,
+        nBoxes: hit.nBoxes,
+        memoMsAhorrado: hit.msDet,
+      };
+    }
+  }
+  const t0 = performance.now();
+  const { canvas, ops } = preDet(src, cap);
+  const ctx = ctxDe(canvas);
+  const { width: w, height: h } = canvas;
+  const img = ctx.getImageData(0, 0, w, h);
+  // PaddleOCR trabaja en BGR (cv2) — los ONNX del PP-OCRv4 esperan ese orden.
+  const data = new Float32Array(w * h * 3);
+  for (let i = 0, px = 0; i < img.data.length; i += 4, px++) {
+    data[px] = (img.data[i + 2] / 255 - 0.5) / 0.5; // B
+    data[w * h + px] = (img.data[i + 1] / 255 - 0.5) / 0.5; // G
+    data[2 * w * h + px] = (img.data[i] / 255 - 0.5) / 0.5; // R
+  }
+  const tensor = new rt.ort.Tensor("float32", data, [1, 3, h, w]);
+  logger.info(`[e14-rapidocr] det run [1,3,${h},${w}]...`);
+  const res = await rt.det.run({ [rt.det.inputNames[0]]: tensor });
+  logger.info(`[e14-rapidocr] det run OK (${Math.round(performance.now() - t0)}ms)`);
+  const out = res[rt.det.outputNames[0]];
+  const pred = out.data as Float32Array;
+  const pw = out.dims[3];
+  const ph = out.dims[2];
+  const msDet = Math.round(performance.now() - t0);
+
+  // R7c (M8) — pasos 1-4 del postproceso (binarizar > 0.3 → dilate 2×2 →
+  // CCL 4-conectividad → hull/rect/score/unclip → esquinas → mapeo a la
+  // FUENTE + ordenarCajas) DELEGADOS al módulo PURO ./db-postprocess
+  // (transcripción verbatim de este bloque; tests de caracterización en
+  // ocr/__tests__/db-postprocess.test.ts — nBoxes sigue siendo el nº de
+  // rects candidatos, antes del filtro de mapeo).
+  const { boxesFuente, nBoxes } = dbPostprocess(
+    pred,
+    pw,
+    ph,
+    ops,
+    src.naturalWidth,
+    src.naturalHeight,
+  );
+  const salida: DetSalida = { boxesFuente, msDet, nBoxes };
+  // D62 T2 — MISS: alimenta el memo (tope 2; insertar desplaza la más vieja).
+  if (claveOrigen != null) detMemoGuardar(claveOrigen, { cap, ...salida });
+  return salida;
+}
+
+// ─── Reconocer (secuencia completa) ─────────────────────────────────────────
+
+/**
+ * Secuencia completa det→cls→rec. KIT e14-motor-rapidocr-v1 (PROD-2 §4.3-C4):
+ * `onProgress` OPCIONAL — tras cada lote de rec (6 líneas) reporta i/total
+ * (0→1). Sin callback: comportamiento byte a byte del instrumento (el informe
+ * NO lo pasa — matriz congelada).
+ */
+export async function rapidOcrReconocer(
+  rt: RapidRuntime,
+  dataUrl: string,
+  onProgress?: (p: number) => void,
+  // KIT e14-ocr-escalonado-v1 (§2.1-§2.2): cap det de ESTA llamada —
+  // ausente = DET_CAP_PROD (comportamiento de hoy byte a byte); la 1.ª
+  // pasada del escalonado pasa DET_CAP_RAPIDO. La sesión/cls/rec NO cambian.
+  opts?: { detCap?: number; esperaSink?: EsperaOcrSink },
+): Promise<RapidOcrResultado> {
+  // fase 5 (selector-motor-v1) — contar la inferencia para el reinicio
+  // seguro del panel (reiniciarMotorOcrSiInactivo). Cero costo en la ruta.
+  reconocimientosEnVuelo++;
+  try {
+    // fase 5b — Tesseract spa-best REAL: el rt ONNX se ignora (es la red de
+    // seguridad); el texto sale 100 % de tesseract.js con el MISMO contrato.
+    // null (fallo en vuelo) ⇒ cae a v4 abajo con sello honesto en el informe
+    // — la corrida jamás se tumba.
+    if (motorElegidoActual === "tesseract-spa-best-psm4") {
+      const rTess = await tesseractReconocer(dataUrl, onProgress);
+      if (rTess) return rTess;
+      motorElegidoActual = "tesseract-best-psm4"; // resto de la sesión
+      motorOcrVivo = {
+        motor: "tesseract-spa-best-psm4",
+        modelos: "v4",
+        origen: motorOcrVivo?.origen ?? "override-manual",
+        motivo: `${motorOcrVivo?.motivo ?? "Override Tesseract spa-best."} · fallo de reconocimiento en vuelo — v4 de seguridad (resto de la sesión).`,
+      };
+      logger.info("[ocr-router] Tesseract spa-best falló en vuelo — v4 de seguridad");
+    }
+    return await (colaOcrActiva()
+      ? conTurnoOcr(
+          () => rapidOcrReconocerInterno(rt, dataUrl, onProgress, opts),
+          opts?.esperaSink,
+        )
+      : rapidOcrReconocerInterno(rt, dataUrl, onProgress, opts));
+  } finally {
+    reconocimientosEnVuelo--;
+  }
+}
+
+async function rapidOcrReconocerInterno(
+  rt: RapidRuntime,
+  dataUrl: string,
+  onProgress?: (p: number) => void,
+  opts?: { detCap?: number },
+): Promise<RapidOcrResultado> {
+  const tTotal = performance.now();
+  const src = await loadImageMemo(dataUrl); // SPRINT-A A2 — decode memoizado del repo
+  // D62 T2 — claveOrigen: el memo del det (probe 1280 ↔ pasada-1 1280 sobre el
+  // MISMO bitmap ⇒ HIT; aplicado=1 cambia el string ⇒ miss natural).
+  const { boxesFuente, msDet, memoMsAhorrado } = await inferDet(rt, src, opts?.detCap ?? DET_CAP_PROD, dataUrl);
+
+  if (boxesFuente.length === 0) {
+    return { lineas: [], texto: "", confMedia: 0, msDet, msCls: 0, msRec: 0, nBoxes: 0 };
+  }
+
+  // 5) crops por línea (desde la FUENTE, resolución nativa)
+  const crops = boxesFuente.map((b) => cropLinea(src, b));
+
+  // 6) cls por lote de 6 (rotación 180 si score > 0.9)
+  // KIT ocr-sin-cls-v1 — `ocrCls=false` OMITE el clasificador de 180° por
+  // línea (lote de 6 → `rt.cls.run`). Por qué es una palanca: medido en el lote
+  // navegador (bench `gpu12`, 2026-11-03, WebGPU) el cls cuesta 1,2-1,9 s por
+  // acta y ADEMÁS compila el pipeline WebGPU del modelo cls en la sonda de
+  // arranque (~3 s). La orientación de PÁGINA ya la deciden el quad del worker
+  // + el probe de rotación (0/90/180/270) antes de llegar aquí; lo único que
+  // el cls aporta son líneas individuales volteadas dentro de una página ya
+  // derecha — en un formulario E-14 impreso+escrito a mano, caso nulo. Default
+  // TRUE = comportamiento de hoy byte-idéntico; el override
+  // {"ocrCls":false} es el kill-switch del dueño y la sesión cls se sigue
+  // creando (solo se salta el run).
+  const t1 = performance.now();
+  const rotar: boolean[] = new Array(crops.length).fill(false);
+  if (leerFlags().ocrCls)
+    for (let i = 0; i < crops.length; i += 6) {
+    const lote = crops.slice(i, i + 6).map((c) => c.canvas);
+    const tensors = lote.map((cv) => {
+      // cls: h=48, w=min(192, ceil(48·ratio)) con pad a 192
+      const ratio = cv.width / cv.height;
+      const wObj = Math.min(192, Math.max(1, Math.ceil(48 * ratio)));
+      const tmp = canvasCon(wObj, 48); // SPRINT-A A3 — factory
+      ctxDe(tmp).drawImage(cv, 0, 0, wObj, 48);
+      return tmp;
+    });
+    const tensor = tensorDeCanvases(rt.ort, tensors, 192);
+    const res = await rt.cls.run({ [rt.cls.inputNames[0]]: tensor });
+    const out = res[rt.cls.outputNames[0]];
+    const data = out.data as Float32Array;
+    for (let k = 0; k < lote.length; k++) {
+      const [p0, p180] = out.dims[1] === 2 ? softmax2(data[k * 2], data[k * 2 + 1]) : [1, 0];
+      if (p180 > 0.9 && p180 > p0) rotar[i + k] = true;
+    }
+  }
+  const msCls = Math.round(performance.now() - t1);
+
+  // aplicar rotaciones (re-crop volteado 180°)
+  const cropsFinales = crops.map((c, i) => {
+    if (!rotar[i]) return c.canvas;
+    const cv = c.canvas;
+    const tmp = canvasCon(cv.width, cv.height); // SPRINT-A A3 — factory
+    const ctx = ctxDe(tmp);
+    ctx.translate(cv.width, cv.height);
+    ctx.rotate(Math.PI);
+    ctx.drawImage(cv, 0, 0);
+    return tmp;
+  });
+
+  // 7) rec por lote de 6 (líneas ordenadas por ratio w/h — acelera)
+  const t2 = performance.now();
+  const orden = cropsFinales
+    .map((c, i) => ({ i, ratio: c.width / c.height }))
+    .sort((a, b) => a.ratio - b.ratio);
+  const lineas: RapidOcrLinea[] = new Array(cropsFinales.length);
+  for (let k = 0; k < orden.length; k += 6) {
+    const lote = orden.slice(k, k + 6);
+    const maxRatio = Math.max(320 / 48, ...lote.map((o) => o.ratio));
+    // KIT e14-rec-wmax480-v1 (bench v8.5): cap del ancho del tensor — el lote
+    // entero corre al ancho de su línea más ancha; sin cap, una sola línea
+    // de 864 px hinchaba TODOS los tensores del lote (0.56 ms/unidad WASM).
+    const W = Math.min(REC_WMAX, Math.floor(48 * maxRatio));
+    const canvases = lote.map((o) => cropsFinales[o.i]);
+    const tensor = tensorDeCanvases(rt.ort, canvases, W);
+    const res = await rt.rec.run({ [rt.rec.inputNames[0]]: tensor });
+    const out = res[rt.rec.outputNames[0]];
+    for (let m = 0; m < lote.length; m++) {
+      const dims = out.dims;
+      const sub: OrtValue = {
+        dims: [1, dims[1], dims[2]],
+        data: (out.data as Float32Array).subarray(
+          m * dims[1] * dims[2],
+          (m + 1) * dims[1] * dims[2],
+        ) as Float32Array,
+        type: out.type,
+      };
+      const { texto, conf } = ctcDecode(sub, rt.dict);
+      if (conf >= TEXT_SCORE && texto.trim().length > 0) {
+        lineas[lote[m].i] = { texto: texto.trim(), conf, box: boxesFuente[lote[m].i] };
+      }
+    }
+    // PROD-2 (§4.3-C4): progreso real por lotes de rec — i/total (0→1).
+    onProgress?.(Math.min(1, (k + lote.length) / orden.length));
+  }
+  const msRec = Math.round(performance.now() - t2);
+
+  const aceptadas = lineas.filter((l): l is RapidOcrLinea => !!l);
+  const texto = aceptadas.map((l) => l.texto).join("\n");
+  const confMedia =
+    aceptadas.length === 0 ? 0 : aceptadas.reduce((s, l) => s + l.conf, 0) / aceptadas.length;
+  logger.info(
+    `[e14-rapidocr] celda: det=${msDet}ms cls=${msCls}ms rec=${msRec}ms · ${boxesFuente.length} cajas · ${aceptadas.length} líneas · conf ${(confMedia * 100).toFixed(1)}% · ${Math.round(performance.now() - tTotal)}ms detMemo=${memoMsAhorrado != null ? `hit msAhorrado=${memoMsAhorrado}` : "miss"}`,
+  );
+  return {
+    lineas: aceptadas,
+    texto,
+    confMedia,
+    msDet,
+    msCls,
+    msRec,
+    nBoxes: boxesFuente.length,
+  };
+}
+
+// ─── KIT e14-orientacion-auto-v1 (T-A1): soporte del probe de orientación ───
+
+/**
+ * det + K crops repartidos por el acta para el probe de orientación (§2.1
+ * paso 1): UNA pasada det (el MISMO inferDet de producción — sin sesión
+ * nueva, §2.2) y crops ANTES del cls (el cls puede sesgar el probe en 180°,
+ * kit §2.1). Selección (kit: «p. ej. boxesFuente cada len/8» — el p. ej.
+ * deja la muestra a criterio): las 3 líneas MÁS LARGAS + el resto repartido
+ * cada n/K por orden de centro Y. La LONGITUD importa: las anclas de
+ * ANCLAS_LECTURA (cabecera E-14, fila CONSULADO/PAIS/ZONA/PUESTO/MESA,
+ * código 1D) viven en las líneas largas — verificad en sandbox con dump
+ * visual: el spread puro cayó todo en el cuerpo (VOTOS NULOS / TOTAL...)
+ * y el probe quedó sin anclas en 180° (score 0.99 < 0+1.5 → no aplicaba).
+ * El largo se mide como el lado MAYOR del rect (p0→p1 o p1→p2): en actas
+ * ±90° las líneas son verticales y tl→tr daría el GROSOR, no el largo
+ * (regresión medida en sandbox: score(270) 3.83→1.06 → no aplicaba).
+ */
+export async function rapidOcrCropsOrientacion(
+  rt: RapidRuntime,
+  dataUrl: string,
+  k: number,
+  /** (espera del turno) — ver `EsperaOcrSink`. */
+  esperaSink?: EsperaOcrSink,
+): Promise<{ crops: HTMLCanvasElement[]; w: number; h: number; msDet: number }> {
+  const src = await loadImageMemo(dataUrl); // SPRINT-A A2 — decode memoizado del repo
+  // D56 §3 T2: det del probe a DET_CAP_RAPIDO (banco B3 GO: −56%, 0 cajas
+  // perdidas) — el probe no necesita det de producción, sí caber en presupuesto.
+  // D62 T2 — claveOrigen: este det ALIMENTA el memo (mismo bitmap + cap 1280
+  // ⇒ la pasada-1 del escalonado con aplicado=0 hace HIT y no repite el det).
+  // KIT ocr-cola-global-v1 — el det del probe también pide turno (es un
+  // `session.run` del mismo singleton; ver la cabecera del kit).
+  const { boxesFuente, msDet } = await (colaOcrActiva()
+    ? conTurnoOcr(() => inferDet(rt, src, DET_CAP_RAPIDO, dataUrl), esperaSink)
+    : inferDet(rt, src, DET_CAP_RAPIDO, dataUrl));
+  const n = boxesFuente.length;
+  const crops: HTMLCanvasElement[] = [];
+  if (n > 0) {
+    const kk = Math.min(k, n);
+    const largoDe = (b: { x: number; y: number }[]) =>
+      Math.max(
+        Math.hypot(b[1].x - b[0].x, b[1].y - b[0].y),
+        Math.hypot(b[2].x - b[1].x, b[2].y - b[1].y),
+      );
+    const nAnchas = Math.min(3, kk);
+    const anchas = [...boxesFuente]
+      .sort((a, b) => largoDe(b) - largoDe(a))
+      .slice(0, nAnchas);
+    const enAnchas = new Set(anchas);
+    const resto = [...boxesFuente]
+      .sort(
+        (a, b) => a.reduce((s, p) => s + p.y, 0) - b.reduce((s, p) => s + p.y, 0),
+      )
+      .filter((b) => !enAnchas.has(b));
+    const faltan = kk - anchas.length;
+    const paso = resto.length / Math.max(1, faltan); // ≥ 1 → índices sin repetir
+    const elegidas = [...anchas];
+    for (let i = 0; i < faltan; i++) {
+      elegidas.push(resto[Math.floor(i * paso)]);
+    }
+    for (const b of elegidas) crops.push(cropLinea(src, b).canvas);
+  }
+  return { crops, w: src.naturalWidth, h: src.naturalHeight, msDet };
+}
+
+/**
+ * rec CRUDO de un lote de crops para el probe (§2.1 paso 2): el MISMO pre/post
+ * del rec de producción (orden por ratio → lotes de 6 → tensorDeCanvases →
+ * ctcDecode) SIN cls y SIN filtro TEXT_SCORE — el probe necesita la conf
+ * cruda de TODAS las líneas (un crop mal rotado debe puntuar BAJO, no
+ * desaparecer del cómputo de conf/anclas). Sin sesiones nuevas: recibe el
+ * MISMO runtime singleton del caller (§2.2).
+ */
+export async function rapidOcrRecLote(
+  rt: RapidRuntime,
+  canvases: HTMLCanvasElement[],
+  /** (espera del turno) — ver `EsperaOcrSink`. */
+  esperaSink?: EsperaOcrSink,
+): Promise<{ texto: string; conf: number }[]> {
+  // KIT ocr-cola-global-v1 — UN solo turno por lote (los `rt.rec.run` de las
+  // cuatro rotaciones del probe son los que se solapan con el OCR de la otra
+  // acta en un pool 2).
+  if (colaOcrActiva()) return conTurnoOcr(() => rapidOcrRecLoteInterno(rt, canvases), esperaSink);
+  return rapidOcrRecLoteInterno(rt, canvases);
+}
+
+async function rapidOcrRecLoteInterno(
+  rt: RapidRuntime,
+  canvases: HTMLCanvasElement[],
+): Promise<{ texto: string; conf: number }[]> {
+  const salida: { texto: string; conf: number }[] = new Array(canvases.length);
+  const orden = canvases
+    .map((c, i) => ({ i, ratio: c.width / c.height }))
+    .sort((a, b) => a.ratio - b.ratio);
+  for (let k = 0; k < orden.length; k += 6) {
+    const lote = orden.slice(k, k + 6);
+    const maxRatio = Math.max(320 / 48, ...lote.map((o) => o.ratio));
+    // KIT e14-rec-wmax480-v1: MISMO cap que el rec de producción — el probe
+    // promete «el MISMO pre/post del rec» y su conf cruda debe ser comparable.
+    const W = Math.min(REC_WMAX, Math.floor(48 * maxRatio));
+    const tensor = tensorDeCanvases(rt.ort, lote.map((o) => canvases[o.i]), W);
+    const res = await rt.rec.run({ [rt.rec.inputNames[0]]: tensor });
+    const out = res[rt.rec.outputNames[0]];
+    for (let m = 0; m < lote.length; m++) {
+      const dims = out.dims;
+      const sub: OrtValue = {
+        dims: [1, dims[1], dims[2]],
+        data: (out.data as Float32Array).subarray(
+          m * dims[1] * dims[2],
+          (m + 1) * dims[1] * dims[2],
+        ) as Float32Array,
+        type: out.type,
+      };
+      salida[lote[m].i] = ctcDecode(sub, rt.dict);
+    }
+  }
+  return salida;
+}
+
+// KIT e14-optimizacion-v1 (T4): notaWebgpu BORRADA — residuo del informe
+// (kit fuera-informes retiró a sus consumidores; 0 refs en src/, verificado
+// con rg). WebGPU sigue anotado, no usado (EP wasm fijo, determinismo).
+
+// KIT e14-motor-rapidocr-v1 (PROD-2 §4.1-C5): pre-warm al importar el módulo
+// (el bridge lo importa → arranca ANTES de la primera captura SIN tocar
+// ScanView, intocable). Singleton compartido: producción e informe pagan la
+// carga (~1.1 s) UNA sola vez por sesión. Silencioso: si falla aquí, la
+// primera captura reintenta vía rapidOcrInit (reintentable).
+// KIT perf/idle-init-v1 (P0-2.2 del REPORTE-perfil-medio-rendimiento-v1) — la
+// init ya NO corre en el import (competía con el LCP y descargaba ~46 MB
+// justo al arranque): se difiere a requestIdleCallback (timeout 5 s — el
+// plan recomendado del kit dice «precarga en idle»). Si el operador captura
+// ANTES del idle, la primera captura dispara la misma init (singleton
+// reentrante — mismo contrato de siempre, cero cambio de comportamiento).
+if (typeof window !== "undefined") {
+  const iniciarEnIdle = () => void rapidOcrInit().catch(() => {});
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(iniciarEnIdle, { timeout: 5000 });
+  } else {
+    setTimeout(iniciarEnIdle, 1500);
+  }
+}
