@@ -103,5 +103,8 @@ operación; **P2** mejora deseable.
   exigiría renumerar comentarios; riesgo alto, beneficio bajo.
 - **Faltan D32 y D65–D74** en el registro local: D32 se perdió sin push. Lección:
   hacer push al cerrar cada tarea.
-- **`AGENTS.md` no existe** aunque documentación histórica lo menciona; las
-  reglas para agentes viven hoy en `CONTRIBUTING.md` y `docs/adr/README.md`.
+- **`AGENTS.md` ya existe** (reglas para agentes: stack, reglas del producto,
+  privacidad y paridad con `digielect14`). La documentación histórica lo
+  mencionaba como ausente; las reglas de fondo siguen también en
+  `CONTRIBUTING.md` y `docs/adr/README.md`, así que hay tres entradas y conviene
+  que `AGENTS.md` apunte a ellas en vez de duplicarlas.
