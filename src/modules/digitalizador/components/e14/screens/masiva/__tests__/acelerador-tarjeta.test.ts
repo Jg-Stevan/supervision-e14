@@ -93,7 +93,10 @@ describe("acelerador — tarjeta del sidecar", () => {
 
   test("el href apunta al repo remoto real (no a un placeholder)", () => {
     const git = leer(".git/config");
-    const remoto = /url\s*=\s*https:\/\/github\.com\/([^/]+)\/([^.]+)\.git/.exec(git);
+    // `git remote add` y `actions/checkout` escriben la URL sin `.git`; exigir el
+    // sufijo hacía esta ancla falsa-dependiente de la forma de la URL (y roja en CI).
+    const remoto =
+      /url\s*=\s*https:\/\/github\.com\/([^/\s]+)\/([^\s/]+?)(?:\.git)?\s*$/m.exec(git);
     expect(remoto).not.toBeNull();
     expect(URL_DESCARGA_SIDECAR).toContain(`github.com/${remoto![1]}/${remoto![2]}`);
   });
