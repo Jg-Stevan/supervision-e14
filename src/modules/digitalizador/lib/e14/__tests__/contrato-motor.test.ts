@@ -88,11 +88,14 @@ describe("contrato de motor · base DIVIPOL", () => {
 });
 
 describe("contrato de motor · clasificación (misma entrada ⇒ mismo resultado que el móvil)", () => {
+  // Cada descriptor se auto-mide con performance.now() y cuesta 392-602 ms solo;
+  // con el default de 5 s un pico de carga de la máquina lo hacía TIMED OUT sin
+  // que el contrato cambiara (rojo falso — medido en el hermano, 2026-11-04).
   for (const d of GOLDEN.descriptores) {
     it(`${d.id} — ${d.nota}`, () => {
       expect(clasificarCabecera(d.ocr, BASE)).toEqual(d.esperado);
       expect(derivadosDe(d)).toEqual(d.derivados);
-    });
+    }, 30_000);
   }
 });
 
