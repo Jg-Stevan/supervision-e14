@@ -16,7 +16,7 @@
  * contenido (el dhash). Conservador: cualquier fallo (decode, hash) →
  * null → la fila NUNCA se marca (procesa normal — jamás inventar).
  */
-import { fileToCaptureDataUrl } from "@jg-stevan/scanner-core/image-processor";
+import { fileToCaptureDataUrl } from "@/modules/digitalizador/lib/e14/core/image-processor";
 import { canvasCon } from "../image-utils"; // SPRINT-A A3 — factory de canvas
 
 /** D65 (T2.2) — umbral del kit, documentado: DEDUP_HAMMING_MAX = 6 (de 64

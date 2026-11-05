@@ -63,7 +63,7 @@
  * sin worker nuevo — corre en el main thread igual que la capa 0 QR).
  */
 
-import type { Quad } from "@jg-stevan/scanner-core/types";
+import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
 import type { Binarizer } from "zxing-wasm/reader";
 import { canvasCon, loadImageMemo } from "./image-utils";
 import { logger } from "../logger";

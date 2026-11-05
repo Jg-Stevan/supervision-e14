@@ -39,7 +39,7 @@
 import { maestroDeImagen, type MaestroImagen } from "./archivos";
 import { logger } from "../../logger";
 import { leerRegistro } from "./cola";
-import { warmUpScannerWorker } from "@jg-stevan/scanner-core/detector-client";
+import { warmUpScannerWorker } from "@/modules/digitalizador/lib/e14/core/detector-client";
 import { storeMasiva } from "./store-api";
 // KIT e14-gama-adaptativa-v1 (D74): el TOPE EFECTIVO del precalor lo da el
 // plan de gama (BAJO 1 · MEDIO 2 · base 3).

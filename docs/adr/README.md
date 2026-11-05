@@ -158,3 +158,4 @@ firmado y SmartScreen lo advierte.
 - **Benchmarks de 5 s:** la banda se rompe con cualquier carga de la máquina; no son gates.
 - **Colisión de IDs:** los comentarios del motor citan D44/D57/D61/D63–D66/D74 del repo origen, con otro significado aquí.
 - **README histórico:** describía solo GitHub Pages y decía «solo useState/useMemo»; no confíes en documentación vieja sin contrastar el código.
+| D83 | Motor vendorizado en el repo | VIGENTE | `@jg-stevan/scanner-core` (npm) se copió a `src/modules/digitalizador/lib/e14/core/` (6 módulos) y a `src/lib/e14/core/` del hermano (13), desde `web-scanner@feba267` = 0.4.1. La paridad ya no la da la versión de npm sino `core/CONTRATO.json` + `core/__tests__/contrato-core.test.ts` (corre en CI) y `scripts/qa-core-vendorizado.ts`. Editar el motor = misma edición en los dos repos, `--generar` en los dos. |

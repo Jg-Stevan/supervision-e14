@@ -34,7 +34,7 @@ function encodeJpegDataUrl(canvas: HTMLCanvasElement): Promise<string> {
   });
 }
 
-import { loadImage } from "@jg-stevan/scanner-core/image-processor";
+import { loadImage } from "@/modules/digitalizador/lib/e14/core/image-processor";
 
 /** KIT e14-optimizacion-v1 (T1): memo de decodificación tope 2 — la
  *  MISMA dataURL del acta en vuelo se decodifica UNA vez aunque 4-5 etapas

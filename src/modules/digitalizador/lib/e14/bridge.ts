@@ -24,14 +24,14 @@ import type {
   // mismo precedente R7b M10).
   DecodificadorQrCam,
 } from "./types";
-import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
+import type { PageFilter, Quad } from "@/modules/digitalizador/lib/e14/core/types";
 // KIT e14-ocr-nativo-v1 (FASE 2): el TIPO del acta-completa del sidecar (solo
 // tipo — el cliente y su fetch viven en ocr/nativo.ts, importados por quien
 // consume la promesa).
 import type { ActaNativa } from "./ocr/nativo";
 // KIT e14-esquinas-suaves-v1 (Q2): origen del quad en el contrato del
 // recorte (ver comentario del contrato — el flag manual viaja con él).
-import type { OrigenQuad } from "@jg-stevan/scanner-core/image-processor";
+import type { OrigenQuad } from "@/modules/digitalizador/lib/e14/core/image-processor";
 // D63-A/D63-C — KIT e63a-origen-escaneo-v1: el origen del archivo (detector
 // heurístico del runner MASIVA) viaja en opciones SOLO para MASIVA — SIM y
 // el flujo individual JAMÁS lo traen (el gate de escaneos no les aplica).

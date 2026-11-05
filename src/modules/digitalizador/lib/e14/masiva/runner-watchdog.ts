@@ -10,7 +10,7 @@
  * (WATCHDOG_MS/INTENTOS/GRACIA/RELECTURA_TOPE — qa-watchdog-relectura y
  * qa-qr-identidad las grepean en runner.ts) permanecen en runner.ts.
  */
-import { getScannerWorker, warmUpScannerWorker } from "@jg-stevan/scanner-core/detector-client";
+import { getScannerWorker, warmUpScannerWorker } from "@/modules/digitalizador/lib/e14/core/detector-client";
 // D65 (T1): soltar el runtime OCR al matar los workers del intento vencido.
 // KIT e14-gama-adaptativa-v1 (D74): re-warm del OCR tras el kill — sin él,
 // el reintento pagaba sesión+calor completos (~27 s fríos medidos).

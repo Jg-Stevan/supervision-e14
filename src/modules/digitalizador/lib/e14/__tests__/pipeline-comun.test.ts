@@ -30,7 +30,7 @@ import type { PageQualityV2 } from "../calidad";
 import type { SalidaDesenlace } from "../gate";
 import type { ResultadoCompletitud } from "../completitud";
 import type { EsquinasActa } from "../integridad";
-import type { Quad } from "@jg-stevan/scanner-core/types";
+import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 

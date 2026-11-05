@@ -24,7 +24,7 @@
  * módulo no escribe logs: SOLO monta el registro (§9.6 — una sola fuente de
  * verdad del payload).
  */
-import type { Quad } from "@jg-stevan/scanner-core/types";
+import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
 import { construirDiagnostico } from "./diagnostico";
 import { contrasteEfectivoDe, type PageQualityV2 } from "./calidad";
 import type { NivelLectura } from "./senal-lectura";

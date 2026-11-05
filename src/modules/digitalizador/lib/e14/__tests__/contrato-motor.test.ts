@@ -1,7 +1,8 @@
 /**
  * CONTRATO DE PARIDAD con `digielect14` (el digitalizador móvil por puesto).
  *
- * Los dos repos comparten el motor de OCR (mismo `@jg-stevan/scanner-core`,
+ * Los dos repos comparten el motor de OCR (el MISMO código, vendorizado en
+ * `core/` de cada repo — ver `core/LEEME.md`,
  * mismo `tesseract.js` con el mismo `spa.traineddata`, mismas ONNX PP-OCRv4 y
  * la misma base DIVIPOL) y comparten el NEGOCIO que decide el resultado de un
  * acta: `clasificador.ts`, `completitud.ts` y `divipol.ts`. Este test corre

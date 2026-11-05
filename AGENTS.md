@@ -18,11 +18,18 @@
 ## Paridad con `digielect14` (el mismo motor, dos productos)
 
 `digielect14` es el digitalizador MÓVIL de un puesto; este repo es el supervisor
-masivo. Comparten el motor de OCR (mismo `@jg-stevan/scanner-core`, mismo
-`tesseract.js` con el mismo `spa.traineddata`, mismas ONNX PP-OCRv4, mismo
-`public/e14/divipol.json`) y el negocio que decide el acta: `clasificador.ts` ·
-`completitud.ts` · `kits.ts` · `divipol.ts` · `senal-lectura.ts` ·
-`marcadores.ts` · `integridad.ts` · `diagnostico.ts`.
+masivo. Comparten el motor de OCR —hoy **vendorizado** en
+`src/modules/digitalizador/lib/e14/core/` (acá 6 módulos) y en
+`src/lib/e14/core/` del hermano (13), byte a byte idénticos donde se solapan—,
+más el mismo `tesseract.js` con el mismo `spa.traineddata`, mismas ONNX PP-OCRv4
+y mismo `public/e14/divipol.json`. También comparten el negocio que decide el
+acta: `clasificador.ts` · `completitud.ts` · `kits.ts` · `divipol.ts` ·
+`senal-lectura.ts` · `marcadores.ts` · `integridad.ts` · `diagnostico.ts`.
+
+- La paridad del motor la fijan `core/CONTRATO.json` (md5 de cada módulo,
+  validado por `core/__tests__/contrato-core.test.ts` dentro de `bun test`) y
+  `bun scripts/qa-core-vendorizado.ts` cuando los dos checkouts están en disco.
+  Editar el motor exige la misma edición en el hermano y `--generar` en los dos.
 
 - El contrato está en `src/modules/digitalizador/lib/e14/__tests__/__fixtures__/contrato-motor.json`
   (21 cabeceras SINTÉTICAS + la salida exacta del motor) y lo valida

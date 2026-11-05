@@ -216,13 +216,13 @@ mock.module("@/modules/digitalizador/lib/e14/get-bridge", () => ({
 }));
 
 // ─── image-processor (core) ─────────────────────────────────────────────────
-mock.module("@jg-stevan/scanner-core/image-processor", () => ({
+mock.module("@/modules/digitalizador/lib/e14/core/image-processor", () => ({
   fileToCaptureDataUrl: async (file: File) =>
     `data:image/jpeg;base64,${Buffer.from(file.name).toString("base64url")}`,
 }));
 
 // ─── detector-client (core — workers OpenCV) ────────────────────────────────
-mock.module("@jg-stevan/scanner-core/detector-client", () => ({
+mock.module("@/modules/digitalizador/lib/e14/core/detector-client", () => ({
   getScannerWorker: () => null,
   warmUpScannerWorker: () => {},
 }));

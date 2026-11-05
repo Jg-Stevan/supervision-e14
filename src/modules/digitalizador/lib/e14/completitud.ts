@@ -43,7 +43,7 @@
  * D6/AC10), copys de rechazo, contingencia C4, chips sim (completa=true
  * forzado — AC7). packages/ y detection-worker.js SIN tocar (D8).
  */
-import type { Quad } from "@jg-stevan/scanner-core/types";
+import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
 // KIT e14-optimizacion-v1 (T1): decode memoizado — loadImage del package pasa
 // por el memo FIFO tope 2 de image-utils (misma firma, mismo decode).
 import { canvasCon, loadImageMemo } from "./image-utils";

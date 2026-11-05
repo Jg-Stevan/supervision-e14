@@ -25,8 +25,8 @@
  * estado de módulo. El log de auditoría se compone con el MISMO orden de
  * tokens (contrato D51: solo AÑADIR al final).
  */
-import { ocrTextIsValid } from "@jg-stevan/scanner-core/ocr";
-import type { Quad } from "@jg-stevan/scanner-core/types";
+import { ocrTextIsValid } from "@/modules/digitalizador/lib/e14/core/ocr";
+import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
 import { ocrBanda } from "./ocr-escalonado-runner";
 import type { EsperaOcrSink } from "./ocr/rapidocr";
 import { faltaSeccionInferior, PATRON_CABECERA, tipoDeBanda, type ClasificacionE14 } from "./clasificador";

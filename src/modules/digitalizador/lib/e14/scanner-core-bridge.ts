@@ -1,5 +1,5 @@
 /**
- * RealCoreBridge — el motor REAL de @jg-stevan/scanner-core (SPEC-fase-logica §5).
+ * RealCoreBridge — el motor REAL del repo (`./core/`, SPEC-fase-logica §5).
  * FASE LÓGICA L2: fuente ARCHIVO completa —
  *   fileToCaptureDataUrl → detectDocumentEdges → processImage →
  *   evaluateQuality → requestOcr → mapeo §4 → Acta.
@@ -69,23 +69,23 @@ import {
   detectDocumentEdgesDetail,
   fileToCaptureDataUrl,
   processImage,
-} from "@jg-stevan/scanner-core/image-processor";
-import type { OrigenQuad } from "@jg-stevan/scanner-core/image-processor";
+} from "@/modules/digitalizador/lib/e14/core/image-processor";
+import type { OrigenQuad } from "@/modules/digitalizador/lib/e14/core/image-processor";
 // KIT e14-masiva-ux-v1 (T1): mecanismo de warm-up del worker OpenCV que ya
 // expone el core (el mismo que ScanView.tsx:757 invoca al montar) — la
 // detección al importar espera al worker en vez de caer al Sobel de una.
 import {
   getScannerWorker,
   warmUpScannerWorker,
-} from "@jg-stevan/scanner-core/detector-client";
-import { ocrTextIsValid } from "@jg-stevan/scanner-core/ocr";
+} from "@/modules/digitalizador/lib/e14/core/detector-client";
+import { ocrTextIsValid } from "@/modules/digitalizador/lib/e14/core/ocr";
 // KIT e14-motor-rapidocr-v1 (PROD-2 §3): motor de OCR de producción — módulo
 // compartido con el informe (singleton de sesión ÚNICO, pitfall §9.6). El
 // requestOcr del core SOLO vive en motores.ts (celda «actual» de la matriz —
 // instrumento congelado, pitfall §9.2).
-import { defaultQuad } from "@jg-stevan/scanner-core/types";
+import { defaultQuad } from "@/modules/digitalizador/lib/e14/core/types";
 // (R7b M5b: PageQuality viaja con construirActa — acta-factory.ts.)
-import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
+import type { PageFilter, Quad } from "@/modules/digitalizador/lib/e14/core/types";
 // (R7b M5b: ACTA_MOCK viaja con construirActa — acta-factory.ts.)
 import { cargarDivipol } from "./divipol";
 import {

@@ -110,7 +110,7 @@ import { conTope } from "./tope";
 // pre-OCR — punto ÚNICO del kit, ANTES de despachar OCR). El capture sale
 // de la vía del pipeline (fileToCaptureDataUrl — la MISMA que midió el
 // banco #72; jsQR 1.4.0 vendido byte-idéntico en vendor/jsQR.js).
-import { fileToCaptureDataUrl } from "@jg-stevan/scanner-core/image-processor";
+import { fileToCaptureDataUrl } from "@/modules/digitalizador/lib/e14/core/image-processor";
 import {
   decodificarQrDeCapture,
   decodificarQrPrevioDeCapture,

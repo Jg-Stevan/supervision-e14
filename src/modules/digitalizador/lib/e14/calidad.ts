@@ -17,8 +17,8 @@
  *   · calidadDeActa — evaluateQuality sobre el RECORTE del acta (§S.0)
  *   · esquinasDeActa — marcas fiduciales de esquina (kit identificacion §F)
  */
-import { evaluateQuality } from "@jg-stevan/scanner-core/image-processor";
-import type { PageQuality, Quad } from "@jg-stevan/scanner-core/types";
+import { evaluateQuality } from "@/modules/digitalizador/lib/e14/core/image-processor";
+import type { PageQuality, Quad } from "@/modules/digitalizador/lib/e14/core/types";
 import { loadImageMemo, canvasCon } from "./image-utils";
 import { marcasEsquina, type EsquinasActa } from "./integridad";
 import { TECHO_SIN_SENAL } from "./gate";

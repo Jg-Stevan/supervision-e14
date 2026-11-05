@@ -43,9 +43,9 @@ const PDF_ESCALA_MAX = 4;
 // ---------- D66 — KIT e14-decode-unico-precalor-v1 (T1/T2): maestro único ----------
 
 /** D66 (T1-R4) — ESCALA DE TRABAJO ACTUAL, documentada y SIN CAMBIO: es la
- *  `IMPORT_MAX_LONG_SIDE` del F-IMPORT del core (@jg-stevan/scanner-core
- *  0.4.0, image-processor.js L140) — idéntica a `PROCESSED_MAX_LONG_SIDE`
- *  (L35): 4032×3024 ≈ 12.2 MP. Todo el pipeline (fotoOriginal capturada,
+ *  `IMPORT_MAX_LONG_SIDE` del F-IMPORT del core vendorizado
+ *  (`../core/image-processor.ts`) — idéntica a `PROCESSED_MAX_LONG_SIDE`:
+ *  4032×3024 ≈ 12.2 MP. Todo el pipeline (fotoOriginal capturada,
  *  fotoProcesada, REVISIÓN) vive a ESA escala hoy; el master nace a la MISMA
  *  escala para que los píxeles que llegan a detección/OCR sean los de siempre
  *  (mismo cap — solo cambia UNA re-encode intermedia q0.90, gate del dueño

@@ -3,7 +3,7 @@
  * FASE LÓGICA L1: campos async opcionales (§3.1) — el mock y el seed siguen
  * compatibles (todo es opcional).
  */
-import type { PageFilter, Quad } from "@jg-stevan/scanner-core/types";
+import type { PageFilter, Quad } from "@/modules/digitalizador/lib/e14/core/types";
 import type { ClasificacionE14 } from "./clasificador";
 import type { NivelLectura } from "./senal-lectura";
 

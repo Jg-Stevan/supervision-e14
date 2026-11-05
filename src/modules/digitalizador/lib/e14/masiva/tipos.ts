@@ -5,7 +5,7 @@ import type { Acta } from "../types";
 import type { FasesCapa0 } from "./capa0-qr.worker"; // R1.4-b — tipo puro (se borra al compilar)
 // KIT e14-quad-streaming-v1 (P4): forma canónica del quad del core — SOLO
 // tipo (se borra en compile: cero dependencia runtime desde los tipos).
-import type { Quad } from "@jg-stevan/scanner-core/types";
+import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
 
 /** KIT e14-masiva-tiempos-v1 (PR-1): DUPLICADA = gemela por hash perceptual
  *  (dhash Hamming ≤ 6, dedup.ts) — estado SOLO visual: al procesar REUTILIZA
@@ -109,7 +109,7 @@ export interface FilaMasiva {
   prescanOk?: boolean;
   /** (P4) quad del acta detectado por el pre-scan sobre el bitmap de la
    *  clase 400 — MISMA convención del core (4 puntos normalizados 0-1,
-   *  TL,TR,BR,BL — tipo Quad de @jg-stevan/scanner-core; el bitmap es un
+   *  TL,TR,BR,BL — tipo Quad del core (`../core/types.ts`); el bitmap es un
    *  downscale PROPORCIONAL del full, las fracciones viajan sin re-escalar).
    *  El runner lo pasa al bridge como quadPrecomputado (flag masivaQuad ON)
    *  para saltar la re-detección (resuelve la desviación D66 — precalor.ts:
