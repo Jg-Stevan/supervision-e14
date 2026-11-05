@@ -21,6 +21,10 @@
  */
 
 import { canvasCon, decodeImagenLruDeBlob } from "../image-utils"; // SPRINT-A A1/A3 — decode-once LRU + factory de canvas
+import {
+  HEIC_TOPE_MP_DEFECTO,
+  dimensionesHeic,
+} from "../core/image-processor"; // KIT e14-heic-tope-v1 — el mismo olfateo de contenedor que usa el móvil
 // KIT e14-gama-adaptativa-v1 (D74): el lado mayor EFECTIVO del master lo da
 // el plan de gama (BAJO 3072 · resto 4032).
 import { planGamaActual } from "../gama";
@@ -192,6 +196,19 @@ export async function maestroDeImagen(
   //    motor del F-HEIC del core (0.0.4) con import DEFERIDO (D47). Un no-HEIC
   //    que falló el nativo (blob corrupto) NO paga wasm: fallback honesto.
   if (!esHeic) return null;
+  // F-HEIC-TOPE (KIT e14-heic-tope-v1) — el MISMO guardabarros del core, antes
+  // de importar heic2any: un HEIC de 50 MP no termina de decodificar (medido en
+  // el A56 del hermano: 12 MP = 6 913 ms · 50 MP = watchdog). En MASIVA eso vale
+  // una fila secuestrada y un worker perdido, no solo un acta rechazada.
+  // Se leen las dimensiones del contenedor SIN decodificar; si el olfateo no
+  // las consigue se intenta igual — lo desconocido nunca es motivo de rechazo.
+  try {
+    const n = Math.min(entrada.size, 2 * 1024 * 1024);
+    const dims = dimensionesHeic(new Uint8Array(await entrada.slice(0, n).arrayBuffer()));
+    if (dims && (dims.ancho * dims.alto) / 1_000_000 > HEIC_TOPE_MP_DEFECTO) return null;
+  } catch {
+    /* sin cabecera legible → sigue el decode de reserva de siempre */
+  }
   try {
     const { default: heic2any } = await import("heic2any");
     if (cancelado()) return null;

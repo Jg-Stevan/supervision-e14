@@ -217,10 +217,155 @@ function loadHeic2Any(): Promise<Heic2Any> {
   return heic2anyPromise;
 }
 
+/**
+ * F-HEIC-TOPE — dos constantes que el paquete npm no podía tener porque el
+ * ajuste es de este producto, no del motor genérico.
+ *
+ * Medido en un Galaxy A56 real contra `12 MP.heic` y `50 MP.heic` de la cámara:
+ * el decode de libheif sale a RESOLUCIÓN NATIVA (heic2any 0.0.4 no acepta
+ * `width`/`height`; se verificó en su `dist`: las únicas opciones son blob,
+ * toType, quality, gifInterval, multiple) y eso cuesta 6 913 ms en 12 MP contra
+ * 632 ms del JPEG equivalente. Un HEIC de 50 MP no termina nunca: lo mata el
+ * watchdog de 120 s del puente y el acta queda RECHAZADA sin rastro.
+ *
+ * · `HEIC_TOPE_MP_DEFECTO` — arriba de este tamaño el rescate NIQUE se despacha.
+ *   24 MP deja pasar holgado el sensor de 12 MP (4032×3024) y corta el modo
+ *   50 MP de los Xiaomi/Realme que activan HEIF.
+ * · `HEIC_LIMITE_MS_DEFECTO` — techo PROPIO de la conversión. Vale para los
+ *   archivos cuyas dimensiones no se pudieron leer (olfateo devuelve null): es
+ *   mejor cortar a los 45 s con un mensaje honesto que esperar los 120 s del
+ *   puente y no saber qué pasó.
+ */
+export const HEIC_TOPE_MP_DEFECTO = 24;
+export const HEIC_LIMITE_MS_DEFECTO = 45_000;
+
+export type DimensionesImagen = { ancho: number; alto: number };
+
+/** Opciones del rescate F-HEIC (0 = sin tope / sin límite). */
+export type OpcionesRescateHeic = { topeMpHeic?: number; limiteMsHeic?: number };
+
+/** Error del PROPIO motor de captura (tope o límite): llega al operario tal
+ *  cual, no se convierte en el genérico «No se pudo convertir la imagen HEIC». */
+export class ErrorRescateHeic extends Error {}
+
+const megapixeles = (d: DimensionesImagen): number => (d.ancho * d.alto) / 1_000_000;
+
+/**
+ * Dimensiones de un HEIC/HEIF SIN decodificar: camina ISO-BMFF hasta la lista
+ * de propiedades de ítem (`meta` → `iprp` → `ipco`) y devuelve el `ispe` de
+ * MAYOR área. El mayor es la imagen primaria: los ítems auxiliares del contenedor
+ * (thumbnail, previsualización, profundidad) siempre salen más chicos.
+ *
+ * Devuelve `null` ante cualquier duda — caja que no cierra, tamaño fuera de
+ * rango, `ispe` sin leer. Sin dimensiones CIERTAS no se rechaza un acta: en
+ * este dominio lo desconocido se marca, nunca se rellena a mano (D23/D41).
+ */
+export function dimensionesHeic(bytes: Uint8Array): DimensionesImagen | null {
+  let mayor: DimensionesImagen | null = null;
+
+  const leerU32 = (i: number): number =>
+    (bytes[i] * 16777216) + (bytes[i + 1] << 16) + (bytes[i + 2] << 8) + bytes[i + 3];
+
+  /** Camina los hijos de una caja contenedora. `esFullBox` salta los 4 bytes
+   *  de versión+flags que traen `meta` y `ipco` no, pero `meta` sí. */
+  const caminar = (inicio: number, fin: number, profundidad: number, fullBox: boolean): void => {
+    let i = inicio + (fullBox ? 4 : 0);
+    while (i + 8 <= fin) {
+      const tam = leerU32(i);
+      const tipo = String.fromCharCode(bytes[i + 4], bytes[i + 5], bytes[i + 6], bytes[i + 7]);
+      let hijos: number;
+      let siguiente: number;
+      if (tam === 1) {
+        // Header de 16 bytes: size(4) + type(4) + largesize(8). Los hijos van
+        // de i+16 a i+grande.
+        if (i + 16 > fin) return;
+        const grande = leerU32(i + 8) * 4294967296 + leerU32(i + 12);
+        if (grande < 16 || i + grande > fin) return;
+        hijos = i + 16;
+        siguiente = i + grande;
+      } else if (tam >= 8) {
+        hijos = i + 8;
+        siguiente = i + tam;
+      } else if (tam === 0) {
+        hijos = i + 8;
+        siguiente = fin;
+      } else {
+        return; // caja podrida: el resto del recorrido no es fiable
+      }
+      if (siguiente > fin) return;
+
+      if (tipo === "ispe") {
+        // version+flags(4) ancho(4) alto(4)
+        const w = leerU32(hijos + 4);
+        const h = leerU32(hijos + 8);
+        if (w >= 16 && h >= 16 && w <= 20000 && h <= 20000) {
+          if (!mayor || w * h > mayor.ancho * mayor.alto) mayor = { ancho: w, alto: h };
+        }
+      } else if (profundidad < 4 && (tipo === "meta" || tipo === "iprp" || tipo === "ipco")) {
+        caminar(hijos, siguiente, profundidad + 1, tipo === "meta");
+      }
+      i = siguiente;
+    }
+  };
+
+  // La firma `ftyp` debe estar al arranque; si no es ISO-BMFF, no es HEIC.
+  if (bytes.length < 12 || String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) !== "ftyp") {
+    return null;
+  }
+  caminar(0, bytes.length, 0, false);
+  return mayor;
+}
+
+/** Lee solo la cabecera (tope 2 MB): `meta` va temprano en el contenedor. */
+async function dimensionesDesdeBlob(source: Blob): Promise<DimensionesImagen | null> {
+  try {
+    const n = Math.min(source.size, 2 * 1024 * 1024);
+    const buf = await source.slice(0, n).arrayBuffer();
+    return dimensionesHeic(new Uint8Array(buf));
+  } catch {
+    return null;
+  }
+}
+
+/** Rechaza con `ms` de plazo; el worker de heic2any sigue trabajando en lo
+ *  que le compete (no hay API para cancelarlo), pero el acta deja de estar
+ *  colgada y el operario recibe un mensaje. */
+async function conLimite<T>(trabajo: Promise<T>, ms: number, cuandoPasa: string): Promise<T> {
+  let reloj: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      trabajo,
+      new Promise<never>((_, rechazar) => {
+        reloj = setTimeout(() => rechazar(new ErrorRescateHeic(cuandoPasa)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
 /** HEIC/HEIF (o .jpg con contenido HEIC) → JPEG decodificable. */
-async function convertHeicToJpegBlob(source: Blob): Promise<Blob> {
+async function convertHeicToJpegBlob(source: Blob, opciones: OpcionesRescateHeic): Promise<Blob> {
+  const topeMp = opciones.topeMpHeic ?? HEIC_TOPE_MP_DEFECTO;
+  const limiteMs = opciones.limiteMsHeic ?? HEIC_LIMITE_MS_DEFECTO;
+  const dims = await dimensionesDesdeBlob(source);
+
+  if (dims && topeMp > 0 && megapixeles(dims) > topeMp) {
+    throw new ErrorRescateHeic(
+      `La foto HEIC es de ${megapixeles(dims).toFixed(1)} MP (${dims.ancho}×${dims.alto}) y pasa el tope del decodificador (${topeMp} MP): tócala en JPEG o recórtala en la galería antes de escanearla.`,
+    );
+  }
+
   const convert = await loadHeic2Any();
-  const out = await convert({ blob: source, toType: "image/jpeg", quality: 0.92 });
+  const trabajo = convert({ blob: source, toType: "image/jpeg", quality: 0.92 });
+  if (limiteMs <= 0) {
+    const out = await trabajo;
+    return Array.isArray(out) ? out[0] : out;
+  }
+  const mensajeLimite = dims
+    ? `El decodificador HEIC no terminó en ${Math.round(limiteMs / 1000)} s (foto de ${megapixeles(dims).toFixed(1)} MP): tócala en JPEG o recórtala.`
+    : `El decodificador HEIC no terminó en ${Math.round(limiteMs / 1000)} s: tómate la foto en JPEG.`;
+  const out = await conLimite(trabajo, limiteMs, mensajeLimite);
   return Array.isArray(out) ? out[0] : out;
 }
 
@@ -292,8 +437,16 @@ async function nativeDecodeToCappedDataUrl(blob: Blob): Promise<string | null> {
  *     pasar fotos de iPhone por apps de mensajería/nube). libheif rechaza
  *     en milisegundos archivos que no sean HEIF (firma ftyp), así que
  *     intentarlo con un JPEG corrupto no cuesta nada.
+ *     El rescate va TOPADO (F-HEIC-TOPE): antes de despachar se leen las
+ *     dimensiones del contenedor y un HEIC de más de `topeMpHeic` MP se rechaza
+ *     con mensaje; la conversión además tiene su propio `limiteMsHeic`, más
+ *     corto que cualquier watchdog del llamador, para que un decode que no
+ *     termina no se confunda con «la app está pensando».
  */
-export async function fileToCaptureDataUrl(file: File): Promise<string> {
+export async function fileToCaptureDataUrl(
+  file: File,
+  opcionesRescate: OpcionesRescateHeic = {}
+): Promise<string> {
   const looksHeic = /heic|heif/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
 
   // 1) Ruta nativa (rápida; iOS decodifica HEIC aquí mismo).
@@ -303,11 +456,15 @@ export async function fileToCaptureDataUrl(file: File): Promise<string> {
   // 2) Rescate F-HEIC: decodificar con libheif y reintentar sobre el JPEG.
   let heicConversionAttempted = false;
   try {
-    const jpeg = await convertHeicToJpegBlob(file);
+    const jpeg = await convertHeicToJpegBlob(file, opcionesRescate);
     heicConversionAttempted = true;
     const decoded = await nativeDecodeToCappedDataUrl(jpeg);
     if (decoded) return decoded;
-  } catch {
+  } catch (e) {
+    // El tope y el límite del rescate son decisiones NUESTROS y el operario
+    // tiene que leerlas tal cual; lo demás («no era HEIC», archivo podrido)
+    // sigue cayendo al mensaje genérico de abajo.
+    if (e instanceof ErrorRescateHeic) throw e;
     /* no era HEIC o falló la conversión → error abajo */
   }
 

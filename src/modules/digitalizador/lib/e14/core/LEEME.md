@@ -43,6 +43,16 @@ mismo commit → `bun scripts/qa-core-vendorizado.ts --generar` en cada uno →
 `bun run verificar`. Uno exclusivo del modo MASIVA (cola, dedup, hardware) se
 queda solo aquí.
 
+## El tope del rescate HEIC (D84)
+
+`image-processor.ts` trae `dimensionesHeic()` + `HEIC_TOPE_MP_DEFECTO` (24 MP):
+lean la cabecera ISO-BMFF sin decodificar, porque heic2any 0.0.4 no admite
+`width`/`height` y un HEIC grande no termina de convertir. En este repo el tope
+no rechaza el acta — se aplica en `masiva/archivos.ts` (`maestroDeImagen`) antes
+de importar heic2any, y devuelve `null` como cualquier otro master imposible: la
+fila sigue su ruta de siempre. Cambiar el tope o el límite es cambiar el módulo
+compartido en los dos repos (ritual de arriba).
+
 ## Tests del motor
 
 `core/__tests__/` trae los tests propios del motor que aplican a los módulos de
