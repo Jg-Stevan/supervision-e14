@@ -37,6 +37,10 @@ function ok(cond: boolean, etiqueta: string): void {
 const CORE_AQUI = join(RAIZ, "src", "modules", "digitalizador", "lib", "e14", "core");
 const HERMANO = process.env.E14_HERMANO ?? join(RAIZ, "..", "digielect14");
 const CORE_HERMANO = join(HERMANO, "src", "lib", "e14", "core");
+// La capa React vendorizada (ZoomableVisor) solo existe en el móvil: el visor
+// del panel es propio y no importa el paquete. En el hermano este árbol está
+// ausente y el chequeo 6 sale con «omitido» explícito.
+const UI_AQUI = join(RAIZ, "src", "modules", "digitalizador", "lib", "e14", "ui");
 
 // El contrato fija el CONTENIDO del motor, no sus finales de línea: el índice y
 // el CI (Linux) van en LF y `.gitattributes` lo fuerza, pero un editor puede
@@ -108,7 +112,7 @@ ok(rotos === 0, `cierre interno del core (${rotos} imports colgando)${rotos ? `:
 
 const areas = ["src", "scripts"];
 const ESPECIFICADOR_CORE =
-  /\b(?:from|import|require|mock\.module|vi\.mock)\s*\(?\s*["']@jg-stevan\/scanner-core/;
+  /\b(?:from|import|require|mock\.module|vi\.mock)\s*\(?\s*["']@jg-stevan\/scanner-(?:core|ui)/;
 const referencias: string[] = [];
 for (const area of areas) {
   const dir = join(RAIZ, area);
@@ -134,13 +138,18 @@ for (const area of areas) {
 }
 ok(
   referencias.length === 0,
-  `ningún import apunta a "@jg-stevan/scanner-core" (${referencias.length} archivos)${referencias.length ? `: ${referencias.join(", ")}` : ""}`,
+  `ningún import apunta a "@jg-stevan/scanner-core" ni "-ui" (${referencias.length} archivos)${referencias.length ? `: ${referencias.join(", ")}` : ""}`,
 );
 
 const pkg = JSON.parse(readFileSync(join(RAIZ, "package.json"), "utf8"));
+const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
 ok(
-  !("dependencies" in pkg && "@jg-stevan/scanner-core" in (pkg.dependencies ?? {})),
-  'el paquete ya no está en "dependencies" de package.json',
+  !("@jg-stevan/scanner-core" in deps),
+  'el paquete "@jg-stevan/scanner-core" ya no está en package.json',
+);
+ok(
+  !("@jg-stevan/scanner-ui" in deps),
+  'el paquete "@jg-stevan/scanner-ui" ya no está en package.json',
 );
 
 // ---------- 4 · procedencia declarada ----------
@@ -228,5 +237,91 @@ if (generar) {
   }
 }
 
+// ---------- 6 · la capa UI vendorizada (existe solo donde se copia) ----------
+//
+// Mismo mecanismo que el 5, sobre `ui/`: fija que el visor que se editó en el
+// repo sigue siendo el que se documentó. Donde no hay `ui/` (el panel) el
+// chequeo sale «omitido» explícito — el harness es idéntico en los dos repos
+// salvo por las constantes de ruta.
+
+const archivosUI = existsSync(UI_AQUI)
+  ? readdirSync(UI_AQUI)
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .sort()
+  : [];
+const CONTRATO_UI = join(UI_AQUI, "CONTRATO.json");
+
+if (archivosUI.length === 0) {
+  console.log(
+    "OK · omitido — este repo no vendoriza la capa UI (su visor es propio).\n",
+  );
+} else if (generar) {
+  const cuerpo =
+    JSON.stringify(
+      {
+        "//": "md5 de cada archivo de ui/ — ver LEEME.md. Regenerar con `bun scripts/qa-core-vendorizado.ts --generar`.",
+        origen: {
+          repo: "Jg-Stevan/web-scanner",
+          commit: "feba267cb9c01a896f0135ed2e406b7567bec663",
+          version: "0.1.0",
+        },
+        modulos: Object.fromEntries(
+          archivosUI.map((f) => [f, md5(readFileSync(join(UI_AQUI, f)))]),
+        ),
+      },
+      null,
+      2,
+    ) + "\n";
+  writeFileSync(CONTRATO_UI, cuerpo);
+  console.log(`OK · ui/CONTRATO.json generado (${archivosUI.length} archivos)`);
+} else {
+  ok(true, `ui/ vendorizada presente (${archivosUI.length} archivos)`);
+  ok(existsSync(CONTRATO_UI), "ui/CONTRATO.json existe (generar con --generar)");
+  if (existsSync(CONTRATO_UI)) {
+    const c = JSON.parse(readFileSync(CONTRATO_UI, "utf8")) as {
+      modulos: Record<string, string>;
+    };
+    const nombres = Object.keys(c.modulos).sort();
+    ok(
+      nombres.join(" ") === archivosUI.join(" "),
+      `ui/CONTRATO lista los mismos archivos del árbol (${nombres.length} vs ${archivosUI.length})`,
+    );
+    const movidos = nombres.filter(
+      (f) => existsSync(join(UI_AQUI, f)) && md5(readFileSync(join(UI_AQUI, f))) !== c.modulos[f],
+    );
+    ok(
+      movidos.length === 0,
+      `cada archivo de ui/ pesa lo que declara su contrato${movidos.length ? ` — EDITADO SIN REGENERAR: ${movidos.join(" ")}` : ""}`,
+    );
+  }
+  const leemeUI = join(UI_AQUI, "LEEME.md");
+  ok(existsSync(leemeUI), "ui/LEEME.md existe con la procedencia");
+  ok(
+    existsSync(join(UI_AQUI, "LICENSE-scanner-ui.md")),
+    "el texto MIT del origen de la capa UI está conservado",
+  );
+  if (existsSync(leemeUI) && existsSync(join(CORE_AQUI, "LEEME.md"))) {
+    const commitUI =
+      readFileSync(leemeUI, "utf8").match(/`([0-9a-f]{40})`/)?.[1] ?? "";
+    const commitCore =
+      readFileSync(join(CORE_AQUI, "LEEME.md"), "utf8").match(/`([0-9a-f]{40})`/)?.[1] ?? "";
+    ok(
+      commitUI.length === 40 && commitUI === commitCore,
+      `la capa UI y el motor declaran el mismo commit de origen (${commitUI.slice(0, 8) || "sin hash"})`,
+    );
+  }
+  // Tailwind v4 genera las clases del visor desde el build del consumidor: sin
+  // la línea @source el componente se ve DESNUDO y el fallo es silencioso.
+  const css = join(RAIZ, "src", "app", "globals.css");
+  if (existsSync(css)) {
+    const txt = readFileSync(css, "utf8");
+    ok(
+      /@source\s+"[^"]*lib\/e14\/ui"/.test(txt) && !/@source\s+"[^"]*scanner-ui/.test(txt),
+      "globals.css apunta @source al árbol ui/ vendorizado (no al paquete npm)",
+    );
+  }
+}
+
 console.log(`\n${pasadas - fallos}/${pasadas} chequeos · ${fallos} hallazgos`);
 process.exit(fallos ? 1 : 0);
+

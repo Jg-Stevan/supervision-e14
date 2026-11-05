@@ -27,7 +27,7 @@ artefactos:
 - `core/CONTRATO.json` — el md5 de cada módulo de este árbol, validado por
   `src/modules/digitalizador/lib/e14/core/__tests__/contrato-core.test.ts`
   dentro de `bun test` (corre en CI sin necesitar el otro checkout).
-- `bun scripts/qa-core-vendorizado.ts` — 17 chequeos: compara byte a byte contra
+- `bun scripts/qa-core-vendorizado.ts` — sus chequeos: compara byte a byte contra
   el hermano cuando los dos checkouts están en disco, revisa el cierre interno,
   la procedencia, que ningún import vuelva a apuntar al paquete npm y que los
   dos `CONTRATO.json` coincidan donde se solapan.
