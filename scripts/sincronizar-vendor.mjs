@@ -1,89 +1,139 @@
 /**
- * sincronizar-vendor.mjs — materializa `public/vendor/onnxruntime/` desde el
- * paquete `onnxruntime-web` que ya instaló el gestor de dependencias.
+ * sincronizar-vendor.mjs — materializa en `public/` los binarios que ya vienen
+ * dentro de los paquetes npm: runtime de ONNX Runtime, núcleos y worker de
+ * Tesseract, y los wasm de zxing/zbar.
  *
- * PROBLEMA: esos 6 archivos (66 MB) son copia exacta de
- * `node_modules/onnxruntime-web/dist/` y estaban COMMITEADOS. El repo pesaba
- * ~66 MB más por binarios que cualquier clon ya descarga al hacer
- * `bun install`, y además se volvían obsoletos en cuanto subía la versión de
- * ORT (el `.wasm` viejo servido con la librería nueva = fallo en runtime del
- * OCR, no en el build).
+ * PROBLEMA: eran copia exacta de `node_modules/` y estaban COMMITEADOS. El repo
+ * pesaba ~50 MB más por bytes que cualquier clon ya descarga al hacer
+ * `bun install`, y además se volvían obsoletos en cuanto subía la versión del
+ * paquete (el `.wasm` viejo servido con la librería nueva = fallo en runtime
+ * del OCR, no en el build).
  *
  * SOLUCIÓN: el vendor se genera, no se versiona. Este script copia los
  * artefactos que el navegador necesita en build/dev y falla duro si el
  * paquete instalado no coincide con el que declara `package.json`.
  *
+ * NO cubre lo que no está en npm (OpenCV y los modelos OCR): eso lo baja
+ * `preparar-assets.mjs` con URL y SHA-256 fijados.
+ *
  * Uso:  bun scripts/sincronizar-vendor.mjs
- * (corre solo: `predev` y `prebuild` — ver package.json)
+ * (corre solo: `preparar` → `predev`, `prebuild` y el step de CI — ver
+ * package.json y .github/workflows/)
  * Idempotente: bytes iguales ⇒ no reescribe; `next build` vuelve a copiar
  * `public/` a `out/` y por eso el export sigue trayendo el wasm.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), "..");
-const ORIGEN = join(RAIZ, "node_modules", "onnxruntime-web");
-const DESTINO = join(RAIZ, "public", "vendor", "onnxruntime");
+const pkg = JSON.parse(readFileSync(join(RAIZ, "package.json"), "utf-8"));
 
-// Los 3 pares que consume rapidocr.ts vía `ort.env.wasm.wasmPaths`:
-//   · simd-threaded         → EP wasm con hilos (gama baja/media, sin WebGPU)
-//   · …jsep                 → EP WebGPU (gama alta; el `.wasm` es el grande)
-//   · …asyncify             → worker proxy del EP wasm (`ort.env.wasm.proxy`)
-// `jspi` NO va: el export estático no puede depender de SharedArrayBuffer
-// sin COOP/COEP, y GitHub Pages no los sirve.
-const ARCHIVOS = [
-  "ort-wasm-simd-threaded.mjs",
-  "ort-wasm-simd-threaded.wasm",
-  "ort-wasm-simd-threaded.jsep.mjs",
-  "ort-wasm-simd-threaded.jsep.wasm",
-  "ort-wasm-simd-threaded.asyncify.mjs",
-  "ort-wasm-simd-threaded.asyncify.wasm",
+// Cada entrada: paquete npm → archivo dentro del paquete → ruta servida.
+// Los `.wasm` crudos de tesseract.js-core NO se copian: el worker solo importa
+// los `.wasm.js` (wasm embebido en base64) — ver
+// src/modules/digitalizador/lib/e14/ocr/tesseract-ocr.ts.
+const COPIAS = [
+  // Los 3 pares que consume rapidocr.ts vía `ort.env.wasm.wasmPaths`:
+  //   · simd-threaded         → EP wasm con hilos (gama baja/media, sin WebGPU)
+  //   · …jsep                 → EP WebGPU (gama alta; el `.wasm` es el grande)
+  //   · …asyncify             → worker proxy del EP wasm (`ort.env.wasm.proxy`)
+  // `jspi` NO va: el export estático no puede depender de SharedArrayBuffer
+  // sin COOP/COEP, y GitHub Pages no los sirve.
+  ...["simd-threaded", "simd-threaded.jsep", "simd-threaded.asyncify"].flatMap((v) => [
+    {
+      paquete: "onnxruntime-web",
+      origen: `dist/ort-wasm-${v}.mjs`,
+      destino: `public/vendor/onnxruntime/ort-wasm-${v}.mjs`,
+    },
+    {
+      paquete: "onnxruntime-web",
+      origen: `dist/ort-wasm-${v}.wasm`,
+      destino: `public/vendor/onnxruntime/ort-wasm-${v}.wasm`,
+    },
+  ]),
+  { paquete: "tesseract.js", origen: "dist/worker.min.js", destino: "public/vendor/tesseract/worker.min.js" },
+  {
+    paquete: "tesseract.js-core",
+    origen: "tesseract-core-lstm.wasm.js",
+    destino: "public/vendor/tesseract/tesseract-core-lstm.wasm.js",
+  },
+  {
+    paquete: "tesseract.js-core",
+    origen: "tesseract-core-simd-lstm.wasm.js",
+    destino: "public/vendor/tesseract/tesseract-core-simd-lstm.wasm.js",
+  },
+  {
+    paquete: "zxing-wasm",
+    origen: "dist/reader/zxing_reader.wasm",
+    destino: "public/wasm/zxing_reader.wasm",
+  },
+  { paquete: "@undecaf/zbar-wasm", origen: "dist/zbar.wasm", destino: "public/wasm/zbar.wasm" },
 ];
 
-if (!existsSync(ORIGEN)) {
-  console.error("BLOQUEADA: no hay node_modules/onnxruntime-web — corre `bun install` primero.");
-  process.exit(1);
-}
-
-// La versión instalada tiene que ser la declarada: un `.wasm` de otra versión
-// mezclado con la librería JS falla en runtime del OCR, silencioso en el build.
-const esperada = JSON.parse(readFileSync(join(RAIZ, "package.json"), "utf-8")).dependencies[
-  "onnxruntime-web"
+// Rutas que versiones anteriores dejaron en clones viejos y que ya nadie pide
+// (el worker importa los `.wasm.js`, no los `.wasm`).
+const OBSOLETOS = [
+  "public/vendor/tesseract/tesseract-core-lstm.wasm",
+  "public/vendor/tesseract/tesseract-core-simd-lstm.wasm",
 ];
-const instalada = JSON.parse(readFileSync(join(ORIGEN, "package.json"), "utf-8")).version;
-if (esperada !== instalada) {
-  console.error(
-    `BLOQUEADA: onnxruntime-web instalado ${instalada} ≠ declarado ${esperada} en package.json — ` +
-      "hace falta `bun install` con el lockfile del repo.",
-  );
-  process.exit(1);
+
+for (const paquete of new Set(COPIAS.map((c) => c.paquete))) {
+  const dir = join(RAIZ, "node_modules", paquete);
+  if (!existsSync(dir)) {
+    console.error(`BLOQUEADA: no hay node_modules/${paquete} — corre \`bun install\` primero.`);
+    process.exit(1);
+  }
+  // Un pin exacto en package.json es un contrato: si el árbol instalado no lo
+  // cumple, el binario servido no es el que se probó.
+  const declarada = pkg.dependencies?.[paquete] ?? pkg.devDependencies?.[paquete];
+  const instalada = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")).version;
+  if (declarada && /^\d/.test(declarada) && declarada !== instalada) {
+    console.error(
+      `BLOQUEADA: ${paquete} instalado ${instalada} ≠ declarado ${declarada} en package.json — ` +
+        "hace falta `bun install` con el lockfile del repo.",
+    );
+    process.exit(1);
+  }
 }
 
-mkdirSync(DESTINO, { recursive: true });
 let copiados = 0;
 let omitidos = 0;
-for (const nombre of ARCHIVOS) {
-  const src = join(ORIGEN, "dist", nombre);
+for (const { paquete, origen, destino } of COPIAS) {
+  const src = join(RAIZ, "node_modules", paquete, origen);
   if (!existsSync(src)) {
     console.error(
-      `BLOQUEADA: ${nombre} no está en onnxruntime-web/dist — la distribución de ORT cambió; ` +
+      `BLOQUEADA: ${origen} no está en ${paquete} — la distribución del paquete cambió; ` +
         "revisa qué variante necesita ahora el pipeline antes de desplegar.",
     );
     process.exit(1);
   }
-  const dst = join(DESTINO, nombre);
+  const dst = join(RAIZ, destino);
   if (existsSync(dst) && statSync(dst).size === statSync(src).size) {
     omitidos++;
     continue;
   }
+  mkdirSync(dirname(dst), { recursive: true });
   copyFileSync(src, dst);
   copiados++;
 }
 
+let borrados = 0;
+for (const ruta of OBSOLETOS) {
+  const dst = join(RAIZ, ruta);
+  if (existsSync(dst)) {
+    rmSync(dst);
+    borrados++;
+  }
+}
+
+const versiones = [...new Set(COPIAS.map((c) => c.paquete))]
+  .map((n) => `${n}@${JSON.parse(readFileSync(join(RAIZ, "node_modules", n, "package.json"), "utf-8")).version}`)
+  .join(" · ");
 const totalMB = (
-  ARCHIVOS.reduce((acc, n) => acc + statSync(join(DESTINO, n)).size, 0) / 1048576
+  COPIAS.reduce((acc, { destino }) => acc + statSync(join(RAIZ, destino)).size, 0) / 1048576
 ).toFixed(1);
 console.log(
-  `OK vendor/onnxruntime v${instalada} · ${ARCHIVOS.length} archivos · ${totalMB} MB (${copiados} copiados, ${omitidos} ya estaban)`,
+  `OK vendor npm (${versiones}) · ${COPIAS.length} archivos · ${totalMB} MB ` +
+    `(${copiados} copiados, ${omitidos} ya estaban${borrados ? `, ${borrados} obsoletos borrados` : ""})`,
 );

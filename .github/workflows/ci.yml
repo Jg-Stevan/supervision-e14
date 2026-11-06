@@ -42,6 +42,23 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Los modelos OCR y OpenCV no se versionan (scripts/preparar-assets.mjs).
+      # El cache evita bajar ~40 MB por corrida; la clave cuelga del manifiesto,
+      # así que cambiar un hash invalida el cache automáticamente.
+      - name: Cache de assets externos
+        uses: actions/cache@v4
+        with:
+          path: |
+            public/models/rapidocr/*.onnx
+            public/models/tesseract/*.traineddata.gz
+            public/vendor/opencv-4.5.5-core.js
+          key: assets-${{ runner.os }}-${{ hashFiles('scripts/assets.lock.json') }}
+
+      # Los tests de dict-v5 y de contrato leen los binarios del motor: sin
+      # este paso un clon limpio corre la suite contra archivos ausentes.
+      - name: Preparar (worker + vendor + assets)
+        run: bun run preparar
+
       - name: Typecheck
         run: bunx tsc --noEmit
 

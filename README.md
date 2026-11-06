@@ -67,9 +67,12 @@ bun install
 bun run dev          # http://localhost:3000
 ```
 
-`predev` ejecuta `bun run preparar`: genera el worker de QR y materializa
-`public/vendor/onnxruntime/` (68 MB) desde `node_modules`; no se versiona.
-Un clon limpio queda operativo tras `bun install`.
+`predev` ejecuta `bun run preparar`: genera el worker de QR y materializa los
+binarios del motor en `public/` (~115 MB): vendor copiado de `node_modules`
+(ONNX Runtime, Tesseract, zxing, zbar) y assets externos descargados con URL y
+SHA-256 fijados (OpenCV, modelos RapidOCR, `spa.traineddata`). Nada de eso se
+versiona. Un clon limpio queda operativo tras `bun install` + `bun run dev`; si
+vas a correr la suite sin arrancar el dev, ejecuta `bun run preparar` antes.
 
 ### Scripts
 

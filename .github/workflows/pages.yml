@@ -23,6 +23,15 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      # Los modelos/OpenCV se materializan en el `prebuild` (preparar); el cache
+      # evita bajarlos en cada deploy (clave atada a scripts/assets.lock.json).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            public/models/rapidocr/*.onnx
+            public/models/tesseract/*.traineddata.gz
+            public/vendor/opencv-4.5.5-core.js
+          key: assets-${{ runner.os }}-${{ hashFiles('scripts/assets.lock.json') }}
       - run: bunx next typegen
       - run: bun run build
         env:

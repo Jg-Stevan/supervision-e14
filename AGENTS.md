@@ -3,7 +3,8 @@
 ## Stack y comandos (verificados contra package.json)
 - Next.js + TypeScript. Gestor de dependencias: **bun** (`packageManager: bun@1.3.14`). No uses npm ni pnpm.
 - `bun run dev` — servidor en el puerto 3000 (ejecuta `preparar` antes).
-- `bun run verificar` — typecheck + lint + test. **Es la puerta de salida**: nada se declara terminado sin este comando en verde, y se reporta su salida real.
+- `bun run preparar` — materializa lo que no se versiona: worker de QR, vendor copiado de `node_modules` y assets externos verificados por SHA-256 (`scripts/assets.lock.json`). Un clon limpio lo necesita antes de `bun test`.
+- `bun run verificar` — preparar + typecheck + lint + test. **Es la puerta de salida**: nada se declara terminado sin este comando en verde, y se reporta su salida real.
 - Unitario: `bun run typecheck`, `bun run lint`, `bun test`.
 
 ## Reglas del producto
@@ -14,6 +15,7 @@
 - Son datos electorales reales: no commitees actas, capturas ni credenciales, y no envíes actas a endpoints externos.
 - No añadas dependencias, telemetría ni servicios externos sin preguntarlo antes.
 - Nunca `git push --force` ni reescritura de historial.
+- No commitees binarios de `public/` (modelos `.onnx`, `traineddata.gz`, OpenCV, vendor). Van en `.gitignore` y los genera `bun run preparar`; si hace falta un asset nuevo, se declara en `scripts/assets.lock.json` con su SHA-256.
 
 ## Paridad con `digielect14` (el mismo motor, dos productos)
 

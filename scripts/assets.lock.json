@@ -1,0 +1,46 @@
+{
+  "_comentario": "Assets que NO vienen en npm y se descargan al preparar el entorno. Cada entrada fija la URL exacta y el SHA-256 del archivo servido: si el origen devuelve otro contenido, scripts/preparar-assets.mjs detiene el build. Al actualizar un modelo, se sube versión/hash aquí en el mismo commit que cambie el código que lo consume.",
+  "_notas": [
+    "Los PP-OCRv4 salen del commit fijo 1cfba2e9 de SWHL/RapidOCR (rama main es móvil; el commit no cambia).",
+    "Los PP-OCRv5 salen de ModelScope con tag v3.9.2 (no expone commit pinneable): el hash fijado es la garantía.",
+    "spa.traineddata.gz: el archivo que se servía antes era un re-gzip local del mismo modelo (mismo traineddata de 13.570.187 bytes, sha256 e2c1ffda…); acá se baja el .gz publicado de naptha/tessdata en un commit fijo. Cambian los bytes del gzip, no el modelo que lee Tesseract.",
+    "OpenCV es el build oficial de @techstark/opencv-js@4.5.5-release.2, servido por unpkg con la versión fija."
+  ],
+  "archivos": [
+    {
+      "destino": "public/vendor/opencv-4.5.5-core.js",
+      "url": "https://unpkg.com/@techstark/opencv-js@4.5.5-release.2/dist/opencv.js",
+      "sha256": "8c33758c3ed6ead5d6d37837e1a7f2fbf7e21111e7bb9b9c41f3f6d59680e81b"
+    },
+    {
+      "destino": "public/models/tesseract/spa.traineddata.gz",
+      "url": "https://raw.githubusercontent.com/naptha/tessdata/806cd9adc8c6e8abc11c782db1818c990576bebc/4.0.0_best/spa.traineddata.gz",
+      "sha256": "724c20ba45cff66937906a89c74f1a4ef6ac2d10d233f2387fd81c9a8421526a"
+    },
+    {
+      "destino": "public/models/rapidocr/ch_PP-OCRv4_det_infer.onnx",
+      "url": "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx",
+      "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9"
+    },
+    {
+      "destino": "public/models/rapidocr/ch_PP-OCRv4_rec_infer.onnx",
+      "url": "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx",
+      "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b"
+    },
+    {
+      "destino": "public/models/rapidocr/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+      "url": "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv1/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+      "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"
+    },
+    {
+      "destino": "public/models/rapidocr/det_v5_mobile.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx",
+      "sha256": "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae"
+    },
+    {
+      "destino": "public/models/rapidocr/rec_v5_latin.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/latin_PP-OCRv5_rec_mobile.onnx",
+      "sha256": "b20bd37c168a570f583afbc8cd7925603890efbcdc000a59e22c269d160b5f5a"
+    }
+  ]
+}

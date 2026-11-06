@@ -6,13 +6,14 @@
     "dev": "next dev -p 3000",
     "predev": "bun run preparar",
     "prebuild": "bun run preparar",
-    "preparar": "bun scripts/build-capa0-worker.mjs && bun scripts/sincronizar-vendor.mjs",
+    "preparar": "bun scripts/build-capa0-worker.mjs && bun scripts/sincronizar-vendor.mjs && bun scripts/preparar-assets.mjs",
+    "assets": "bun scripts/preparar-assets.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "verificar": "bun run typecheck && bun run lint && bun test"
+    "verificar": "bun run preparar && bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {
     "@undecaf/zbar-wasm": "^0.11.0",

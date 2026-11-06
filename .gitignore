@@ -10,13 +10,20 @@ coverage
 *.tsbuildinfo
 next-env.d.ts
 
-# Generados por `bun run preparar` (scripts/build-capa0-worker.mjs y
-# scripts/sincronizar-vendor.mjs). NO se versionan: el worker emite desde su
-# .ts en cada build y el wasm de onnxruntime-web es copia del paquete que ya
-# baja `bun install`. Los workflows corren `bun run build`, que dispara el
-# hook `prebuild`.
+# Generados por `bun run preparar` (scripts/build-capa0-worker.mjs,
+# scripts/sincronizar-vendor.mjs y scripts/preparar-assets.mjs). NO se
+# versionan: el worker emite desde su .ts en cada build, el vendor es copia de
+# los paquetes que ya baja `bun install` y los modelos/OpenCV se descargan
+# verificados por SHA-256 (scripts/assets.lock.json). Los workflows corren
+# `bun run build` (hook `prebuild`) y un step explícito antes de los tests.
 public/scanner/capa0-qr.worker.js
 public/vendor/onnxruntime/
+public/vendor/tesseract/
+public/vendor/opencv-4.5.5-core.js
+public/wasm/zxing_reader.wasm
+public/wasm/zbar.wasm
+public/models/tesseract/*.traineddata.gz
+public/models/rapidocr/*.onnx
 
 # Sidecar nativo: se versiona el código (native/*.py), no lo que produce
 native/__pycache__/

@@ -7,6 +7,13 @@ public/models/** eol=lf
 public/vendor/** -text
 public/scanner/** eol=lf
 
+# Los binarios de `public/models/` NO llevan normalización de EOL: `eol=lf` los
+# corrompería (cualquier 0x0D 0x0A casual se convierte en 0x0A). Ya no se
+# versionan (scripts/preparar-assets.mjs), pero si alguien los agrega con -f la
+# regla tiene que ser explícita.
+public/models/**/*.onnx binary
+public/models/**/*.traineddata.gz binary
+
 # El sidecar nativo: python y sus requirements se checkean tal cual.
 native/**.py eol=lf
 native/**.txt eol=lf
