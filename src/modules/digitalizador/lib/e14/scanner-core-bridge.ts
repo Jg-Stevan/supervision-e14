@@ -1201,7 +1201,11 @@ export class RealCoreBridge implements E14Bridge {
     // el veto es inalcanzable (guard explícito, chips 8.2/7.0/4.3 intactos).
     // R7c (M6-fin): criterio único vetoCuatroEsquinas — la diferencia del
     // sitio (SIM del escaneo vs recorte siempre real) entra como `aplica`.
-    if (vetoCuatroEsquinas({ esquinas, aplica: !opciones.simular })) {
+    // KIT e14-velocidad-5s-v1: el perdón entra por `pisoPerfecto`/`recortada`
+    // (regla en perdonFaltaFiduciales, compartida con el repo del celular —
+    // evidencia 20261028_084854: 9 anclas, sharpness 100, recortada:false y
+    // RECHAZADA 6.4 por 0/4 fiduciales).
+    if (vetoCuatroEsquinas({ esquinas, aplica: !opciones.simular, pisoPerfecto, recortada })) {
       completa = false;
     }
     // GATE-MARCADORES (KIT e14-gate-v2, FASE G2) — marcador OBLIGATORIO de
@@ -1788,8 +1792,19 @@ export class RealCoreBridge implements E14Bridge {
     // informe con la medición física).
     // R7c (M6-fin): criterio único vetoCuatroEsquinas — el recorte siempre
     // mide real → aplica: true (el escaneo pasa su guard SIM).
+    // KIT e14-velocidad-5s-v1 — las SEÑALES de lectura se SUBEN sobre el veto:
+    // el perdón 4/4 necesita `pisoPerfecto` y `recortada`. `caracterizarLectura`
+    // es PURA y síncrona (misma entrada → misma salida) y `clasificarCabecera`
+    // solo depende de `texto`, ya en vuelo: moverlas no cambia ningún valor y
+    // las awaits del sitio (divipol → marcadores) conservan su orden relativo.
+    const clasificacion = clasificarCabecera(texto, await cargarDivipol());
+    // (faltaSeccion no se desestructura aquí: el recorte no tiene perdón de
+    // marco — solo el escaneo lo consulta vía marcoPerdonadoPorLectura.)
+    const { lazoPerdonado, recortada, ocrLegible, senalActa, senal, pisoPerfecto, scoreBase } =
+      caracterizarLectura({ texto, clasificacion, esquinas, ladoEsquina, calidad });
     const completa =
-      verificacion.completa && !vetoCuatroEsquinas({ esquinas, aplica: true });
+      verificacion.completa &&
+      !vetoCuatroEsquinas({ esquinas, aplica: true, pisoPerfecto, recortada });
     // KIT e14-esquinas-suaves-v1 (Q2): ESCUDO-MANUAL — `!completa` en un recorte
     // MANUAL no rechaza: techo 7.9 (patrón del escudo D10). El operador VIO el
     // papel; a lo sumo su crop cortó un poco de impresión y lo decide mirando.
@@ -1802,29 +1817,15 @@ export class RealCoreBridge implements E14Bridge {
     // §4.4): el recorte re-evalúa TODO el gate, los votos incluidos. Sin
     // excepción: un recorte que deja la zona de votos fuera → SIN_VOTOS
     // (vuelve a captura) — el recorte NUNCA rescata un acta sin votos.
-    // KIT actas-vivas-paginas-v1 (FASE C): clasificación ANTES de
-    // medirZonaVotos (solo depende de texto — ya está en vuelo): el gate de
-    // votos necesita la página (solo P1 tiene zona) y el recorte OCR de
-    // secciones se calcula de paso.
-    const clasificacion = clasificarCabecera(texto, await cargarDivipol());
+    // KIT actas-vivas-paginas-v1 (FASE C): la clasificación y las señales de
+    // lectura se calcularon ARRIBA (KIT e14-velocidad-5s-v1 — el perdón 4/4 las
+    // necesita antes del veto); acá solo se consumen.
     // (KIT consenso-frankfurt-v1 FASE 2: las esquinas se miden ANTES del
     // guard — arriba; aquí solo consume ladoEsquina/trazaEsq.)
-    // KIT actas-vivas-paginas-v1 (FASE C): RECORTADA por OCR de secciones —
-    // mismas señales que el escaneo (helper ÚNICO §4.4). FASE F: OR esquinas.
     // KIT e14-lectura-perdona-lazo-v1 (§4-B): MISMO perdón del escaneo — la
     // LECTURA perdona al lazo (falso positivo margen corto/sombra); la señal
     // de secciones NUNCA se perdona. Mismo criterio en AMBOS pipelines
     // (pitfall §9.9 del kit score-lectura — helper único).
-    // R7c (M6-fin): la COMPOSICIÓN de señales vive UNA vez en pipeline-comun
-    // (caracterizarLectura — pitfall §9.9: era ×2 con las mismas fórmulas).
-    // ADAPTACIÓN DECLARADA: el await de medirZonaVotos quedaba ENTRE las
-    // señales (recortada → ocrLegible); como TODO el bloque extraído es PURO
-    // y síncrono, ahora corre después — mismas salidas, las awaits del sitio
-    // (divipol/marcadores) conservan su orden relativo entre sí.
-    // (faltaSeccion no se desestructura aquí: el recorte no tiene perdón de
-    // marco — solo el escaneo lo consulta vía marcoPerdonadoPorLectura.)
-    const { lazoPerdonado, recortada, ocrLegible, senalActa, senal, pisoPerfecto, scoreBase } =
-      caracterizarLectura({ texto, clasificacion, esquinas, ladoEsquina, calidad });
     // (el score BASE muta después con los caps — `score = desenlace.score`;
     // scoreVisual queda capturado ANTES, misma convención del escaneo.)
     let score = scoreBase;

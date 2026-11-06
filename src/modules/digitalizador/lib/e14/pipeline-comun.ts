@@ -42,6 +42,7 @@ import {
   ESQUINAS_OK,
   cuatroEsquinasFaltan,
   ladoEsquinaFaltante,
+  perdonFaltaFiduciales,
   trazaEsquinas,
   type EsquinasActa,
 } from "./integridad";
@@ -140,10 +141,24 @@ export async function medirEsquinasSitio(o: {
  *  pipelines ya lo consultaban); este helper hace EXPLÍCITA la diferencia
  *  legítima del sitio: `aplica` — escaneo: `!opciones.simular` (en SIM
  *  esquinas=ESQUINAS_OK → el veto es inalcanzable, guard explícito) ·
- *  recorte: `true` (siempre mide real). La LECTURA perdona al marco impreso,
- *  pero NUNCA a la ausencia total de fiduciales (evidencia física manda). */
-export function vetoCuatroEsquinas(o: { esquinas: EsquinasActa | null; aplica: boolean }): boolean {
-  return o.aplica && cuatroEsquinasFaltan(o.esquinas);
+ *  recorte: `true` (siempre mide real).
+ *  KIT e14-velocidad-5s-v1 — `pisoPerfecto` + `recortada` (opcionales, default
+ *  NO perdonar ⇒ el criterio de siempre byte a byte para quien no los pase):
+ *  «0 de 4 marcas» también significa «las marcas no se ven» cuando el resto
+ *  del pipeline demuestra el papel entero con las varas duras. La regla vive
+ *  en `perdonFaltaFiduciales` (integridad.ts — MISMO archivo y MISMO criterio
+ *  en el repo del celular, que no tiene este módulo). */
+export function vetoCuatroEsquinas(o: {
+  esquinas: EsquinasActa | null;
+  aplica: boolean;
+  pisoPerfecto?: boolean;
+  recortada?: boolean;
+}): boolean {
+  return (
+    o.aplica &&
+    cuatroEsquinasFaltan(o.esquinas) &&
+    !perdonFaltaFiduciales(o.pisoPerfecto === true, o.recortada === true)
+  );
 }
 
 // ─── Señales de texto + score base (clasificación → lazo → score §4.1) ──────

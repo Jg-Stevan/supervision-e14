@@ -151,6 +151,26 @@ describe("caracterización · pipeline-comun (gemelos del bridge, M6-fin)", () =
     test("4/4 ausentes + aplica → veto", () => {
       expect(vetoCuatroEsquinas({ esquinas: faltan4, aplica: true })).toBe(true);
     });
+    // KIT e14-velocidad-5s-v1 — el perdón por evidencia física fuerte (la
+    // regla vive en integridad.ts, espejo byte-idéntico del repo del celular).
+    test("perdón: sin pisoPerfecto el veto de siempre NO se relaja", () => {
+      expect(vetoCuatroEsquinas({ esquinas: faltan4, aplica: true, recortada: false })).toBe(true);
+    });
+    test("perdón: pisoPerfecto + recortada:false → no condena", () => {
+      expect(
+        vetoCuatroEsquinas({ esquinas: faltan4, aplica: true, pisoPerfecto: true, recortada: false }),
+      ).toBe(false);
+    });
+    test("perdón: pisoPerfecto pero recortada:true → el veto manda", () => {
+      expect(
+        vetoCuatroEsquinas({ esquinas: faltan4, aplica: true, pisoPerfecto: true, recortada: true }),
+      ).toBe(true);
+    });
+    test("perdón: aplica:false (SIM) gana sobre el veto aunque haya perdón", () => {
+      expect(
+        vetoCuatroEsquinas({ esquinas: faltan4, aplica: false, pisoPerfecto: true, recortada: false }),
+      ).toBe(false);
+    });
     test("4/4 ausentes + !aplica (SIM del escaneo) → sin veto", () => {
       expect(vetoCuatroEsquinas({ esquinas: faltan4, aplica: false })).toBe(false);
     });

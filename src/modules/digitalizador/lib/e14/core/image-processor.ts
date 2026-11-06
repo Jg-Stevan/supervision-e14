@@ -108,8 +108,11 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
  *  SOF (w/h) + EXIF orientation (APP1/IFD0 tag 0x0112; 5-8 → swap).
  *  Devuelve null si no es JPEG o el header es ilegible → fallback.
  *  Contrato: dims de display correctas o null (nunca dims con aspecto
- *  errado — si el EXIF se anuncia pero no se puede leer completo → null). */
-async function jpegDimensionsFromBlob(blob: Blob): Promise<{ w: number; h: number } | null> {
+ *  errado — si el EXIF se anuncia pero no se puede leer completo → null).
+ *  KIT e14-velocidad-5s-v1: exportada — el hook del IMPORTAR la usa como
+ *  ruta corta (decidir si hace falta re-escalar SIN decodificar ni codificar
+ *  base64 en el hilo principal; antes costaba 1,5-2,2 s de congelación). */
+export async function jpegDimensionsFromBlob(blob: Blob): Promise<{ w: number; h: number } | null> {
   try {
     const head = new Uint8Array(await blob.slice(0, 262144).arrayBuffer());
     if (head[0] !== 0xff || head[1] !== 0xd8) return null;
@@ -233,11 +236,16 @@ function loadHeic2Any(): Promise<Heic2Any> {
  *   50 MP de los Xiaomi/Realme que activan HEIF.
  * · `HEIC_LIMITE_MS_DEFECTO` — techo PROPIO de la conversión. Vale para los
  *   archivos cuyas dimensiones no se pudieron leer (olfateo devuelve null): es
- *   mejor cortar a los 45 s con un mensaje honesto que esperar los 120 s del
+ *   mejor cortar a los 15 s con un mensaje honesto que esperar los 120 s del
  *   puente y no saber qué pasó.
+ *
+ * PRE-WARNING (T3): 15 s antes del límite (a los 0 s para 15 s) se emite un
+ * heartbeat `heic:prewarning` con `{ faltanMs: 15000 }` para que la UI avise
+ * al operario ANTES de que falle — el operario puede cancelar y retocar en JPEG.
  */
 export const HEIC_TOPE_MP_DEFECTO = 24;
-export const HEIC_LIMITE_MS_DEFECTO = 45_000;
+export const HEIC_LIMITE_MS_DEFECTO = 15_000;
+export const HEIC_PREWARNING_MS = 15_000; // se emite al inicio si limiteMs <= 15s
 
 export type DimensionesImagen = { ancho: number; alto: number };
 
@@ -354,6 +362,32 @@ async function convertHeicToJpegBlob(source: Blob, opciones: OpcionesRescateHeic
     throw new ErrorRescateHeic(
       `La foto HEIC es de ${megapixeles(dims).toFixed(1)} MP (${dims.ancho}×${dims.alto}) y pasa el tope del decodificador (${topeMp} MP): tócala en JPEG o recórtala en la galería antes de escanearla.`,
     );
+  }
+
+  // PRE-WARNING (T3): si el límite es <= 15 s, avisar ANTES de arrancar
+  // para que el operario pueda cancelar y retocar en JPEG.
+  if (limiteMs > 0 && limiteMs <= HEIC_PREWARNING_MS) {
+    void (async () => {
+      try {
+        const { appendEvento } = await import("../obs/buffer");
+        const { idSesion, idDispositivo, appVersion } = await import("../obs/identidad");
+        await appendEvento({
+          tipo: "warn",
+          ts: Date.now(),
+          sesion: idSesion(),
+          dispositivo: idDispositivo(),
+          appVersion: appVersion(),
+          datos: {
+            codigo: "heic:prewarning",
+            mensaje: `El decodificador HEIC tiene ${Math.round(limiteMs / 1000)} s de límite: si ves que se queda, cancela y tómala en JPEG.`,
+            limiteMs,
+            mp: dims ? megapixeles(dims) : null,
+          },
+        });
+      } catch {
+        /* silencioso: el prewarning es observabilidad, nunca rompe el flujo */
+      }
+    })();
   }
 
   const convert = await loadHeic2Any();

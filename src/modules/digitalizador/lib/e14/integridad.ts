@@ -170,3 +170,26 @@ export function trazaEsquinas(e: EsquinasActa | null): string {
 export function cuatroEsquinasFaltan(e: EsquinasActa | null | undefined): boolean {
   return !!e && !e.tl && !e.tr && !e.bl && !e.br;
 }
+
+/** KIT e14-velocidad-5s-v1 — ¿perdonar la ausencia 4/4 de fiduciales? El veto
+ *  de e71 (P10) lee «0 de 4 marcas» como «el papel no está demostrado entero»,
+ *  pero hay una segunda explicación que `marcasEsquina` no puede distinguir: las
+ *  marcas NO SE VEN (hoja arrugada, giro del acta, sombra dura sobre la franja
+ *  de la esquina) en un papel que sí está demostrado entero por las demás vías.
+ *  La evidencia positiva manda sobre la ausencia: lectura FUERTE con ≥8 anclas,
+ *  nitidez ≥90 y contraste de papel ≥75 — con los MISMOS umbrales de
+ *  `pisoPerfecto`, que es quien los define; acá no se duplican números — y ni el
+ *  guard geométrico ni el OCR de secciones dicen `recortada`.
+ *  Evidencia (2026-11-05, Galaxy A56, 20261028_084854): visual 10, sharpness
+ *  100, contraste 91, 9 anclas, 617 caracteres, votos 9,7 %, `recortada:false`
+ *  y aun así RECHAZADA con 6.4 y «EL ACTA ESTÁ CORTADA EN EL ENCUADRE» — en
+ *  tres corridas siguientes la MISMA foto dio 10 ÓPTIMA. El detector busca en
+ *  ventanas fijas (la superior abarca 10 % del alto, los lados 14 % del ancho)
+ *  con núcleo oscuro y anillo claro sobre la imagen warpeada: es inestable ante
+ *  arrugas, y el veto convertía esa inestabilidad en un rechazo total.
+ *  Puro (sin DOM) — mismo criterio en los DOS pipelines del bridge (pitfall
+ *  §9.9). `esquinas` null (no medible) nunca llega acá: `cuatroEsquinasFaltan`
+ *  ya devuelve false y el veto no se aplica. */
+export function perdonFaltaFiduciales(pisoPerfecto: boolean, recortada: boolean): boolean {
+  return pisoPerfecto && !recortada;
+}
