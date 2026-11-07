@@ -37,6 +37,12 @@ import { motorOcrActual } from "../ocr/rapidocr";
 // KIT e14-ocr-nativo-v1 — identidad del sidecar para el campo `ocrNativo`.
 import { resumenNativo } from "../ocr/nativo";
 import type { FasesCapa0 } from "@jg-stevan/scanner-core/qr/capa0-qr.client"; // R1.4-b — tipo puro (se borra al compilar)
+// FASE C3 (§6.7) — agregado de lectura del informe (puro, del paquete).
+import {
+  agregarLecturas,
+  type AgregadoLectura,
+  type ResumenLectura,
+} from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
 
 const DB_NOMBRE = "e14-masiva-metricas-v1";
 const DB_VERSION = 1;
@@ -237,6 +243,11 @@ export interface MetricaActa {
    *  dedup:"sin-match" responde POR QUÉ no matcheó. Ausente = el dhash no
    *  corrió (gama OFF / decode falló — el "(sin campo)" del informe). */
   dedupDetalle?: { candidatas: number; indice: number; mejorDistancia: number | null };
+  // ─── FASE C3 (medición §6.7) — campo ADITIVO AL FINAL (D57) ───
+  /** Resumen de la corrida de lectura de ESTA acta (motor aceptante,
+   *  intentos con gate y ms por motor). Ausente = SIM / sin gate /
+   *  registro previo. Es el mismo dato que `PerfActa.lectura`. */
+  lectura?: ResumenLectura;
 }
 
 /** Una corrida = un PROCESAR (o su rearranque) hasta que el bucle drena o
@@ -411,6 +422,8 @@ export function registrarMetricaDesenlace(args: {
       /** D57 — probe de orientación (top-level del diagnóstico, fuera de
        *  tiempos). KIT e14-etapas-preocr-v1: sube al informe como etapa. */
       orientacionProbeMs?: number;
+      /** FASE C3 — resumen de lectura del acta (→ MetricaActa.lectura). */
+      resumenLectura?: ResumenLectura;
       tiempos?: {
         totalMs?: number;
         procesoMs?: number;
@@ -564,6 +577,10 @@ export function registrarMetricaDesenlace(args: {
         ...(muroMs != null ? { muroMs } : {}),
         ...(gapMs != null ? { gapMs } : {}),
         ...(args.dedupDetalle ? { dedupDetalle: args.dedupDetalle } : {}),
+        // FASE C3 (§6.7) — lectura del acta (aditivo; ausente = sin dato).
+        ...(args.acta.diagnostico?.resumenLectura
+          ? { lectura: args.acta.diagnostico.resumenLectura }
+          : {}),
         // D45-R1 — el roundtrip de publicación aterrizó ANTES que este
         // desenlace (carrera despacho→registro): se recoge del parking y
         // viaja en m (el callback del store puede ganarle al registro).
@@ -911,6 +928,15 @@ export async function exportarInformeMetricas(): Promise<string> {
   // = el OCR fue WASM de siempre). Sin él, un informe rápido no se distingue
   // de uno rápido por otras razones.
   const nativo = resumenNativo();
+  // FASE C3 (§6.7) — agregado de lectura de las actas del informe: ms/acta
+  // aceptada por motor (numerador/denominador de la decisión C4/C5). Aditivo
+  // AL FINAL; ausente cuando ninguna acta trajo lectura (honesto).
+  const lecturas = actas
+    .map((a) => a.lectura)
+    .filter((l): l is ResumenLectura => !!l);
+  const lecturaResumen: AgregadoLectura | null = lecturas.length
+    ? agregarLecturas(lecturas)
+    : null;
   return JSON.stringify(
     {
       generado: new Date().toISOString(),
@@ -922,6 +948,7 @@ export async function exportarInformeMetricas(): Promise<string> {
       ...(gama && { gama }),
       ...(motor && { motorOcr: motor }),
       ...(nativo && { ocrNativo: nativo }),
+      ...(lecturaResumen && { lecturaResumen }),
     },
     null,
     2,

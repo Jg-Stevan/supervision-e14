@@ -1472,6 +1472,9 @@ export class RealCoreBridge implements E14Bridge {
     });
     if (diag) {
       diag.actaId = acta.id;
+      // FASE C3 (§6.7) — el resumen de lectura viaja con el acta: el informe
+      // de la corrida lo exporta por acta (mismo dato que PerfActa.lectura).
+      if (resumenLectura) diag.resumenLectura = resumenLectura;
       acta.diagnostico = diag;
       // KIT e14-observabilidad-v1 (A1-C7, cambio QUIRÚRGICO): emisión perf
       // del desenlace — lazy import + catch total (el rastreo jamás rompe
