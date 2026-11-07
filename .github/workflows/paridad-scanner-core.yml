@@ -23,7 +23,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Instalar (workspace: el paquete entra por packages/*)
+      - name: "Instalar (workspace: el paquete entra por packages/*)"
         run: bun install --frozen-lockfile || bun install
       - name: Materializar assets del kit (e14-assets-materializados-v1)
         run: bun run preparar
