@@ -148,6 +148,14 @@ import type { E14Bridge, OpcionesEscaneo } from "./bridge";
 // orquesta (reconocerRapidOcr queda para reconocerTexto — mismo contrato).
 // (R7c M6-fin: ocrBanda la consume bandaDirigidaSiFalta — pipeline-comun.ts.)
 import { reconocerRapidOcr, reconocerRapidOcrEscalonado } from "./ocr-escalonado-runner";
+// FASE C del plan post-v2.3 (medición §6.7): el sink REAL de la telemetría de
+// lectura (el colector resume la corrida para `PerfActa.lectura`) + el estado
+// de motores que el panel de perfil observa.
+import {
+  colectorLectura,
+  type EventoLectura,
+} from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
+import { registrarEventoLectura } from "./ocr/estado-motores";
 // Espera del turno OCR global, acumulada POR ACTA (ver EsperaOcrSink en
 // rapidocr). Solo el TIPO: se borra al compilar — cero dependencia runtime.
 import type { EsperaOcrSink } from "./ocr/rapidocr";
@@ -1085,9 +1093,47 @@ export class RealCoreBridge implements E14Bridge {
     // del navegador no se paga; la pasada elegida es la que el sidecar hizo.
     // Cualquier fallo del prefetch dejó `nat = null` → la línea de abajo, byte
     // a byte como hoy.
+    // FASE C (medición §6.7) — telemetría de ESTA lectura: un colector por
+    // acta (su resumen viaja al perf) y el panel de motores observa los
+    // mismos eventos. SIM no emite (chips 8.2/7.0/4.3 intactos por
+    // construcción) y sin divipol no hay gate: JAMÁS se inventa un nivel.
+    const colector = opciones.simular === true ? null : colectorLectura();
+    const baseLectura = colector ? await cargarDivipol() : null;
+    const clasificarNivelLectura = baseLectura
+      ? (t: string): EventoLectura["validacion"] => {
+          try {
+            return clasificarCabecera(t, baseLectura).nivel;
+          } catch {
+            return "MANUAL";
+          }
+        }
+      : undefined;
+    const sinkLectura = colector
+      ? (e: EventoLectura): void => {
+          colector.sink(e);
+          registrarEventoLectura(e);
+        }
+      : undefined;
     const ocrEsc = nat
       ? { texto: nat.texto, conf: nat.conf, detMs: nat.detMs, recMs: nat.recMs }
-      : await reconocerRapidOcrEscalonado(fotoOcr, onProgresoOcr, cfgOcr);
+      : await reconocerRapidOcrEscalonado(fotoOcr, onProgresoOcr, {
+          ...cfgOcr,
+          onEvento: sinkLectura,
+          clasificarNivel: clasificarNivelLectura,
+        });
+    if (nat && sinkLectura && clasificarNivelLectura) {
+      // El sidecar hizo la ÚNICA pasada del acta (det+rec nativo a cap PROD):
+      // se registra tal cual — motor "nativo" para no confundir su ms con el
+      // del WASM (misma familia PP-OCR, coste muy distinto).
+      sinkLectura({
+        paso: "1920",
+        motor: "nativo",
+        validacion: clasificarNivelLectura(nat.texto),
+        aceptada: true,
+        ms: Math.round(nat.detMs + nat.recMs),
+      });
+    }
+    const resumenLectura = colector?.resumen();
     let texto = ocrEsc.texto;
     ms.ocr = performance.now() - tOcr;
     // PROD-2 (§4.2): conf/det/rec de la pasada ELEGIDA (SPRINT-A A4: la
@@ -1448,6 +1494,7 @@ export class RealCoreBridge implements E14Bridge {
             scoreFinal: score,
             gate: desenlace.status,
             ocrValido: diag.ocrValido,
+            lectura: resumenLectura,
           }),
         )
         .catch(() => {});

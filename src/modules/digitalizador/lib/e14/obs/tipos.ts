@@ -2,6 +2,8 @@
  * KIT e14-observabilidad-v1 — contratos del módulo obs.
  * SOLO tipos: cero lógica runtime. Fuente de verdad: README-KITS.md §4.
  */
+import type { ResumenLectura } from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
+
 export type TipoEvento = "error" | "warn" | "perf" | "salud" | "uso" | "hang"; // ANEXO Agente C: "hang" NUEVO AL FINAL (contrato D57: append-only)
 export type Tier = "ALTO" | "MEDIO" | "BAJO";
 
@@ -29,6 +31,9 @@ export interface PerfActa {
   scoreFinal: number;
   gate: string;
   ocrValido: boolean;
+  /** FASE C2 (medición §6.7): resumen de la corrida de lectura — ausente en
+   *  perf legacy (D57: opcional al final). */
+  lectura?: ResumenLectura;
 }
 
 export interface SaludSnapshot {

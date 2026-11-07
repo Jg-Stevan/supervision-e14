@@ -42,6 +42,13 @@ import { loadImageMemo, canvasCon } from "./image-utils";
 // null = camino de siempre en WASM).
 import { ladoNativoDisponible, ocrNativo } from "./ocr/nativo";
 import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
+// FASE C del plan post-v2.3 (medición §6.7): telemetría por etapa — el sink
+// YA existe en el paquete; este runner lo alimenta sin cambiar ninguna
+// decisión (mismos caps, mismos criterios, mismo texto elegido).
+import type {
+  EventoLectura,
+  SinkLectura,
+} from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
 
 /**
  * KIT consenso-frankfurt-v1 (FASE 4, §5): segunda pasada OCR DIRIGIDA del
@@ -127,6 +134,16 @@ export interface PasadaEscalonada {
  *  caller cae al WASM; el motor WASM jamás devuelve null — lanza como hoy. */
 type Pasada = (cap: number) => Promise<PasadaEscalonada | null>;
 
+/** Telemetría de la corrida (FASE C — §6.7). Sin ella `escalar` se comporta
+ *  BYTE A BYTE como siempre (0 eventos, 0 gate, mismo texto elegido). */
+interface TelemetriaLectura {
+  /** Etiqueta del motor REAL que produjo la pasada (rapidocr | nativo). */
+  motor: string;
+  sink: SinkLectura;
+  /** GATE de producción (clasificarCabecera) — el nivel de CADA pasada. */
+  clasificarNivel: (texto: string) => EventoLectura["validacion"];
+}
+
 /** §2.2-§2.5 — las DOS pasadas escalonadas, sobre el motor que le pase. El
  *  KIT e14-ocr-nativo-v1 necesitaba la misma cascada (1280 → re-OCR 1920 →
  *  el mejor manda) con otro motor: se extrae SIN cambiar el orden, los
@@ -135,11 +152,36 @@ async function escalar(
   pasada: Pasada,
   escalonado: { presupuestoMs: number; inicioMs: number },
   sufijo: string,
+  telemetria?: TelemetriaLectura,
 ): Promise<OcrEscalonadoSalida | null> {
+  // La telemetría jamás tumba la corrida (misma doctrina del paquete).
+  const ev = (e: EventoLectura): void => {
+    try {
+      telemetria?.sink(e);
+    } catch {
+      /* silencio */
+    }
+  };
+  const gate = (texto: string): EventoLectura["validacion"] => {
+    try {
+      return telemetria ? telemetria.clasificarNivel(texto) : "MANUAL";
+    } catch {
+      return "MANUAL";
+    }
+  };
   const t1 = performance.now();
   const r1 = await pasada(DET_CAP_RAPIDO);
   if (!r1) return null;
   const ms1 = Math.round(performance.now() - t1);
+  if (telemetria) {
+    ev({
+      paso: "1280",
+      motor: telemetria.motor,
+      validacion: gate(r1.texto),
+      aceptada: false,
+      ms: ms1,
+    });
+  }
   const senal1 = senalDeLectura(r1.texto);
   // §2.3 decisión + §3 presupuesto (el timeout existente manda): vencido →
   // NO hay 2.ª (mismo desenlace que hoy: el timeout del pipeline resuelve).
@@ -158,6 +200,15 @@ async function escalar(
       ms2 = Math.round(performance.now() - t2);
       anclas2 = anclasDe(r2.texto);
       elegido = elegirMejor(r1, r2); // MISMA referencia — la ganadora trae sus métricas
+      if (telemetria) {
+        ev({
+          paso: "1920",
+          motor: telemetria.motor,
+          validacion: gate(elegido.texto),
+          aceptada: false,
+          ms: ms2,
+        });
+      }
     }
   }
   // Traza propia (§2.5 — línea PROPIA, append-only; SIN línea en SIM).
@@ -167,6 +218,18 @@ async function escalar(
       (ms2 != null ? ` anclas2=${anclas2} ms1=${ms1} ms2=${ms2}` : ` ms1=${ms1}`) +
       sufijo,
   );
+  // Cierre de la telemetría: la pasada ELEGIDA es la lectura aceptada. El ms
+  // del cierre es el total de la corrida (el resumen del colector suma las
+  // etapas reales, no este eco — misma convención que la cascada del paquete).
+  if (telemetria) {
+    ev({
+      paso: elegido.cap === DET_CAP_PROD ? "1920" : "1280",
+      motor: telemetria.motor,
+      validacion: gate(elegido.texto),
+      aceptada: true,
+      ms: ms1 + (ms2 ?? 0),
+    });
+  }
   return { texto: elegido.texto, conf: elegido.conf, detMs: elegido.detMs, recMs: elegido.recMs };
 }
 
@@ -184,8 +247,23 @@ export async function reconocerRapidOcrEscalonado(
      *  Las DOS pasadas suman en el mismo sink: lo que el acta esperó al GPU,
      *  no lo que el GPU tardó. */
     esperaSink?: EsperaOcrSink;
+    /** FASE C (medición §6.7) — sink de la telemetría por etapa. Ausente =
+     *  sin telemetría (SIM, tests y llamadas históricas, byte a byte). */
+    onEvento?: SinkLectura;
+    /** GATE real (clasificarCabecera) para el nivel de cada pasada. Sin él
+     *  no se emite nada: JAMÁS se inventa un nivel. */
+    clasificarNivel?: (texto: string) => EventoLectura["validacion"];
   },
 ): Promise<OcrEscalonadoSalida> {
+  // La telemetría exige sink Y gate (sin gate no hay validación honesta).
+  const telemetria = (motor: string): TelemetriaLectura | undefined =>
+    escalonado.onEvento && escalonado.clasificarNivel && !escalonado.simular
+      ? {
+          motor,
+          sink: escalonado.onEvento,
+          clasificarNivel: escalonado.clasificarNivel,
+        }
+      : undefined;
   // KIT e14-ocr-nativo-v1: con sidecar a mano la cascada entera (1280 → 1920)
   // corre nativa y NO se toca `rapidOcrInit` (los ~46 MB del WASM no se
   // descargan). SIM queda EXCLUIDO a propósito: los chips de simulación
@@ -201,6 +279,7 @@ export async function reconocerRapidOcrEscalonado(
       },
       escalonado,
       " motor=nativo",
+      telemetria("nativo"),
     );
     if (salida) return salida;
   }
@@ -222,6 +301,7 @@ export async function reconocerRapidOcrEscalonado(
     },
     escalonado,
     "",
+    telemetria("rapidocr"),
   );
   if (!salida) throw new Error("ocr-escalonado: invariante roto (el motor WASM devolvió null)");
   return salida;

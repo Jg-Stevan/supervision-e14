@@ -22,6 +22,7 @@ import { idDispositivo, idSesion, appVersion, fnv1a8 } from "./identidad";
 // conoce React (regla §0). La app lo define sobre emitirError (exportada).
 import { configObsBase } from "./config";
 import type { ErrorEvento, PerfActa } from "./tipos";
+import type { ResumenLectura } from "./eventos-lectura";
 
 const TRUNCA_MENSAJE = 500; // contrato ErrorEvento
 const TRUNCA_STACK = 2000;
@@ -106,6 +107,8 @@ export interface DatosPerfActa {
   scoreFinal: number;
   gate: string;
   ocrValido: boolean;
+  /** FASE C2 — resumen de la corrida de lectura (opcional: perf legacy). */
+  lectura?: ResumenLectura;
 }
 
 /** §G.3 — ORDEN-WAVE3-add-envio-individual-v1 (obs-envio-individual-v1):
@@ -142,6 +145,7 @@ export function emitirPerfDeActa(a: DatosPerfActa): void {
             scoreFinal: a.scoreFinal,
             gate: a.gate,
             ocrValido: a.ocrValido,
+            ...(a.lectura ? { lectura: a.lectura } : {}),
           } satisfies PerfActa,
         });
       } catch {

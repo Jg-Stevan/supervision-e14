@@ -25,17 +25,52 @@ export interface EventoLectura {
 /** Sink de eventos de lectura — inyectable (la app decide a dónde van). */
 export type SinkLectura = (e: EventoLectura) => void;
 
-/** Sink que acumula en memoria (la medición de la ventana §6.7 lo consume). */
-export function sinkLecturaEnMemoria(): { sink: SinkLectura; eventos: EventoLectura[] } {
+/** Resumen de UNA corrida de lectura (una acta) — lo que se persiste en
+ *  `PerfActa.lectura` (FASE C2 del plan post-v2.3): motor aceptante,
+ *  intentos con su gate y ms por motor. Es lo que el router NUNCA registró
+ *  (§6.7: riesgo 3 de la auditoría). Append-only (D57). */
+export interface ResumenLectura {
+  /** Motor del último evento `aceptada: true` (null = ninguno aceptó). */
+  motorAceptante: string | null;
+  /** Un registro por ETAPA intentada (gate incluido), en orden de corrida. */
+  intentos: EventoLectura[];
+  /** ms acumulados por motor — suma de las etapas reales, sin ecos. */
+  msPorMotor: Record<string, number>;
+}
+
+/** Colector por corrida: la app lo crea ANTES de leer un acta, pasa `sink`
+ *  a la cascada y persiste `resumen()` junto al perf del acta. */
+export function colectorLectura(): {
+  sink: SinkLectura;
+  eventos: EventoLectura[];
+  resumen: () => ResumenLectura;
+} {
   const eventos: EventoLectura[] = [];
   return {
     sink: (e) => {
       try {
-        eventos.push(e);
+        eventos.push({ ...e });
       } catch {
         /* jamás tumba */
       }
     },
     eventos,
+    resumen: () => {
+      // La cascada re-emite la etapa aceptante con `aceptada: true` y, al
+      // cerrar sin AUTO, un evento agregado con la suma de la corrida: sus
+      // ms son eco o total, nunca una pasada nueva. Los intentos reales son
+      // los NO aceptados; el motor aceptante es el del último aceptado.
+      const intentos = eventos.filter((e) => !e.aceptada);
+      const msPorMotor: Record<string, number> = {};
+      for (const e of intentos) {
+        const ms = Number.isFinite(e.ms) ? e.ms : 0;
+        msPorMotor[e.motor] = (msPorMotor[e.motor] ?? 0) + ms;
+      }
+      let motorAceptante: string | null = null;
+      for (const e of eventos) {
+        if (e.aceptada) motorAceptante = e.motor;
+      }
+      return { motorAceptante, intentos, msPorMotor };
+    },
   };
 }
