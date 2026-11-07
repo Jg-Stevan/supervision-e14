@@ -1,0 +1,15 @@
+{
+  "_comentario": "Assets versionados del paquete (D6 del mapa v2.3): el detection-worker es una IIFE PRECOMPILADA del proyecto vendorizado de origen (web-scanner · feba267 · v0.4.1 — su cabecera comenta rutas src/scanner/core/*) SIN fuente compilable en ninguno de los dos repos. NO se reconstruye: viaja como asset con su md5 fijado y procedencia documentada. El build único (3.7) aplica SOLO a capa0-qr.worker.ts. divipol.json y opencv siguen md5-idénticos por deploy en ambas apps (e14-assets-materializados-v1).",
+  "assets": [
+    {
+      "ruta": "assets/scanner/detection-worker.js",
+      "md5": "8afc886aad39ffaca4c814f273cea3c3",
+      "origen": "web-scanner · feba267 · v0.4.1 (vendorizado, precompilado)",
+      "bytes": 71012
+    }
+  ],
+  "referencias_md5_por_deploy": {
+    "public/e14/divipol.json": "8d4b0963057b2e8d0b0db179b8f5ddb2",
+    "public/scanner/detection-worker.js": "8afc886aad39ffaca4c814f273cea3c3"
+  }
+}

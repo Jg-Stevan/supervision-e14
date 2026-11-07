@@ -1,0 +1,24 @@
+{
+  "origen": {
+    "repo": "Jg-Stevan/web-scanner",
+    "commit": "feba267cb9c01a896f0135ed2e406b7567bec663",
+    "version": "0.4.1"
+  },
+  "nota": "Paquete unico @jg-stevan/scanner-core (mapa v2.3): sustituye a las copias vendorizadas de digielect14 y supervision-e14. Los 6 modulos compartidos entran TAL CUAL (md5 verificado en ambos clones); los 6 D-only del CONTRATO de digielect14 se quedan en esa app (sin contraparte en S).",
+  "compartidos": [
+    "codec.ts",
+    "detector-client.ts",
+    "image-modes.ts",
+    "image-processor.ts",
+    "ocr.ts",
+    "types.ts"
+  ],
+  "modulos": {
+    "codec.ts": "da9e19e1b887dd254580a5daa27f3d47",
+    "detector-client.ts": "6317350199bcbab65affe8c64820b441",
+    "image-modes.ts": "0b8881cb025bd5adbde1a7421f5c1954",
+    "image-processor.ts": "1d9457bf8fe7595f6da974375fd89065",
+    "ocr.ts": "57eb3786b8705a287dd40cc18801bacb",
+    "types.ts": "54943986fffac5e0b58dc586ebf89a9d"
+  }
+}

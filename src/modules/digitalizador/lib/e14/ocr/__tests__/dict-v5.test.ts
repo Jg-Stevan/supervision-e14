@@ -68,9 +68,19 @@ describe("dict-ppocrv5-v2 — charset del rec PP-OCRv5 latin", () => {
     expect(dict).toContain("ñ"); // «AÑO»/nombres
   });
 
-  test("rapidocr.ts apunta al dict v2 — cache-bust obligatorio (/models/* immutable, D39)", () => {
-    const src = readFileSync(RAPIDOCR_TS, "utf-8");
-    expect(src).toContain('dict: "/models/rapidocr/latin_dict_v2.txt"');
-    expect(src).not.toContain('dict: "/models/rapidocr/latin_dict.txt"');
+  // POST-F3 (mapa v2.3): el cableado v5 moría con el router (§4.1 — era SU
+  // camino de upgrade). El motor vivo es el del PAQUETE (PP-OCRv4, dict
+  // ppocr_keys.txt). El guard se mantiene en su espíritu: NINGÚN motor
+  // referencia el dict viejo (latin_dict.txt) que rompía el CTC blank-first.
+  test("el motor del paquete NO referencia el dict roto (cache-bust D39)", () => {
+    const src = readFileSync(
+      join(RAIZ, "packages/scanner-core/src/ocr/rapidocr.ts"),
+      "utf-8",
+    );
+    expect(src).toContain("ppocr_keys.txt");
+    expect(src).not.toContain('latin_dict.txt"');
+    // el wrapper de ESTA app no cablea dicts (el motor vive en el paquete)
+    const wrapper = readFileSync(RAPIDOCR_TS, "utf-8");
+    expect(wrapper).not.toContain('latin_dict.txt"');
   });
 });

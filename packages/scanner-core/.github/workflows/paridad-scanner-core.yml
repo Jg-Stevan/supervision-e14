@@ -1,0 +1,37 @@
+# Workflow de paridad reutilizable (ítem 3.8 del mapa v2.3).
+#
+# Sin esto, la garantía de paridad es promesa, no mecanismo: materializa los
+# assets (e14-assets-materializados-v1) y corre LOS TESTS DEL PAQUETE en el CI
+# de AMBAS apps. Cada app lo llama desde su propio CI:
+#
+#   jobs:
+#     paridad:
+#       uses: Jg-Stevan/<repo-app>/.github/workflows/paridad-scanner-core.yml@main
+#       # (copiado en .github/workflows/ de la app — ver cambios/)
+#
+# El invariante (§6.1): mismo fixture → misma lectura aceptada por la misma
+# cascada en ambas apps, aunque el orden de motores configurado difiera.
+name: paridad-scanner-core
+on:
+  workflow_call:
+
+jobs:
+  paquete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Instalar (workspace: el paquete entra por packages/*)
+        run: bun install --frozen-lockfile || bun install
+      - name: Materializar assets del kit (e14-assets-materializados-v1)
+        run: bun run preparar
+      - name: Tests del PAQUETE (bun:test — corren IGUAL en ambos CIs)
+        run: bun test packages/scanner-core
+      - name: Gate de drift del core (3.9 — jubilable al cerrar la adopción)
+        run: bun packages/scanner-core/scripts/qa-drift-core.ts
+      - name: Build único del worker capa-0 (3.7 — MISMO artefacto en ambas apps)
+        run: bun packages/scanner-core/scripts/build-capa0-worker.mjs
+      - name: Typecheck del paquete
+        run: cd packages/scanner-core && bunx tsc --noEmit

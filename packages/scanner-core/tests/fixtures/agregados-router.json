@@ -1,0 +1,11 @@
+{
+  "_comentario": "Agregados del router-ocr.ts de supervision-e14, preservados como fixture ANTES de borrarlo en POST-F3 (ítem 3.10 del mapa v2.3). La medición de la ventana (condición BLOQUEANTE §6.7 antes de fijar el orden por defecto de la cascada) necesita comparar contra estos umbrales históricos. El panel-perfil adaptado los referencia como evidencia del régimen anterior.",
+  "FALLOS_PARA_DEGRADAR": 2,
+  "VENTANA_PRESION_MS": 180000,
+  "DIAS_NO_REINTENTAR": 7,
+  "SONDA_MINIMA_V5": 750,
+  "SONDA_TAPIR_TESSERACT": 350,
+  "CLAVE_SONDA_CARGA": "ocr-router-sonda-carga-v1",
+  "FLAG_MOTOR_ADAPTATIVO": "ocrMotorAdaptativo",
+  "nota": "VENTANA_PRESION_MS = 3 * 60_000 (3 min). FALLOS_PARA_DEGRADAR: 2 eventos de presión en la ventana degradaban el motor. El router registraba presión/degradación pero NO el motor aceptante por acta — exactamente lo que la telemetría EventoCascada/EventoLectura del paquete sí registra (riesgo 3 de la auditoría, condición bloqueante)."
+}

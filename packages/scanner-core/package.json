@@ -1,0 +1,37 @@
+{
+  "name": "@jg-stevan/scanner-core",
+  "version": "0.5.0",
+  "description": "Nucleo de lectura E-14 — un solo motor para digielect14 (movil) y supervision-e14 (masiva). Procedencia: web-scanner · feba267 · v0.4.1 (vendorizado) → paquete unico (mapa de migracion v2.3).",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./*.ts": "./src/*.ts",
+    "./*.json": "./src/*.json",
+    "./workers/*": "./workers/*",
+    "./assets/*": "./assets/*",
+    "./scripts/*": "./scripts/*",
+    "./tests/fixtures/*": "./tests/fixtures/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build:worker": "bun scripts/build-capa0-worker.mjs",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "qa:drift": "bun scripts/qa-drift-core.ts"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "heic2any": "0.0.4",
+    "onnxruntime-web": "1.30.0",
+    "tesseract.js": "5.1.1",
+    "zxing-wasm": "3.1.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "bun-types": "^1.3.0"
+  }
+}

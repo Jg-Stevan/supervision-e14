@@ -12,7 +12,7 @@ const eslintConfig = defineConfig([
   // del repo (app, components, modules/supervision, modules/perfil-dispositivo)
   // usa las reglas estándar de eslint-config-next sin relajar.
   {
-    files: ["src/modules/digitalizador/**"],
+    files: ["src/modules/digitalizador/**", "packages/scanner-core/**"],
     rules: {
       // TypeScript
       "@typescript-eslint/no-explicit-any": "off",
@@ -66,6 +66,8 @@ const eslintConfig = defineConfig([
     // R7b (M10-fin): el vendor jsQR se MOVIO de masiva/vendor a vendor/ del
     // nucleo (git mv byte-idéntico) — el ignore viaja con el activo.
     "src/modules/digitalizador/lib/e14/vendor/**",
+    "packages/scanner-core/src/qr/vendor/**",
+    "packages/scanner-core/assets/**",
     "public/vendor/**",
     "public/scanner/**",
     "public/wasm/**",
