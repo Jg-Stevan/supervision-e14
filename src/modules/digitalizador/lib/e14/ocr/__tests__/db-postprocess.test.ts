@@ -30,7 +30,7 @@ import {
   minAreaRect,
   ordenarCajas,
   type OpsDet,
-} from "../db-postprocess";
+} from "@jg-stevan/scanner-core/ocr/db-postprocess";
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 

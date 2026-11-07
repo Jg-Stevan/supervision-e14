@@ -80,7 +80,7 @@ import {
 // KIT e14-obs-hang-atribucion-v1 (§A.3) — hook D58 del sitio main-thread
 // pesado de la cadenaDedup (precedente masiva→obs: runner.ts importa
 // ../obs/dispositivo).
-import { marcarOperacion } from "../obs/operacion";
+import { marcarOperacion } from "@jg-stevan/scanner-core/obs-base/operacion";
 // KIT e14-gama-adaptativa-v1 (D74): el guard del dhash de INGESTA (BAJO lo
 // omite — ver comentario en la capa dhash de cadenaDedup).
 import { planGamaActual } from "../gama";

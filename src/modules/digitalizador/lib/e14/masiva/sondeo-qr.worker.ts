@@ -51,7 +51,7 @@ import {
   QR_RECORTE_LADO,
   rotarPixeles,
   type PixelesQr,
-} from "./qr-pixeles";
+} from "@jg-stevan/scanner-core/qr/qr-pixeles";
 
 /** (§A.3 S3) Mínimo de presupuesto RESTANTE para ENTRAR al barrido (S3):
  *  el barrido completo es acotado (nº de ventanas) pero costoso — si al

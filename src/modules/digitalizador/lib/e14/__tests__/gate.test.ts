@@ -33,7 +33,7 @@ import {
   resolverDesenlace,
   type EntradaDesenlace,
 } from "../gate";
-import type { ClasificacionE14 } from "../clasificador";
+import type { ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 

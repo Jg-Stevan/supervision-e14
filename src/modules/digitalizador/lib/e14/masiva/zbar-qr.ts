@@ -22,7 +22,7 @@
  *   typeName; el payload sigue siendo llave opaca, red line 10 intacta).
  */
 import { logger } from "../../logger";
-import type { PixelesQr } from "./qr-pixeles";
+import type { PixelesQr } from "@jg-stevan/scanner-core/qr/qr-pixeles";
 
 type ModZbar = typeof import("@undecaf/zbar-wasm");
 

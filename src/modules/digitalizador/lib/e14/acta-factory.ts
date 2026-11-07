@@ -22,9 +22,9 @@
  *     resuelta (§1) + campos reales §3.1 + señal QR (red line 10)
  */
 import { canvasCon } from "./image-utils"; // SPRINT-A A3 — factory de canvas
-import { ACTA_MOCK } from "./seed";
-import { tituloYUbicacionDe, type ClasificacionE14 } from "./clasificador";
-import type { PageFilter, PageQuality, Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import { ACTA_MOCK } from "@jg-stevan/scanner-core/dominio/seed";
+import { tituloYUbicacionDe, type ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
+import type { PageFilter, PageQuality, Quad } from "@jg-stevan/scanner-core/core/types";
 import type { Acta, ActaFirma, ActaStatus } from "./types";
 import type { OpcionesEscaneo } from "./bridge";
 

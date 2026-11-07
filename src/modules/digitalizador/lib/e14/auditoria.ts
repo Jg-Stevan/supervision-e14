@@ -24,10 +24,10 @@
  * módulo no escribe logs: SOLO monta el registro (§9.6 — una sola fuente de
  * verdad del payload).
  */
-import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import type { Quad } from "@jg-stevan/scanner-core/core/types";
 import { construirDiagnostico } from "./diagnostico";
 import { contrasteEfectivoDe, type PageQualityV2 } from "./calidad";
-import type { NivelLectura } from "./senal-lectura";
+import type { NivelLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 import type { Acta, ActaStatus, DiagnosticoActa } from "./types";
 
 /** Monta el registro del DESENLACE (payload completo de construirDiagnostico)

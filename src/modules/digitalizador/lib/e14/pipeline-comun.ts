@@ -25,11 +25,11 @@
  * estado de módulo. El log de auditoría se compone con el MISMO orden de
  * tokens (contrato D51: solo AÑADIR al final).
  */
-import { ocrTextIsValid } from "@/modules/digitalizador/lib/e14/core/ocr";
-import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import { ocrTextIsValid } from "@jg-stevan/scanner-core/core/ocr";
+import type { Quad } from "@jg-stevan/scanner-core/core/types";
 import { ocrBanda } from "./ocr-escalonado-runner";
 import type { EsperaOcrSink } from "./ocr/rapidocr";
-import { faltaSeccionInferior, PATRON_CABECERA, tipoDeBanda, type ClasificacionE14 } from "./clasificador";
+import { faltaSeccionInferior, PATRON_CABECERA, tipoDeBanda, type ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
 import {
   contrasteEfectivoDe,
   esquinasDeActa,
@@ -37,7 +37,7 @@ import {
   type InfoCrop,
   type PageQualityV2,
 } from "./calidad";
-import { lazoPerdonadoPorLectura, senalDeLectura, type SenalLectura } from "./senal-lectura";
+import { lazoPerdonadoPorLectura, senalDeLectura, type SenalLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 import {
   ESQUINAS_OK,
   cuatroEsquinasFaltan,
@@ -45,8 +45,8 @@ import {
   perdonFaltaFiduciales,
   trazaEsquinas,
   type EsquinasActa,
-} from "./integridad";
-import type { ResultadoCompletitud } from "./completitud";
+} from "@jg-stevan/scanner-core/dominio/integridad";
+import type { ResultadoCompletitud } from "@jg-stevan/scanner-core/dominio/completitud";
 import { construirDiagnosticoDelDesenlace } from "./auditoria";
 import type { SalidaDesenlace } from "./gate";
 import type { Acta, DiagnosticoActa } from "./types";

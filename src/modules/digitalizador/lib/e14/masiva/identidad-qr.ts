@@ -108,7 +108,7 @@ import {
   rotarPixeles,
   ventanaDePixeles,
   type PixelesQr,
-} from "./qr-pixeles";
+} from "@jg-stevan/scanner-core/qr/qr-pixeles";
 export {
   barridoQrDePixeles,
   BANDA_A,
@@ -118,7 +118,7 @@ export {
   QR_RECORTE_LADO,
   QR_PREVIO_LADO_LARGO,
   rotarPixeles,
-} from "./qr-pixeles";
+} from "@jg-stevan/scanner-core/qr/qr-pixeles";
 // D40 — KIT e14-capa0-qr-worker-v1: NITIDEZ/BINARIZADA se MOVIERON al módulo
 // puro (qr-pixeles.ts, byte a byte) para que el worker de capa 0 las importe
 // de forma ESTÁTICA sin arrastrar zxing/logger/DOM. Re-exportadas aquí —
@@ -129,8 +129,8 @@ export {
   BINARIZADA_VENTANA,
   nitidezQrDePixeles,
   NITIDEZ_K,
-} from "./qr-pixeles";
-export type { EspecieBanda, PixelesQr } from "./qr-pixeles";
+} from "@jg-stevan/scanner-core/qr/qr-pixeles";
+export type { EspecieBanda, PixelesQr } from "@jg-stevan/scanner-core/qr/qr-pixeles";
 
 // ─── Constantes NUEVAS del kit e63m §1.1 (separadas de las existentes) ──────
 /** Lado largo MÁXIMO del canvas de trabajo (kit §1.1 — igual que el banco:
@@ -147,7 +147,7 @@ export const QR_INTENTOS_BASE: readonly string[] = BANDAS_BASE.map((b) => b.id);
  *  @90°→@180°→@270° (evidencia del banco: el QR CAMBIA de esquina al rotar
  *  — durazno1 solo decodifica con A@90°; repetir bandas finas sobre el
  *  rotado no sirve, la imagen completa sí). */
-export { QR_ROTACIONES } from "./qr-pixeles"; // D40 — movida al módulo puro (byte a byte)
+export { QR_ROTACIONES } from "@jg-stevan/scanner-core/qr/qr-pixeles"; // D40 — movida al módulo puro (byte a byte)
 /** Espera acotada del caso «original en vuelo» (kit §1.1/§1.2.4): intervalo
  *  × intentos = techo efectivo de 15 s. Re-chequeo SOLO-LECTURA del estado
  *  del original; sin timers globales. */
@@ -190,7 +190,7 @@ export type EstadoOriginalQr = EstadoEntrada | "AUSENTE";
  * completa decodificarQrDePixeles como ÚLTIMO tier, doc hermano §1).
  * Puro — testeable headless.
  */
-export { ladderBaseDePixeles } from "./qr-pixeles"; // D40 — movida al módulo puro (byte a byte)
+export { ladderBaseDePixeles } from "@jg-stevan/scanner-core/qr/qr-pixeles"; // D40 — movida al módulo puro (byte a byte)
 
 /**
  * Ladder COMPLETO e63m sobre píxeles (kit §1.1): base A→B→C→C1.5 con

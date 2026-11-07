@@ -10,9 +10,9 @@
  * OFF · saludEnVivo ON. JSON corrupto → defaults + evento warn (jamás
  * inventar la mitad de una política).
  */
-import { appendEvento } from "./buffer";
-import { digestDe } from "./digest";
-import { obtenerBreadcrumbs } from "./breadcrumbs";
+import { appendEvento } from "@jg-stevan/scanner-core/obs-base/buffer";
+import { digestDe } from "@jg-stevan/scanner-core/obs-base/digest";
+import { obtenerBreadcrumbs } from "@jg-stevan/scanner-core/obs-base/breadcrumbs";
 import type { FlagsApp, PoliticaDatos } from "./tipos";
 // R2 — tabla ÚNICA de flags + whitelist de saneo (§B2 #11): sanearFlags
 // (flags.ts) y leerOverridesFlags derivan del MISMO esquema (fin de la

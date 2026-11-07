@@ -18,7 +18,7 @@
  * un regex suelto sobre el texto cuando el consenso falló — una lectura
  * errada fabricaría identidad falsa ⇒ falso dedup. Sin serie → null (honesto).
  */
-import { codigoUnicoE14 } from "../clasificador";
+import { codigoUnicoE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
 import type { Acta } from "../types";
 
 export interface IdentidadActa {

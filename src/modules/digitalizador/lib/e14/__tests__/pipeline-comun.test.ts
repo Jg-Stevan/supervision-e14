@@ -25,12 +25,12 @@ import {
   trazaDesenlaceComun,
   vetoCuatroEsquinas,
 } from "../pipeline-comun";
-import type { ClasificacionE14 } from "../clasificador";
+import type { ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
 import type { PageQualityV2 } from "../calidad";
 import type { SalidaDesenlace } from "../gate";
-import type { ResultadoCompletitud } from "../completitud";
-import type { EsquinasActa } from "../integridad";
-import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import type { ResultadoCompletitud } from "@jg-stevan/scanner-core/dominio/completitud";
+import type { EsquinasActa } from "@jg-stevan/scanner-core/dominio/integridad";
+import type { Quad } from "@jg-stevan/scanner-core/core/types";
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 

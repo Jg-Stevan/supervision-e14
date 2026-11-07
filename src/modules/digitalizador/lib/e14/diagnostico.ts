@@ -13,7 +13,7 @@
  * quita se quita COMPLETO y lo que queda queda EXACTO.
  */
 import type { Acta, ActaStatus, DiagnosticoActa } from "./types";
-import type { NivelLectura } from "./senal-lectura";
+import type { NivelLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 
 /** Empaca lo que el sitio del log ya tiene en scope (§6-B: las MISMAS
  *  expresiones que ya usa el log — NO re-evalúa nada nuevo). Los techos

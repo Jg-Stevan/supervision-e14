@@ -23,7 +23,7 @@ import { logger } from "../../logger";
 import { leerFlags } from "../flags";
 // KIT e14-obs-hang-atribucion-v1 (§A.5) — hook D58: contexto barato al
 // resolver el sondeo en main (el trabajo pesado vive en el worker).
-import { marcarOperacion } from "../obs/operacion";
+import { marcarOperacion } from "@jg-stevan/scanner-core/obs-base/operacion";
 import type { RespuestaSondeo } from "./sondeo-qr.worker";
 
 /** Resultado del sondeo — ESPEJO de RespuestaSondeo del worker: el objeto
