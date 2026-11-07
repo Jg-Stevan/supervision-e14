@@ -4,9 +4,9 @@
  * compatibles (todo es opcional).
  */
 import type { ResumenLectura } from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
-import type { PageFilter, Quad } from "@/modules/digitalizador/lib/e14/core/types";
-import type { ClasificacionE14 } from "./clasificador";
-import type { NivelLectura } from "./senal-lectura";
+import type { PageFilter, Quad } from "@jg-stevan/scanner-core/core/types";
+import type { ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
+import type { NivelLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 
 // D63-A (kit e63a-origen-escaneo-v1) — R7b (M10): el TIPO OrigenActa vive
 // ahora en el núcleo (types.ts) — fin de la dependencia invertida

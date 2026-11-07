@@ -39,10 +39,10 @@
  *   · `scoreSimulado` — solo pipeline SIM (chips 8.2/7.0/4.3 mandan — §9.5).
  */
 
-import { ocrTextIsValid } from "@/modules/digitalizador/lib/e14/core/ocr";
-import type { QualityLevel } from "@/modules/digitalizador/lib/e14/core/types";
-import type { ClasificacionE14 } from "./clasificador";
-import { PISO_LECTURA_FUERTE, TECHO_LECTURA_DEBIL, type NivelLectura } from "./senal-lectura";
+import { ocrTextIsValid } from "@jg-stevan/scanner-core/core/ocr";
+import type { QualityLevel } from "@jg-stevan/scanner-core/core/types";
+import type { ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
+import { PISO_LECTURA_FUERTE, TECHO_LECTURA_DEBIL, type NivelLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 import { statusDeScore, type Acta, type ActaStatus } from "./types";
 
 /** Copias del rechazo — MOVIDAS de scanner-core-bridge.ts (R7a): vivían

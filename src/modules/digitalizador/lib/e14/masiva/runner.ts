@@ -94,8 +94,8 @@ import { logger } from "../../logger";
 // Lógica pura en masiva/relectura.ts (testeable headless); aquí solo la
 // orquestación: re-OCR del MISMO bitmap (reconocerTexto — cap fino) +
 // re-clasificar con la base divipol.
-import { clasificarCabecera } from "../clasificador";
-import { cargarDivipol } from "../divipol";
+import { clasificarCabecera } from "@jg-stevan/scanner-core/dominio/clasificador";
+import { cargarDivipol } from "@jg-stevan/scanner-core/dominio/divipol";
 import { desenlaceTrasRelectura, procedeRelecturaInterna } from "./relectura";
 // e63k — KIT e63k-capa2-identidad-v1 (F1.4): CAPA 2 de dedup por IDENTIDAD
 // impresa (código 1D consensuado — identidad.ts es lógica pura; aquí solo
@@ -110,7 +110,7 @@ import { conTope } from "./tope";
 // pre-OCR — punto ÚNICO del kit, ANTES de despachar OCR). El capture sale
 // de la vía del pipeline (fileToCaptureDataUrl — la MISMA que midió el
 // banco #72; jsQR 1.4.0 vendido byte-idéntico en vendor/jsQR.js).
-import { fileToCaptureDataUrl } from "@/modules/digitalizador/lib/e14/core/image-processor";
+import { fileToCaptureDataUrl } from "@jg-stevan/scanner-core/core/image-processor";
 import {
   decodificarQrDeCapture,
   decodificarQrPrevioDeCapture,
@@ -119,7 +119,7 @@ import {
 // La constante se pide AL módulo puro, no a identidad-qr: cruzaba el ciclo
 // store↔runner y bun la enlazaba como «export not found» (funciones hoisted:
 // no; `export const` tardío: sí). Doc en qr-pixeles:QR_PREVIO_LADO_LARGO.
-import { QR_PREVIO_LADO_LARGO } from "./qr-pixeles";
+import { QR_PREVIO_LADO_LARGO } from "@jg-stevan/scanner-core/qr/qr-pixeles";
 // KIT e14-ocr-nativo-v1 (FASE 2): el prefetched del ACTA COMPLETA al sidecar
 // (quad+warp+sonda+b/n+QR+OCR en una ida). Se dispara aquí, en la capa 0, para
 // que el muro nativo corra en paralelo del dedup/precalor y para que su payload

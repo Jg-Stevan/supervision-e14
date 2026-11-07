@@ -10,7 +10,7 @@
  * (WATCHDOG_MS/INTENTOS/GRACIA/RELECTURA_TOPE — qa-watchdog-relectura y
  * qa-qr-identidad las grepean en runner.ts) permanecen en runner.ts.
  */
-import { getScannerWorker, warmUpScannerWorker } from "@/modules/digitalizador/lib/e14/core/detector-client";
+import { getScannerWorker, warmUpScannerWorker } from "@jg-stevan/scanner-core/core/detector-client";
 // D65 (T1): soltar el runtime OCR al matar los workers del intento vencido.
 // KIT e14-gama-adaptativa-v1 (D74): re-warm del OCR tras el kill — sin él,
 // el reintento pagaba sesión+calor completos (~27 s fríos medidos).
@@ -18,7 +18,7 @@ import { rapidOcrPrecalentar, rapidOcrReiniciar } from "../ocr/rapidocr";
 import { flagsMasivaEfectivos, reportarPresionGama } from "../gama";
 // D65 (T1.3): semilla para el acta de timeout del watchdog — la MISMA que el
 // bridge usa en SU acta de timeout (solo lectura de la forma; cero criterios).
-import { ACTA_MOCK } from "../seed";
+import { ACTA_MOCK } from "@jg-stevan/scanner-core/dominio/seed";
 import type { Acta, EtapaAnalisis } from "../types";
 
 /** Espejo del DETALLE_TIMEOUT del bridge (constante PRIVADA allí): el string

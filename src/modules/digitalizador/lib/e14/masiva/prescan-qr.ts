@@ -51,7 +51,7 @@ import {
   downscaleLado,
   type ClientePrescan,
 } from "./prescan-qr.client";
-import { BANDA_A, intentoSobrePixeles, type PixelesQr } from "./qr-pixeles";
+import { BANDA_A, intentoSobrePixeles, type PixelesQr } from "@jg-stevan/scanner-core/qr/qr-pixeles";
 import {
   enviadaPorPayload as enviadaPorPayloadStore,
   marcarDuplicadaCon,

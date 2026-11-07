@@ -19,7 +19,7 @@
  *  desenlace. La lógica vive AQUÍ (pura, testeable headless por
  *  `scripts/qa-autoenvio.ts`) y la orquestación en `masiva/runner.ts`. */
 import type { Acta } from "../types";
-import type { ClasificacionE14 } from "../clasificador";
+import type { ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
 
 /** ¿Procede la re-lectura interna para ESTE desenlace? (kit §4.1 — puro.)
  *  EN_REVISION_HUMANA por SUGERIDA/MANUAL ∧ score ≥ 8 ∧ lectura FUERTE ∧

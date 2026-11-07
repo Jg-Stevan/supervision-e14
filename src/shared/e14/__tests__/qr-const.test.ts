@@ -23,7 +23,7 @@ import {
   type PixelesQr as PixelesQrShared,
 } from "@/shared/e14/qr-const";
 // Paridad por import directo del módulo puro worker-safe (masiva/qr-pixeles.ts).
-import { QR_RECORTE_LADO as QR_RECORTE_LADO_ORIGINAL, type PixelesQr as PixelesQrOriginal } from "@/modules/digitalizador/lib/e14/masiva/qr-pixeles";
+import { QR_RECORTE_LADO as QR_RECORTE_LADO_ORIGINAL, type PixelesQr as PixelesQrOriginal } from "@jg-stevan/scanner-core/qr/qr-pixeles";
 
 describe("paridad constantes QR (§B2 #12)", () => {
   test("QR_RECORTE_LADO ≡ qr-pixeles.ts:187 (import directo)", () => {

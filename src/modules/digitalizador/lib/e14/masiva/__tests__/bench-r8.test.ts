@@ -25,7 +25,7 @@ import {
 } from "./caracterizacion.harness";
 
 // ─── módulos bajo medición (después de los mocks del harness) ───────────────
-const seed = await import("../../seed");
+const seed = await import("@jg-stevan/scanner-core/dominio/seed");
 const { ACTA_MOCK } = seed;
 const store = await import("../store");
 const runner = await import("../runner");

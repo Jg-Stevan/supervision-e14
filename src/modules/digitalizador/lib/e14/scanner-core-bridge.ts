@@ -69,31 +69,31 @@ import {
   detectDocumentEdgesDetail,
   fileToCaptureDataUrl,
   processImage,
-} from "@/modules/digitalizador/lib/e14/core/image-processor";
-import type { OrigenQuad } from "@/modules/digitalizador/lib/e14/core/image-processor";
+} from "@jg-stevan/scanner-core/core/image-processor";
+import type { OrigenQuad } from "@jg-stevan/scanner-core/core/image-processor";
 // KIT e14-masiva-ux-v1 (T1): mecanismo de warm-up del worker OpenCV que ya
 // expone el core (el mismo que ScanView.tsx:757 invoca al montar) — la
 // detección al importar espera al worker en vez de caer al Sobel de una.
 import {
   getScannerWorker,
   warmUpScannerWorker,
-} from "@/modules/digitalizador/lib/e14/core/detector-client";
-import { ocrTextIsValid } from "@/modules/digitalizador/lib/e14/core/ocr";
+} from "@jg-stevan/scanner-core/core/detector-client";
+import { ocrTextIsValid } from "@jg-stevan/scanner-core/core/ocr";
 // KIT e14-motor-rapidocr-v1 (PROD-2 §3): motor de OCR de producción — módulo
 // compartido con el informe (singleton de sesión ÚNICO, pitfall §9.6). El
 // requestOcr del core SOLO vive en motores.ts (celda «actual» de la matriz —
 // instrumento congelado, pitfall §9.2).
-import { defaultQuad } from "@/modules/digitalizador/lib/e14/core/types";
+import { defaultQuad } from "@jg-stevan/scanner-core/core/types";
 // (R7b M5b: PageQuality viaja con construirActa — acta-factory.ts.)
-import type { PageFilter, Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import type { PageFilter, Quad } from "@jg-stevan/scanner-core/core/types";
 // (R7b M5b: ACTA_MOCK viaja con construirActa — acta-factory.ts.)
-import { cargarDivipol } from "./divipol";
+import { cargarDivipol } from "@jg-stevan/scanner-core/dominio/divipol";
 import {
   clasificarCabecera,
   PATRON_CABECERA,
   tituloYUbicacionDe,
   type ClasificacionE14,
-} from "./clasificador";
+} from "@jg-stevan/scanner-core/dominio/clasificador";
 // KIT e14-optimizacion-v1 (T1): los decodes del bridge pasan por el memo
 // FIFO tope 2 de image-utils — misma imagen, una sola decodificación por
 // dataURL del acta en vuelo. (R7b M1/M2: loadImageMemo ya solo se consume
@@ -108,10 +108,10 @@ import { procesadaVaciaDataUrl } from "./image-utils";
 // GUARD-BORDE Rev. 2 (SPEC-e14-guard-borde §2-§3, D1/D3): la verificación de
 // completitud vive en helper ÚNICO (completitud.ts) — «la geometría sospecha,
 // la tinta condena» — usado por AMBOS pipelines (escaneo y recorte, AC11).
-import { verificarCompletitud, type ResultadoCompletitud } from "./completitud";
+import { verificarCompletitud, type ResultadoCompletitud } from "@jg-stevan/scanner-core/dominio/completitud";
 // KIT e14-gate-v2 (FASE G2): marcador OBLIGATORIO de votos — helper ÚNICO
 // compartido con el guard de completitud (motorTinta, cero duplicación).
-import { medirZonaVotos } from "./marcadores";
+import { medirZonaVotos } from "@jg-stevan/scanner-core/dominio/marcadores";
 // D63-C — KIT e63c-quad-gate-escaneo-v1: detector del MARCO IMPRESO del E-14
 // para el gate de escaneos (T2) — fotos y SIM jamás lo invocan (guards).
 import { evaluarMarcoImpreso, type MarcoEscaneo, type MarcoImpreso } from "./marco-escaneo";
@@ -120,7 +120,7 @@ import { evaluarMarcoImpreso, type MarcoEscaneo, type MarcoImpreso } from "./mar
 // desenlace unificado — gate.ts. R7c M6-fin: lazoPerdonadoPorLectura y
 // senalDeLectura las consume pipeline-comun.ts; el bridge solo usa el TIPO
 // NivelLectura — firma de marcoPerdonadoPorLectura.)
-import type { NivelLectura } from "./senal-lectura";
+import type { NivelLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 // R7a — M3 (revisión 03a-digitalizador-nucleo): DESENLACE unificado del gate.
 // pipeline() y pipelineRecorte() delegan en este módulo PURO (transcripción
 // literal de las ramas gemelas — pitfall §9.9): mismo orden de caps, mismo
@@ -183,7 +183,7 @@ import { probeOrientacion, rotarDataUrl } from "./orientacion";
 // KIT e14-orientacion-qr-v1 — la brújula QR decide la rotación por el
 // cuadrante del QR (bench v8.3: 4/4); el sondeo OCR queda como red de
 // seguridad cuando el QR no lee. leerFlags = kill-switch del dueño (§D).
-import { brujulaQrOrientacion, type BrujulaQr } from "./orientacion-qr";
+import { brujulaQrOrientacion, type BrujulaQr } from "@jg-stevan/scanner-core/geom/orientacion-qr";
 import { leerFlags } from "./flags";
 // KIT e14-proceso-lado-v1 — tope del lienzo de SALIDA del warp+enhance del
 // lote. `processImage` ya sabe hacer esto (`opts.maxLongSide`, default

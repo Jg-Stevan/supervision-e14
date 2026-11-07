@@ -20,8 +20,7 @@
   "scripts": {
     "build:worker": "bun scripts/build-capa0-worker.mjs",
     "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "qa:drift": "bun scripts/qa-drift-core.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "fflate": "^0.8.3",

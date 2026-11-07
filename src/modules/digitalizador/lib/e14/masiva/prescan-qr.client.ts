@@ -34,7 +34,7 @@
 import { logger } from "../../logger";
 // KIT flujo-dueno-v1 (K2): forma canónica del quad del core (solo tipo —
 // se borra en compile: cero dependencia runtime).
-import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import type { Quad } from "@jg-stevan/scanner-core/core/types";
 // KIT e14-prescan-warp-lado-v1: válvulas del dueño (presupuesto de fila
 // configurable + maxWarpLongSide del warp) — mismo patrón e73 (sondeo).
 // KIT e14-gama-adaptativa-v1 (D74): la lectura del presupuesto es EFECTIVA

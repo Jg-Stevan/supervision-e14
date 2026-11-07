@@ -14,7 +14,7 @@ import type { ProgresoAnalisis } from "../types";
 // KIT e14-obs-hang-atribucion-v1 (§A.2) — hook D58: cada señal del bridge
 // actualiza la operación ACTIVA (module state, barato — sin tocar el
 // throttling). Precedente masiva→obs: runner.ts ya importa ../obs/dispositivo.
-import { marcarOperacion } from "../obs/operacion";
+import { marcarOperacion } from "@jg-stevan/scanner-core/obs-base/operacion";
 // KIT e14-gama-adaptativa-v1 (D74): el throttle EFECTIVO lo da el plan de
 // gama (BAJO 500 · MEDIO 350 · base 250).
 import { planGamaActual } from "../gama";

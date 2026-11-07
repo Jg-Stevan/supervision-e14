@@ -32,9 +32,9 @@ import {
   DET_CAP_RAPIDO,
 } from "./ocr/rapidocr";
 // KIT e14-score-lectura-v1: señal de LECTURA (nivel) para la traza §2.5.
-import { senalDeLectura } from "./senal-lectura";
+import { senalDeLectura } from "@jg-stevan/scanner-core/dominio/senal-lectura";
 // KIT e14-ocr-escalonado-v1 (§2): decisión/elegir del módulo PURO (testable).
-import { anclasDe, elegirMejor, necesitaSegunda } from "./ocr-escalonado";
+import { anclasDe, elegirMejor, necesitaSegunda } from "@jg-stevan/scanner-core/dominio/ocr-escalonado";
 // SPRINT-A A1/A3 — decode-once LRU + factory de canvas (los 4 decodes del
 // pipeline: calidad ×2, esquinas, banda — misma imagen, un solo decode).
 import { loadImageMemo, canvasCon } from "./image-utils";

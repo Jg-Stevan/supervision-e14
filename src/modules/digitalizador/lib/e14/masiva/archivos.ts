@@ -24,7 +24,7 @@ import { canvasCon, decodeImagenLruDeBlob } from "../image-utils"; // SPRINT-A A
 import {
   HEIC_TOPE_MP_DEFECTO,
   dimensionesHeic,
-} from "../core/image-processor"; // KIT e14-heic-tope-v1 — el mismo olfateo de contenedor que usa el móvil
+} from "@jg-stevan/scanner-core/core/image-processor"; // KIT e14-heic-tope-v1 — el mismo olfateo de contenedor que usa el móvil
 // KIT e14-gama-adaptativa-v1 (D74): el lado mayor EFECTIVO del master lo da
 // el plan de gama (BAJO 3072 · resto 4032).
 import { planGamaActual } from "../gama";

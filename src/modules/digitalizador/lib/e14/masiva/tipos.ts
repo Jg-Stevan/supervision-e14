@@ -5,7 +5,7 @@ import type { Acta } from "../types";
 import type { FasesCapa0 } from "@jg-stevan/scanner-core/qr/capa0-qr.client"; // R1.4-b — tipo puro (se borra al compilar)
 // KIT e14-quad-streaming-v1 (P4): forma canónica del quad del core — SOLO
 // tipo (se borra en compile: cero dependencia runtime desde los tipos).
-import type { Quad } from "@/modules/digitalizador/lib/e14/core/types";
+import type { Quad } from "@jg-stevan/scanner-core/core/types";
 
 /** KIT e14-masiva-tiempos-v1 (PR-1): DUPLICADA = gemela por hash perceptual
  *  (dhash Hamming ≤ 6, dedup.ts) — estado SOLO visual: al procesar REUTILIZA

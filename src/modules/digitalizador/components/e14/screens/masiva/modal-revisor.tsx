@@ -96,7 +96,7 @@ import {
   puestosDe,
   zonasDe,
   type DivipolBase,
-} from "@/modules/digitalizador/lib/e14/divipol";
+} from "@jg-stevan/scanner-core/dominio/divipol";
 // KIT editor-masiva-v1: horneado de ROTAR por canvas (misma disciplina de
 // siempre — canvas puro, dataURL out). El recorte RECTANGULAR
 // (`recortarDataUrl`) lo sustituye el editor de perspectiva (T4).
