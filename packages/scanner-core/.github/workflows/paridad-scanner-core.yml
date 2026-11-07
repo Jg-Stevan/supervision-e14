@@ -29,8 +29,6 @@ jobs:
         run: bun run preparar
       - name: Tests del PAQUETE (bun:test — corren IGUAL en ambos CIs)
         run: bun test packages/scanner-core
-      - name: Gate de drift del core (3.9 — jubilable al cerrar la adopción)
-        run: bun packages/scanner-core/scripts/qa-drift-core.ts
       - name: Build único del worker capa-0 (3.7 — MISMO artefacto en ambas apps)
         run: bun packages/scanner-core/scripts/build-capa0-worker.mjs
       - name: Typecheck del paquete

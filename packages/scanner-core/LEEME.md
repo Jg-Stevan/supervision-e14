@@ -62,7 +62,7 @@ assets/scanner/    detection-worker.js — asset VERSIONADO (D6): IIFE
 tests/             harness de paridad (3.10): contrato-motor (golden del
                    negocio) + cascada + fixtures versionados
                    (contrato-motor.json · divipol.json · agregados-router)
-scripts/           build-capa0-worker.mjs (build único) · qa-drift-core.ts
+scripts/           build-capa0-worker.mjs (build único)
                    (gate 3.9 — jubilable al cerrar la adopción)
 .github/           paridad-scanner-core.yml (workflow 3.8 — corre ESTOS
                    tests en el CI de ambas apps)
