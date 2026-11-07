@@ -10,7 +10,12 @@
  *  · colección vacía honesta (no hay lectura ⇒ null, no hay que inventar).
  */
 import { describe, expect, test } from "bun:test";
-import { colectorLectura, type EventoLectura } from "../src/obs-base/eventos-lectura";
+import {
+  agregarLecturas,
+  colectorLectura,
+  type EventoLectura,
+  type ResumenLectura,
+} from "../src/obs-base/eventos-lectura";
 import {
   correrCascadaOcr,
   type DepsOcrCascada,
@@ -87,6 +92,71 @@ describe("colectorLectura · resumen por acta (§6.7 C2)", () => {
     c.sink(evento("1280", "rapidocr", Number.NaN, false));
     c.sink(evento("1920", "rapidocr", 900, false));
     expect(c.resumen().msPorMotor).toEqual({ rapidocr: 900 });
+  });
+});
+
+describe("agregarLecturas · ventana §6.7 (C3)", () => {
+  const resumen = (
+    motorAceptante: string | null,
+    msPorMotor: Record<string, number>,
+    intentos = Object.keys(msPorMotor).length,
+  ): ResumenLectura => ({
+    motorAceptante,
+    intentos: Array.from({ length: intentos }, () => evento("1280", "rapidocr", 1, false)),
+    msPorMotor,
+  });
+
+  test("vacío → agregado honesto en cero", () => {
+    expect(agregarLecturas([])).toEqual({
+      actas: 0,
+      aceptadas: 0,
+      sinAceptante: 0,
+      porAceptante: {},
+    });
+  });
+
+  test("ms/acta aceptada = ms totales de la acta (todos los motores) / actas", () => {
+    const a = agregarLecturas([
+      resumen("tesseract", { rapidocr: 1900, tesseract: 2600 }, 3),
+      resumen("tesseract", { tesseract: 4000 }, 1),
+    ]);
+    expect(a.actas).toBe(2);
+    expect(a.aceptadas).toBe(2);
+    const t = a.porAceptante["tesseract"]!;
+    expect(t.actas).toBe(2);
+    expect(t.intentos).toBe(4);
+    expect(t.msTotal).toBe(8500);
+    expect(t.msPorActa).toBe(4250);
+    expect(t.msPorMotor).toEqual({ rapidocr: 1900, tesseract: 6600 });
+  });
+
+  test("aceptantes distintos no se mezclan (la decisión es por motor)", () => {
+    const a = agregarLecturas([
+      resumen("rapidocr", { rapidocr: 2000 }),
+      resumen("nativo", { nativo: 900 }),
+    ]);
+    expect(a.porAceptante["rapidocr"]?.msPorActa).toBe(2000);
+    expect(a.porAceptante["nativo"]?.msPorActa).toBe(900);
+    expect(a.porAceptante["rapidocr"]?.msPorMotor).toEqual({ rapidocr: 2000 });
+  });
+
+  test("acta sin aceptante se cuenta aparte (no inventa bucket)", () => {
+    const a = agregarLecturas([resumen(null, { rapidocr: 700 }), resumen("rapidocr", { rapidocr: 1000 })]);
+    expect(a.actas).toBe(2);
+    expect(a.aceptadas).toBe(1);
+    expect(a.sinAceptante).toBe(1);
+    expect(Object.keys(a.porAceptante)).toEqual(["rapidocr"]);
+    expect(a.porAceptante["rapidocr"]?.msPorActa).toBe(1000);
+  });
+
+  test("ms inválido y entradas hostiles no envenenan el agregado", () => {
+    const a = agregarLecturas([
+      resumen("rapidocr", { rapidocr: Number.NaN, tesseract: 500 }),
+      null as unknown as ResumenLectura,
+    ]);
+    expect(a.actas).toBe(1);
+    expect(a.porAceptante["rapidocr"]?.msTotal).toBe(500);
+    expect(a.porAceptante["rapidocr"]?.msPorActa).toBe(500);
   });
 });
 

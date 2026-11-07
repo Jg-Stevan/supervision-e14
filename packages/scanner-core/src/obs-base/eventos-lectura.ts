@@ -38,6 +38,67 @@ export interface ResumenLectura {
   msPorMotor: Record<string, number>;
 }
 
+/** Agregado de §6.7 sobre varias corridas (una entrada por acta leída). La
+ *  unidad de la decisión es el acta ACEPTADA: `porAceptante[m].msPorActa`
+ *  es el coste medio de lectura (todos los intentos, eco excluido) de las
+ *  actas que ese motor aceptó — el numerador/denominador del criterio
+ *  «min ms/acta aceptada con falso-acepto = 0». */
+export interface AgregadoLecturaAceptante {
+  actas: number;
+  intentos: number;
+  msTotal: number;
+  msPorActa: number;
+  /** ms de intentos por motor DENTRO de las actas de este aceptante. */
+  msPorMotor: Record<string, number>;
+}
+
+/** Agregado acumulable (el reporte lo recalcula sobre las actas retenidas;
+ *  el dueño puede sumar exportaciones sucesivas sin doble conteo). */
+export interface AgregadoLectura {
+  actas: number;
+  aceptadas: number;
+  /** Actas sin evento `aceptada: true` (lectura no cerrada / rechazada). */
+  sinAceptante: number;
+  porAceptante: Record<string, AgregadoLecturaAceptante>;
+}
+
+/** Puro: agrega los resúmenes de varias actas sin inventar datos. Entradas
+ *  inválidas se saltan (jamás lanza — la telemetría no tumba el reporte). */
+export function agregarLecturas(resumenes: ResumenLectura[]): AgregadoLectura {
+  const out: AgregadoLectura = { actas: 0, aceptadas: 0, sinAceptante: 0, porAceptante: {} };
+  for (const r of resumenes) {
+    if (!r || typeof r !== "object") continue;
+    out.actas++;
+    const motor = typeof r.motorAceptante === "string" && r.motorAceptante ? r.motorAceptante : null;
+    if (!motor) {
+      out.sinAceptante++;
+      continue;
+    }
+    out.aceptadas++;
+    const b = (out.porAceptante[motor] ??= {
+      actas: 0,
+      intentos: 0,
+      msTotal: 0,
+      msPorActa: 0,
+      msPorMotor: {},
+    });
+    b.actas++;
+    b.intentos += Array.isArray(r.intentos) ? r.intentos.length : 0;
+    let msActa = 0;
+    const porMotor = r.msPorMotor && typeof r.msPorMotor === "object" ? r.msPorMotor : {};
+    for (const [m, v] of Object.entries(porMotor)) {
+      const ms = Number.isFinite(v) ? v : 0;
+      b.msPorMotor[m] = (b.msPorMotor[m] ?? 0) + ms;
+      msActa += ms;
+    }
+    b.msTotal += msActa;
+  }
+  for (const b of Object.values(out.porAceptante)) {
+    b.msPorActa = b.actas > 0 ? Math.round(b.msTotal / b.actas) : 0;
+  }
+  return out;
+}
+
 /** Colector por corrida: la app lo crea ANTES de leer un acta, pasa `sink`
  *  a la cascada y persiste `resumen()` junto al perf del acta. */
 export function colectorLectura(): {

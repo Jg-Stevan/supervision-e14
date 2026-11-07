@@ -122,3 +122,27 @@ node scripts/bench-navegador.mjs               # tiempos por acta (JSON local)
 Reglas de medición: no mezclar builds, no comparar corpus distintos como si
 fueran el mismo, repetir 2–3 veces y anotar la carga de la máquina. Los JSON de
 benchmark contienen texto OCR de actas reales y **no se versionan**.
+
+## 9. Ventana §6.7 — orden por defecto de motores (en curso)
+
+La cascada de lectura emite telemetría por acta desde el 2026-11-07
+(`MetricaActa.lectura` → `lecturaResumen` del informe de corrida; el mismo
+dato viaja en `PerfActa.lectura`). La ventana mide el **default vigente**:
+
+- **Cierre**: ≥ 2 semanas **o** ≥ 500 actas aceptadas en el producto, lo que
+  llegue primero.
+- **Criterio de cambio**: **min ms/acta aceptada con falso-acepto = 0**. El
+  falso-acepto se revisa a mano sobre una muestra mínima de 50 actas AUTO por
+  motor; un solo falso-acepto descalifica al candidato.
+- **margen**: un candidato solo reemplaza al default si mejora el
+  `msPorActa` vigente en **≥ 15 %**.
+- **Cómo se cambia**: solo por configuración (orden de motores = datos, los
+  órdenes históricos viajan inyectados) y se registra en `docs/adr/README.md`
+  (D86). Mientras no haya datos, el default **no se toca**.
+
+Exportar el informe semanalmente y acumular los `lecturaResumen` sucesivos:
+`MetricaActa` se poda por corrida (historial de 30), no es un archivo
+histórico. SIM no emite telemetría; una corrida simulada no cuenta.
+
+Detalle del protocolo (idéntico en los dos productos): `digielect14` →
+`docs/MEDICION-6.7.md`.

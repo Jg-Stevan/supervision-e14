@@ -3,6 +3,7 @@
  * FASE LÓGICA L1: campos async opcionales (§3.1) — el mock y el seed siguen
  * compatibles (todo es opcional).
  */
+import type { ResumenLectura } from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
 import type { PageFilter, Quad } from "@/modules/digitalizador/lib/e14/core/types";
 import type { ClasificacionE14 } from "./clasificador";
 import type { NivelLectura } from "./senal-lectura";
@@ -257,6 +258,11 @@ export interface DiagnosticoActa {
    *  lentos con red mala (evidencia 1230: cel en 4G 1.5 Mbps). */
   envioRedTipo?: string | null;
   envioDownlinkMbps?: number | null;
+  /** FASE C3 (medición §6.7) — resumen de la corrida de lectura (motor
+   *  aceptante, intentos con gate y ms por motor) para el informe de la
+   *  corrida. Aditivo AL FINAL (D57): ausente = SIM, sin gate o registro
+   *  previo. El mismo resumen viaja en `PerfActa.lectura`. */
+  resumenLectura?: ResumenLectura;
 }
 
 export interface Acta {
