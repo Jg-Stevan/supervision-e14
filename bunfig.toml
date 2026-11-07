@@ -1,0 +1,6 @@
+# Mapa v2.3 — bun workspaces activa el linker AISLADO por defecto; este repo
+# nació HOISTED (los componentes shadcn de src/components/ui resuelven los
+# subpaquetes @radix-ui/* a través del paquete monolítico `radix-ui` —
+# phantom deps que el hoisted exponía). Se conserva el layout histórico.
+[install]
+linker = "hoisted"

@@ -22,7 +22,7 @@
  * Idempotente: bytes iguales ⇒ no reescribe; `next build` vuelve a copiar
  * `public/` a `out/` y por eso el export sigue trayendo el wasm.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -78,8 +78,27 @@ const OBSOLETOS = [
   "public/vendor/tesseract/tesseract-core-simd-lstm.wasm",
 ];
 
+// Mapa v2.3: con bun workspaces el paquete puede vivir aislado en
+// node_modules/.bun/<pkg>@<ver>/node_modules/<pkg> — fallback al layout clásico.
+function dirDe(paquete) {
+  const clasico = join(RAIZ, "node_modules", paquete);
+  if (existsSync(clasico)) return clasico;
+  try {
+    const bunDir = join(RAIZ, "node_modules", ".bun");
+    for (const entrada of readdirSync(bunDir)) {
+      if (entrada.startsWith(paquete + "@")) {
+        const candidata = join(bunDir, entrada, "node_modules", paquete);
+        if (existsSync(candidata)) return candidata;
+      }
+    }
+  } catch {
+    /* sin .bun — sigue */
+  }
+  return clasico;
+}
+
 for (const paquete of new Set(COPIAS.map((c) => c.paquete))) {
-  const dir = join(RAIZ, "node_modules", paquete);
+  const dir = dirDe(paquete);
   if (!existsSync(dir)) {
     console.error(`BLOQUEADA: no hay node_modules/${paquete} — corre \`bun install\` primero.`);
     process.exit(1);
@@ -100,7 +119,7 @@ for (const paquete of new Set(COPIAS.map((c) => c.paquete))) {
 let copiados = 0;
 let omitidos = 0;
 for (const { paquete, origen, destino } of COPIAS) {
-  const src = join(RAIZ, "node_modules", paquete, origen);
+  const src = join(dirDe(paquete), origen);
   if (!existsSync(src)) {
     console.error(
       `BLOQUEADA: ${origen} no está en ${paquete} — la distribución del paquete cambió; ` +
@@ -128,7 +147,7 @@ for (const ruta of OBSOLETOS) {
 }
 
 const versiones = [...new Set(COPIAS.map((c) => c.paquete))]
-  .map((n) => `${n}@${JSON.parse(readFileSync(join(RAIZ, "node_modules", n, "package.json"), "utf-8")).version}`)
+  .map((n) => `${n}@${JSON.parse(readFileSync(join(dirDe(n), "package.json"), "utf-8")).version}`)
   .join(" · ");
 const totalMB = (
   COPIAS.reduce((acc, { destino }) => acc + statSync(join(RAIZ, destino)).size, 0) / 1048576

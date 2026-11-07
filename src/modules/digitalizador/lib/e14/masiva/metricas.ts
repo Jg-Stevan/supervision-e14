@@ -36,7 +36,7 @@ import { planGamaActual } from "../gama";
 import { motorOcrActual } from "../ocr/rapidocr";
 // KIT e14-ocr-nativo-v1 — identidad del sidecar para el campo `ocrNativo`.
 import { resumenNativo } from "../ocr/nativo";
-import type { FasesCapa0 } from "./capa0-qr.worker"; // R1.4-b — tipo puro (se borra al compilar)
+import type { FasesCapa0 } from "@jg-stevan/scanner-core/qr/capa0-qr.client"; // R1.4-b — tipo puro (se borra al compilar)
 
 const DB_NOMBRE = "e14-masiva-metricas-v1";
 const DB_VERSION = 1;

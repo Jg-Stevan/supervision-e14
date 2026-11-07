@@ -18,3 +18,10 @@ public/models/**/*.traineddata.gz binary
 native/**.py eol=lf
 native/**.txt eol=lf
 native/**.md eol=lf
+
+# Paquete del motor (mapa v2.3): el vendor y los artefactos viajan byte a
+# byte (mismo criterio que public/); el resto del paquete se normaliza a LF
+# como en el repo origen.
+packages/scanner-core/** eol=lf
+packages/scanner-core/src/qr/vendor/** -text
+packages/scanner-core/assets/** -text

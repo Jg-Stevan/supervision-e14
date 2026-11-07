@@ -1,6 +1,14 @@
 /**
  * ocr-escalonado-runner.ts — R7b (M2): runner del OCR ESCALONADO (motor RapidOCR).
  *
+ * POST-F3 (mapa v2.3 — verificación A.7 resuelta): este runner SOBREVIVE.
+ * No duplica la cascada: consume las funciones PURAS del paquete
+ * (ocr-escalonado → @jg-stevan/scanner-core/dominio/ocr-escalonado) y el
+ * motor del paquete vía el wrapper rapidocr de esta app. La cascada única
+ * del paquete queda disponible para el flujo de cámara; el pipeline masiva
+ * conserva su runner (producto de S, §4.3) — MISMO criterio de aceptación
+ * (senal-lectura) y MISMA decisión (necesitaSegunda/elegirMejor) en ambos.
+ *
  * MOVIDO verbatim de `scanner-core-bridge.ts` (partición move-only,
  * docs/revision-v1/03a-digitalizador-nucleo.md §7 paso M2 — el reporte lo
  * sitúa en ocr/, pero el contrato de R7b restringe la escritura a la RAÍZ

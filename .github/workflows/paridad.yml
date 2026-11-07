@@ -1,0 +1,12 @@
+# Llamador del workflow de paridad del paquete (ítem 3.8 — mapa v2.3):
+# LOS TESTS DEL PAQUETE corren en el CI de ESTA app con SUS assets
+# materializados — la garantía de paridad como mecanismo, no promesa.
+name: paridad-scanner-core
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  paridad:
+    uses: ./.github/workflows/paridad-scanner-core.yml

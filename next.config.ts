@@ -7,6 +7,9 @@ import type { NextConfig } from "next";
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 const nextConfig: NextConfig = {
+  // El motor vive en el PAQUETE (@jg-stevan/scanner-core, TS fuente vía bun
+  // workspaces) — se transpila junto a la app.
+  transpilePackages: ["@jg-stevan/scanner-core"],
   output: "export",
   basePath,
   images: { unoptimized: true },

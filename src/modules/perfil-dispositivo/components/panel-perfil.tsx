@@ -54,19 +54,17 @@ import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
 // en e14-flags-overrides; la lectura ya pasa por la DOBLE whitelist
 // (sanearFlags + leerOverridesFlags — registrada en fase 2).
 import { guardarOverridesFlags } from "@/modules/digitalizador/lib/e14/obs/politica";
-// KIT ocr-router-v1 — el ROUTER de motor OCR por dispositivo (PR #10). El
-// informe reporta QUÉ motor corre en este equipo y el porqué auditable.
-// fase 5 (selector-motor-v1): + infoCastigoV5/limpiarCastigoV5 — el castigo
-// de la sonda v5 visible y administrable por el dueño (D6).
+// POST-F3 (mapa v2.3): el ROUTER murió — su información vive en la
+// TELEMETRÍA de la cascada y en el ORDEN CONFIGURADO (estado-motores —
+// ítem 3.6). El panel muestra configuración + evidencia real; sin priors
+// inflables: la cascada decide DESPUÉS de leer, contra invariantes del acta.
 import {
-  infoCastigoV5,
-  limpiarCastigoV5,
   presionReciente,
   resolverMotor,
   type MotorOcr,
   type PerfilMinimo,
   type ResolucionMotor,
-} from "@/modules/digitalizador/lib/e14/ocr/router-ocr";
+} from "@/modules/digitalizador/lib/e14/ocr/estado-motores";
 import type { PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 // R9 (ola-3) — ADOPCIÓN de capa shared (R2, reporte 04 §B2 #8/#9):
 // · fmtDuracion — canónico en @/shared/format/tiempo (copia local borrada).
@@ -175,37 +173,42 @@ function fmtN(v: number | null, sufijo: string): string {
   return v === null ? "no informado" : `${v} ${sufijo}`;
 }
 
-// ─── ocr-router-v1 — resolución del motor para el informe ───────────────────
+// ─── POST-F3 — el orden de motores es CONFIGURACIÓN (mapa §3.4) ────────────
 
 const ETIQUETA_MOTOR: Record<MotorOcr, string> = {
-  "tesseract-best-psm4": "Tesseract best + psm 4",
-  ppocrv5: "PP-OCRv5 (ONNX)",
+  rapidocr: "RapidOCR v4 (producción)",
+  tesseract: "Tesseract spa-best + psm 4",
+};
+/** Alias históricos del router (overrides viejos que puedan quedar en
+ *  localStorage — el fixture del paquete conserva el registro). */
+const ETIQUETA_MOTOR_HISTORICA: Record<string, string> = {
+  "tesseract-best-psm4": "RapidOCR v4 (histórico)",
+  ppocrv5: "PP-OCRv5 (histórico)",
   "tesseract-spa-best-psm4": "Tesseract spa-best + psm 4",
 };
+const etiquetaDe = (motor: string): string =>
+  ETIQUETA_MOTOR[motor as MotorOcr] ?? ETIQUETA_MOTOR_HISTORICA[motor] ?? motor;
 
-// KIT selector-motor-v1 fase 5 + 5b — opciones del selector (D6: la app
-// muestra; el dueño decide). null = Automático: el router recupera la
-// decisión. «Motor base» son los modelos v4 de RapidOCR (producción actual);
-// «Tesseract spa-best» es el Tesseract REAL del benchmark (tesseract.js v5 +
-// spa.traineddata best — 94,4 % dígitos, ~67 MB, 13,5 MB gz) — fase 5b.
+// POST-F3 — opciones del selector (D6: la app muestra; el dueño decide).
+// null = Automático: el ORDEN CONFIGURADO corre (rapidocr primero en lotes —
+// §3.4). Los motores son los del PAQUETE (3.2: wrappers viejos muertos);
+// la cascada valida cada intento y cae al siguiente eslabón si falla.
 const OPCIONES_MOTOR: Array<{
   valor: MotorOcr | null;
   etiqueta: string;
   sub: string;
 }> = [
-  { valor: null, etiqueta: "Automático", sub: "el router decide · recomendado" },
-  { valor: "tesseract-best-psm4", etiqueta: "Motor base", sub: "RapidOCR v4 · producción" },
-  { valor: "tesseract-spa-best-psm4", etiqueta: "Tesseract spa-best", sub: "psm 4 · 13,5 MB · 94,4 %" },
-  { valor: "ppocrv5", etiqueta: "PP-OCRv5", sub: "precisión · 100 % · ~487 MB pico" },
+  { valor: null, etiqueta: "Automático", sub: "orden configurado · recomendado" },
+  { valor: "rapidocr", etiqueta: "RapidOCR v4", sub: "motor base · producción" },
+  { valor: "tesseract", etiqueta: "Tesseract spa-best", sub: "psm 4 · 13,5 MB · 94,4 %" },
 ];
 
 // R9 — fmtDuracion adoptado de @/shared/format/tiempo (copia verbatim de
 // la que vivía aquí: L202-209 — misma salida min/h/d, test de paridad R2).
 
-/** Adapta el `PerfilRecursos` del kit a la estructura mínima que espera el
- *  router (`PerfilMinimo` — runtime/sync/async en la raíz). null = sin
- *  señales aún (SSR / primer pase): el informe sale SIN bloque de motor —
- *  honesto, jamás inventar. */
+/** Adapta el `PerfilRecursos` del kit a la estructura mínima que espera
+ *  estado-motores (`PerfilMinimo`). null = sin señales aún (SSR / primer
+ *  pase): el informe sale SIN bloque de motor — honesto, jamás inventar. */
 function perfilMinimoDe(perfil: PerfilRecursos): PerfilMinimo | null {
   const s = perfil.senales;
   if (!s) return null;
@@ -220,17 +223,15 @@ function perfilMinimoDe(perfil: PerfilRecursos): PerfilMinimo | null {
   };
 }
 
-/** Resuelve el motor con la cadena COMPLETA de prioridad del router:
- *  flag kill-switch ← override manual ← gobernador ← sonda de carga ←
- *  sonda de CPU ← tier. Jamás lanza (null si aún no hay señales). */
+/** Resuelve el motor que el ORDEN CONFIGURADO correría aquí (POST-F3):
+ *  override manual ← telemetría (presión) ← configuración. Jamás lanza. */
 function resolverMotorDelDispositivo(perfil: PerfilRecursos): ResolucionMotor | null {
   try {
     const p = perfilMinimoDe(perfil);
     if (!p) return null;
     const flags = leerFlags();
     return resolverMotor(p, {
-      flagOn: flags.ocrMotorAdaptativo !== false,
-      overrideManual: flags.ocrMotor ?? null,
+      overrideManual: (flags.ocrMotor as MotorOcr | null) ?? null,
       presionReciente: presionReciente(),
     });
   } catch {
@@ -238,17 +239,14 @@ function resolverMotorDelDispositivo(perfil: PerfilRecursos): ResolucionMotor | 
   }
 }
 
-/** fase 5 — la recomendación PROPIA del router (override anulado a
- *  propósito): alimenta la advertencia honesta cuando el dueño fuerza un
- *  motor que el router no elegiría aquí. Jamás lanza. */
-function resolverRecomendacionRouter(perfil: PerfilRecursos): ResolucionMotor | null {
+/** POST-F3 — el orden SIN override (para la advertencia honesta cuando
+ *  el dueño fija un motor distinto del configurado). Jamás lanza. */
+function resolverRecomendacionCascada(perfil: PerfilRecursos): ResolucionMotor | null {
   try {
     const p = perfilMinimoDe(perfil);
     if (!p) return null;
-    const flags = leerFlags();
     return resolverMotor(p, {
-      flagOn: flags.ocrMotorAdaptativo !== false,
-      overrideManual: null, // la voz del router SIN la del dueño
+      overrideManual: null, // la voz de la configuración SIN la del dueño
       presionReciente: presionReciente(),
     });
   } catch {
@@ -318,16 +316,13 @@ export function VistaPerfil() {
         poolOcr: number;
         hilosOcr: number;
         flagAuto: boolean;
-        /** KIT ocr-router-v1 — motor resuelto para el informe y la tarjeta. */
+        /** POST-F3 — motor del orden configurado, para informe y tarjeta. */
         motor: ResolucionMotor | null;
-        /** fase 4 — override manual vigente en e14-flags-overrides (null =
-         *  el router decide; «ppocrv5» | «tesseract-best-psm4» = el dueño
-         *  fijó el motor a mano). */
-        overrideManual: MotorOcr | null;
-        /** fase 5 — la recomendación PROPIA del router (sin override) para
-         *  la advertencia honesta del selector + estado del castigo v5. */
+        /** Override manual vigente en e14-flags-overrides (null = el orden
+         *  configurado decide; «rapidocr» | «tesseract» = el dueño fijó). */
+        overrideManual: string | null;
+        /** El orden SIN override (advertencia honesta del selector). */
         motorSinOverride: ResolucionMotor | null;
-        castigoV5: { probadoHaceMs: number; msRestantes: number } | null;
       }
   >(null);
   // D38 — resolución EN MONTAJE (no en render) para hydration-safe con el
@@ -343,8 +338,7 @@ export function VistaPerfil() {
         flagAuto: f.masivaAdaptativoGama !== false,
         overrideManual: f.ocrMotor ?? null,
         motor: resolverMotorDelDispositivo(perfil),
-        motorSinOverride: resolverRecomendacionRouter(perfil),
-        castigoV5: infoCastigoV5(),
+        motorSinOverride: resolverRecomendacionCascada(perfil),
       });
     } catch {
       setAuto(null); // jamás tumba el panel
@@ -395,23 +389,16 @@ export function VistaPerfil() {
       resolverAuto(); // re-resuelve con el override vigente
       toast.success(
         valor === null
-          ? "Automático — el router vuelve a decidir en el próximo arranque"
-          : `${ETIQUETA_MOTOR[valor]} fijado — el próximo arranque del OCR lo aplica (o usa APLICAR AHORA)`,
+          ? "Automático — el orden configurado decide (cascada con validación)"
+          : `${ETIQUETA_MOTOR[valor]} fijado — la próxima corrida del OCR lo aplica (o usa APLICAR AHORA)`,
       );
     } catch {
       toast.error("No se pudo escribir el override");
     }
   };
 
-  const limpiarCastigo = () => {
-    try {
-      limpiarCastigoV5();
-      resolverAuto();
-      toast.success("Castigo limpiado — la sonda de v5 puede reintentarse");
-    } catch {
-      toast.error("No se pudo limpiar el castigo");
-    }
-  };
+  // POST-F3: el castigo de la sonda v5 murió con el router — la telemetría
+  // de la cascada (estado-motores) reemplaza su evidencia.
 
   // fase 5 — aplicar SIN recargar: import dinámico (el módulo del motor
   // pre-calienta al importarse — cargarlo solo cuando el dueño lo pide).
@@ -646,14 +633,14 @@ export function VistaPerfil() {
               />
               <Fila k="Pool OCR efectivo" v={`${auto.poolOcr} worker(s)`} />
               <Fila k="Hilos OCR efectivos" v={String(auto.hilosOcr)} />
-              {/* KIT ocr-router-v1 — el motor que correría HOY en este equipo
-                  y el porqué (auditable también en el JSON del informe: campo
-                  motorOcr). */}
+              {/* POST-F3 — el motor del ORDEN CONFIGURADO para este equipo
+                  (auditable en el JSON del informe: campo motorOcr). La
+                  evidencia REAL de lectura la emite la cascada (3.6). */}
               <Fila
                 k="Motor OCR"
                 v={
                   auto.motor
-                    ? `${ETIQUETA_MOTOR[auto.motor.motor]} · ${auto.motor.origen}`
+                    ? `${etiquetaDe(auto.motor.motor)} · ${auto.motor.origen}`
                     : "—"
                 }
                 titulo={auto.motor?.motivo}
@@ -669,20 +656,17 @@ export function VistaPerfil() {
               />
               {auto.motor && auto.motor.condicionesUpgrade.length > 0 && (
                 <Fila
-                  k="Upgrade a v5"
+                  k="Notas del orden"
                   v={auto.motor.condicionesUpgrade.join(" · ")}
                   titulo={auto.motor.condicionesUpgrade.join(" · ")}
                 />
               )}
             </div>
-            {/* KIT selector-motor-v1 fase 5 — el DUEÑO elige el modelo (D6).
-                Automático por defecto (el router decide por tier + sondas);
-                si el dueño fija un motor, la decisión se RESPETA — paso 1 de
-                la cadena del router (override-manual manda sobre gobernador,
-                castigos y tier). La sonda de carga sigue siendo el gate
-                técnico del arranque: fallo ⇒ v4 honesto, la corrida jamás se
-                tumba. Visible en TODOS los tiers — es la herramienta para
-                probar v5 (p. ej. en BAJO/MEDIO) sin consola. */}
+            {/* POST-F3 — el DUEÑO elige el modelo (D6). Automático por
+                defecto (el ORDEN CONFIGURADO corre; la cascada valida cada
+                intento y cae al siguiente eslabón si falla — jamás tumba la
+                corrida). Si el dueño fija un motor, su decisión se RESPETA
+                (la configuración manda — §3.4). */}
             {auto.motor && (
               <div className="mt-3 rounded-[4px] border border-(--outline-variant) bg-(--hover-row) p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -727,43 +711,20 @@ export function VistaPerfil() {
                   })}
                 </div>
                 <p className="body-md mt-3 text-muted-foreground">
-                  {auto.overrideManual === "ppocrv5"
-                    ? "Fijado a mano (D6): el próximo arranque descarga los modelos v5 (~13 MB) y corre la sonda de carga (≤ 30 s en override manual). Si la sonda falla, esa corrida sigue con el motor base — sin riesgo; el castigo de 7 días solo afecta al modo automático (tu decisión manda)."
-                    : auto.overrideManual === "tesseract-spa-best-psm4"
-                      ? "Fijado a mano (D6): el Tesseract REAL del benchmark (spa-best + psm 4, 94,4 % de dígitos, ~67 MB) vía tesseract.js — la primera vez descarga ~12 MB (traineddata gz). El modo automático jamás lo elige; la init del worker es la prueba y si falla (o falla en vuelo), esa corrida sigue con el motor base — sin riesgo."
-                      : auto.overrideManual === "tesseract-best-psm4"
-                        ? "Fijado a mano (D6): motor base — RapidOCR v4, la producción de siempre — en todos los arranques; el router no decide."
-                        : `Automático (recomendado): el router elige por tier + sondas de carga. La decisión vigente correría «${ETIQUETA_MOTOR[auto.motor.motor]}» (${auto.motor.origen}).`}
+                  {auto.overrideManual === "tesseract"
+                    ? "Fijado a mano (D6): el Tesseract REAL del benchmark (spa-best + psm 4, 94,4 % de dígitos, ~67 MB) vía tesseract.js — la primera vez descarga ~12 MB (traineddata gz). Si la init falla (o falla en vuelo), la cascada cae al motor base — sin riesgo."
+                    : auto.overrideManual === "rapidocr"
+                      ? "Fijado a mano (D6): motor base — RapidOCR v4, la producción de siempre — primero en todos los arranques."
+                      : `Automático (recomendado): el orden configurado corre y la cascada valida después de cada intento. Correría «${etiquetaDe(auto.motor.motor)}» (${auto.motor.origen}).`}
                 </p>
-                {auto.overrideManual === "ppocrv5" &&
-                 auto.motorSinOverride &&
-                 auto.motorSinOverride.motor !== "ppocrv5" && (
+                {presionReciente() && (
                   <div className="mt-2 flex items-start gap-2 rounded-[4px] border border-(--warning)/40 bg-(--warning)/10 p-2">
                     <CircleAlert className="mt-0.5 size-4 shrink-0 text-(--warning)" aria-hidden />
                     <p className="body-md text-muted-foreground">
-                      El router NO elegiría v5 aquí por sí solo: {auto.motorSinOverride.motivo} Tu
-                      decisión manda (D6) — riesgos honestos: pico ~487 MB (OOM posible en gama
-                      baja), descarga ~13 MB, sin WASM SIMD corre lento. La sonda de carga es el
-                      gate técnico: un fallo degrada a v4 sin tumbar la corrida.
+                      Presión reciente: la telemetría de la cascada vio fallos consecutivos sin
+                      lectura aceptada. Se recupera sola con la próxima aceptación (self-healing,
+                      sin castigos de 7 días — eso moría con el router).
                     </p>
-                  </div>
-                )}
-                {auto.castigoV5 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[4px] border border-border bg-card p-2">
-                    <CircleAlert className="size-4 shrink-0 text-(--warning)" aria-hidden />
-                    <p className="body-md min-w-0 flex-1 text-muted-foreground">
-                      Castigo vigente: la sonda de v5 falló hace{" "}
-                      {fmtDuracion(auto.castigoV5.probadoHaceMs)} — el modo automático no reintenta
-                      por {fmtDuracion(auto.castigoV5.msRestantes)} (un override manual NO se ve
-                      afectado).
-                    </p>
-                    <button
-                      type="button"
-                      onClick={limpiarCastigo}
-                      className="label-caps inline-flex h-9 items-center gap-2 rounded-[4px] border border-border bg-card px-3 text-muted-foreground hover:bg-(--accent) hover:text-foreground focus-visible:outline-2 focus-visible:outline-(--primary)"
-                    >
-                      LIMPIAR CASTIGO
-                    </button>
                   </div>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
