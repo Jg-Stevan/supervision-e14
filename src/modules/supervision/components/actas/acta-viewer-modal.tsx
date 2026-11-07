@@ -226,13 +226,23 @@ function VisorAbierto() {
   const fotoActiva: FotoActa | null =
     actaActual?.fotos?.[visorActa.tipo]?.[paginaActiva - 1] ?? null;
   const impresion = actaActual?.impresion;
-  const esActaReal = Boolean(fotoActiva && impresion);
   // Etiqueta/barcode impresos del formulario visible: POR FORMULARIO desde
   // el registro (manifiesto estático D24 + RUNTIME de carga masiva D27 —
   // loader memoizado en módulo: consultar aquí es gratis); fallback al
   // encabezado a nivel de acta solo sin registro (ver U-1 más abajo).
   const registroReal =
     cargarActasReales().actas[`${visorActa.puestoId}::${visorActa.mesaId}`];
+  // D35 (2026-11-08 — anonimizar): la ranura ESTÁTICA del manifest existe
+  // para esta página (el loader metadata-only la publica en null). Con
+  // ranura y sin foto → placeholder «foto retirada (D35)» en vez del
+  // sintético D18 (el supervisor debe SABER que había foto y se retiró —
+  // no un reemplazo silencioso). Las páginas sin ranura (p. ej. la
+  // TRANSMISIÓN de Roma, nunca publicada con foto) siguen 100 % sintéticas.
+  const ranuraD35 = (() => {
+    const ranuras = registroReal?.fotos[visorActa.tipo];
+    return Array.isArray(ranuras) && paginaActiva - 1 < ranuras.length;
+  })();
+  const esActaReal = Boolean((fotoActiva || ranuraD35) && impresion);
   // U-1 (INFORME-PRUEBAS-Y-AUDITORIA) — la etiqueta/barcode del FORMULARIO
   // VISIBLE manda. El registro (manifiesto estático D24 + runtime D27)
   // indexa POR formulario (etiquetasImpresas/barcodesImpresos); `impresion`
@@ -508,6 +518,38 @@ function VisorAbierto() {
                     className="block select-none rounded-[4px] border border-(--border) bg-white"
                   />
                 </VisorZoom>
+              ) : ranuraD35 ? (
+                /* D35 — la página TIENE ranura real en el manifest pero la
+                   foto fue retirada (anonimización 2026-11-08): placeholder
+                   explícito + metadatos; jamás un reemplazo silencioso. */
+                <div
+                  className="flex min-h-full min-w-full items-center justify-center p-6"
+                  role="status"
+                  aria-label="Foto retirada del repositorio por la decisión D35"
+                >
+                  <div className="w-full max-w-[460px] rounded-[4px] border border-dashed border-(--outline-strong) bg-(--card) px-5 py-6 text-center">
+                    <EyeOff
+                      className="mx-auto size-5 text-muted-foreground"
+                      aria-hidden
+                    />
+                    <p className="label-caps mt-2 text-foreground">
+                      Foto retirada (D35)
+                    </p>
+                    <p className="body-md mt-2 text-muted-foreground">
+                      La foto real de esta página se eliminó del repositorio
+                      el 2026-11-08 (decisión D35 de anonimización). El panel
+                      conserva el encabezado impreso y los metadatos de la
+                      mesa; la imagen solo vive —si existe— en el hub
+                      autenticado del puente.
+                    </p>
+                    {impresion && (
+                      <p className="font-data mt-3 text-[11px] text-muted-foreground">
+                        CONSULADO {impresion.consulado} · {impresion.pais} ·
+                        MESA {impresion.mesa} · {impresion.lugar}
+                      </p>
+                    )}
+                  </div>
+                </div>
               ) : (
                 mesa && (
                   <VisorZoom

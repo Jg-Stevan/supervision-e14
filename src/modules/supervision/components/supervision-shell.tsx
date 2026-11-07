@@ -13,6 +13,7 @@ import {
   Inbox,
   LogOut,
   Menu,
+  Settings,
   Upload,
   X,
   type LucideIcon,
@@ -42,6 +43,9 @@ import { VistaMonitor } from "./monitor-global";
 import { VistaAnomalias } from "./vista-anomalias";
 // Ronda C — la recepción volvió: métricas r5 (KPI TOTAL, RITMO, FLUJO…).
 import { VistaRecepcion } from "./vista-recepcion";
+// 0.2/H-2 + 0.6 — vista CONFIGURACIÓN: token de lectura del hub (localStorage
+// del supervisor, jamás en el bundle) + aviso «Privacidad y retención».
+import { VistaAjustes } from "./vista-ajustes";
 // KIT carga-masiva-supervision-v1 (D27) — la vista CARGA MASIVA es el módulo
 // digitalizador trasplantado (src/modules/digitalizador/**). ÚNICO seam de
 // UI supervision→digitalizador: la vista recibe `onVerEnMonitor` para
@@ -82,7 +86,8 @@ export type VistaId =
   | "recepcion"
   | "carga-masiva"
   | "anomalias"
-  | "perfil";
+  | "perfil"
+  | "ajustes";
 
 interface ItemNav {
   Icono: LucideIcon;
@@ -121,6 +126,8 @@ const ITEMS_NAV: ItemNav[] = [
   // KIT perfil-recursos-v1 — diagnóstico de recursos del dispositivo
   // (gama baja/media/alta · PC/móvil): detección + plan recomendado.
   { Icono: Cpu, etiqueta: "Perfil del dispositivo", vista: "perfil" },
+  // 0.2/H-2 + 0.6 — token de lectura del hub + aviso de privacidad.
+  { Icono: Settings, etiqueta: "Configuración", vista: "ajustes" },
 ];
 
 const CLASE_ITEM =
@@ -277,6 +284,9 @@ function VistaActual({
     case "perfil":
       // KIT perfil-recursos-v1 — diagnóstico del dispositivo.
       return <VistaPerfil />;
+    case "ajustes":
+      // 0.2/H-2 + 0.6 — token de lectura + privacidad/retención.
+      return <VistaAjustes />;
     default:
       return <VistaMonitor />;
   }

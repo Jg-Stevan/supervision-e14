@@ -1,7 +1,8 @@
 {
-  "version": "actas-reales-v1",
+  "version": "actas-reales-v2-metadata",
+  "fotos": "eliminadas-por-D35",
   "fuente": "digitalizador — muestras de práctica reales (Consulados El Cairo, Roma y Barcelona-Girona)",
-  "nota": "El módulo NO lee votos ni interpreta el contenido de la imagen. Solo ubica cada foto en su ranura (idEnlace + mesa + formulario + página) y la muestra junto a la información impresa.",
+  "nota": "D35 (opción A — anonimizar, 2026-11-08): las 8 fotos reales (4 actas × 2 páginas, WebP) de la carpeta de assets de este kit y la copia JPG del módulo digitalizador se ELIMINARON del repositorio. Este manifest queda METADATA-ONLY: conserva la ubicación (idEnlace + mesa + formulario + páginas + encabezado impreso verbatim) pero SIN referencias a archivo de foto. El loader (actas-reales.ts) publica las ranuras de página como null y el visor muestra el placeholder «foto retirada (D35)» / el documento sintético D18. Evidencia de auditoría de lo que había (solo JSON, sin fotos): docs/historico/actas-reales-manifest.original.json — rutas y nombres exactos en SECURITY.md §D35. La historia git ANTERIOR al rewrite (1.3, script aparte) aún contiene los blobs y los nombres de archivo con códigos de mesa. El módulo NO lee votos ni interpreta el contenido de la imagen.",
   "actas": [
     {
       "idEnlace": "88_335_005_02",
@@ -19,8 +20,8 @@
         "lugar": "El Cairo - Consulado"
       },
       "paginas": [
-        { "pagina": 1, "archivo": "E14_88_335_005_02_001_TRANSMISION-1.webp" },
-        { "pagina": 2, "archivo": "E14_88_335_005_02_001_TRANSMISION-2.webp" }
+        { "pagina": 1 },
+        { "pagina": 2 }
       ]
     },
     {
@@ -39,8 +40,8 @@
         "lugar": "El Cairo - Consulado"
       },
       "paginas": [
-        { "pagina": 1, "archivo": "E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.webp" },
-        { "pagina": 2, "archivo": "E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.webp" }
+        { "pagina": 1 },
+        { "pagina": 2 }
       ]
     },
     {
@@ -59,8 +60,8 @@
         "lugar": "Roma - Consulado"
       },
       "paginas": [
-        { "pagina": 1, "archivo": "E14_88_495_010_02_001_DELEGADOS-1.webp" },
-        { "pagina": 2, "archivo": "E14_88_495_010_02_001_DELEGADOS-2.webp" }
+        { "pagina": 1 },
+        { "pagina": 2 }
       ]
     },
     {
@@ -79,8 +80,8 @@
         "lugar": "Barcelona - Girona"
       },
       "paginas": [
-        { "pagina": 1, "archivo": "E14_88_355_003_08_001_DELEGADOS-1.webp" },
-        { "pagina": 2, "archivo": "E14_88_355_003_08_001_DELEGADOS-2.webp" }
+        { "pagina": 1 },
+        { "pagina": 2 }
       ]
     }
   ]

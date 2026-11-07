@@ -51,37 +51,49 @@ describe("getMesasDePuesto — clonado profundo (M11)", () => {
 });
 
 describe("getActaDeMesa — clonarActa profundo incluyendo fotos/impresión (M11)", () => {
-  test("mutar acta + fotos + impresión NO corrompe el acta en caché", async () => {
+  test("mutar acta + ranuras de fotos + impresión NO corrompe el acta en caché", async () => {
     const acta = await mockSupervisionRepository.getActaDeMesa(ID_ENLACE_ROMA, "001");
     expect(acta).not.toBeNull();
-    // El ancla Roma trae fotos reales (D44) + encabezado impreso verbatim.
+    // El ancla Roma conserva la paginación real (D44) — pero desde D35
+    // (2026-11-08) las fotos reales NO viven en el repo: las ranuras son
+    // null (metadata-only) + encabezado impreso verbatim.
     expect(acta?.fotos?.DELEGADOS?.length).toBeGreaterThan(0);
+    expect(acta?.fotos?.DELEGADOS?.[0]).toBeNull();
     expect(acta?.impresion).toBeDefined();
     const snapshot = clon(acta) as ActaMesa;
 
-    // Mutación PROFUNDA: historial, formularios, fotos e impresión.
-    const foto = acta?.fotos?.DELEGADOS?.[0] as FotoActa;
+    // Mutación PROFUNDA: historial, formularios, RANURAS de fotos (el
+    // ARREGLO también se clona — un mutador externo no toca la caché) e
+    // impresión.
     acta!.historial[0].hora = "99:99 LOCAL";
     acta!.formularios.TRANSMISION[1].estado = "PENDIENTE";
     acta!.formularios.DELEGADOS[0].numero = 99;
-    foto.archivo = "CORRUMPIDO.png";
-    foto.alto = -1;
+    acta!.fotos!.DELEGADOS![0] = {
+      src: "CORRUMPIDO",
+      ancho: -1,
+      alto: -1,
+      archivo: "CORRUMPIDO.png",
+    } satisfies FotoActa;
     acta!.impresion!.pais = "CORRUMPIDO";
 
     const releida = await mockSupervisionRepository.getActaDeMesa(ID_ENLACE_ROMA, "001");
     expect(releida).toEqual(snapshot);
   }, 20_000);
 
-  test("fotos del acta: los objetos FotoActa NO están aliasados al loader", async () => {
+  test("ranuras de fotos del acta: el ARREGLO no está aliasado al loader (desde D35 las ranuras son null)", async () => {
     const a = await mockSupervisionRepository.getActaDeMesa(ID_ENLACE_ROMA, "001");
     const snapshot = clon(a) as ActaMesa;
-    const foto = a?.fotos?.DELEGADOS?.[0] as FotoActa;
-    expect(foto.archivo).toBeTruthy();
-    foto.archivo = "ALIAS-TEST.png";
+    // D35: la ranura estática es null; se escribe una foto FALSA en la
+    // copia recibida y la relectura debe seguir sirviendo el null original.
+    expect(a?.fotos?.DELEGADOS?.[0]).toBeNull();
+    a!.fotos!.DELEGADOS![0] = {
+      src: "ALIAS-TEST",
+      ancho: 1,
+      alto: 1,
+      archivo: "ALIAS-TEST.png",
+    } satisfies FotoActa;
     const b = await mockSupervisionRepository.getActaDeMesa(ID_ENLACE_ROMA, "001");
-    expect((b?.fotos?.DELEGADOS?.[0] as FotoActa).archivo).toBe(
-      (snapshot.fotos!.DELEGADOS![0] as FotoActa).archivo
-    );
+    expect(b?.fotos?.DELEGADOS?.[0]).toBeNull();
     expect(b).toEqual(snapshot);
   }, 20_000);
 });

@@ -43,6 +43,7 @@ const VISTAS_VALIDAS: readonly string[] = [
   "carga-masiva",
   "anomalias",
   "perfil",
+  "ajustes",
 ];
 
 const DIAS_VALIDOS: readonly string[] = [
