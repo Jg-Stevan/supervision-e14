@@ -87,6 +87,13 @@ let workerProm: Promise<TesseractWorkerMod> | null = null;
  *  callback ACTIVO se intercambia por reconocimiento). */
 let progresoEnVuelo: ((p: number) => void) | null = null;
 
+/** Tesseract v5 arma un blob worker e `importScripts` no resuelve rutas
+ *  relativas contra `blob:` — las tres rutas deben ser absolutas. */
+function urlAbsoluta(ruta: string): string {
+  if (typeof location === "undefined") return ruta;
+  return new URL(ruta, location.href).href;
+}
+
 async function crearWorkerInterno(): Promise<TesseractWorkerMod> {
   try {
     const { createWorker, OEM, PSM } = await import("tesseract.js");
@@ -95,9 +102,9 @@ async function crearWorkerInterno(): Promise<TesseractWorkerMod> {
       // worker + núcleos WASM + traineddata best. DIRECTORIO corePath (no
       // archivo fijo): la lib elige simd-lstm o lstm según la sonda SIMD
       // del dispositivo (ambos vendidos — paridad D/S).
-      workerPath: `${publicBaseEfectivo()}/vendor/tesseract/worker.min.js`,
-      corePath: `${publicBaseEfectivo()}/vendor/tesseract`,
-      langPath: `${publicBaseEfectivo()}${opciones.langPath}`,
+      workerPath: urlAbsoluta(`${publicBaseEfectivo()}/vendor/tesseract/worker.min.js`),
+      corePath: urlAbsoluta(`${publicBaseEfectivo()}/vendor/tesseract`),
+      langPath: urlAbsoluta(`${publicBaseEfectivo()}${opciones.langPath}`),
       logger: (m: { status?: string; progress?: number }) => {
         if (m.status === "recognizing text" && progresoEnVuelo) {
           progresoEnVuelo(m.progress ?? 0); // ANALIZANDO vivo (mismo emit del pipeline)

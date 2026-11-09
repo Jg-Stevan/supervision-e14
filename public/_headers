@@ -23,6 +23,10 @@
 #   · connect-src http://127.0.0.1:* http://localhost:* → sidecar OCR nativo
 #     (KIT e14-ocr-nativo-v1). Solo BUCLE LOCAL: flags-schema rechaza
 #     cualquier otro host y el sidecar responde CORP: cross-origin (COEP).
+#   · connect-src https://e14-puente.julistevan02.workers.dev → hub del
+#     puente (remediación 0.2.2): origen FIJO del GET /actas autenticado
+#     (token de lectura del supervisor — Configuración). No es string
+#     arbitrario configurable: no abre canal de exfiltración.
 #   · frame-ancestors 'none' + X-Frame-Options → anti-clickjacking (la app
 #     procesa contenido no confiable: PDFs, imágenes, QR).
 # NOTA: en GitHub Pages _headers no aplica — la misma CSP viaja como <meta>
@@ -30,7 +34,7 @@
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://e14-puente.julistevan02.workers.dev; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

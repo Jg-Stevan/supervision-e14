@@ -1,18 +1,28 @@
 /**
- * Ingesta de las ACTAS REALES del digitalizador (kit SUP-6 §3-T3 / D24-D25).
+ * Ingesta de las ACTAS REALES del digitalizador (kit SUP-6 §3-T3 / D24-D25)
+ * — METADATA-ONLY desde D35.
+ *
+ * D35 (opción A — anonimizar, 2026-11-08): las 8 fotos reales (4 actas ×
+ * 2 páginas, WebP q75, ~1,17 MB) se ELIMINARON de `assets/` junto con la
+ * segunda copia del módulo digitalizador (nombre exacto y rutas en
+ * SECURITY.md §D35). Este loader
+ * ya NO importa imágenes: publica METADATOS (encabezado impreso verbatim,
+ * etiqueta/barcode/código de forma por formulario y la paginación real) y
+ * cada ranura de página queda en `null` — el visor muestra el placeholder
+ * «foto retirada (D35)» y el documento sintético D18 como cualquier página
+ * sin foto. Qué había (solo JSON, sin fotos): `docs/historico/actas-reales-
+ * manifest.original.json`. La historia git ANTERIOR al rewrite (1.3, script
+ * aparte que se entrega) aún contiene los blobs y los nombres con códigos
+ * de mesa.
  *
  * CONTRATO (D24): `actas-reales-manifest.json` declara las actas —
  * `idEnlace`, `mesa`, `formulario` (clave de dominio TRANSMISION |
  * DELEGADOS), `etiquetaImpresa`, `barcodeImpreso`, `impresion` (verbatim)
- * y `paginas[]`. Los assets son fotos reales de actas E-14 (documentos
- * públicos) importadas estáticamente desde `assets/`. Convención de nombre
- * (la del digitalizador): `E14_<idEnlace>_<mesa>_<PLANCHA>-<pagina>.webp`
- * (DELEGADOS queda como `DELEGADOS` o `CONSUL_EMBAJADOR` según la plancha
- * de origen — ambas son la clave de dominio DELEGADOS).
- *
- * PESO: las fotos vienen recomprimidas a WebP q75 a su ancho nativo
- * (~1.2 MB las 8, contra 1.8 MB en PNG) — el repo no carga el escaneo sin
- * comprimir.
+ * y `paginas[]` (solo números de página — sin archivo desde D35).
+ * Convención histórica de nombre (la del digitalizador, hoy sin asset):
+ * `E14_<idEnlace>_<mesa>_<PLANCHA>-<pagina>.webp` (DELEGADOS queda como
+ * `DELEGADOS` o `CONSUL_EMBAJADOR` según la plancha de origen — ambas son
+ * la clave de dominio DELEGADOS).
  *
  * VALIDACIÓN (D25 a–e) de CADA acta contra el catálogo DIVIPOLA — las
  * puertas (a)/(b) por el validador ÚNICO `data/validacion-d25.ts`
@@ -20,10 +30,10 @@
  * jamás lanza — C1):
  * (a) `idEnlace` existe en el catálogo; (b) `mesa` ≤ `totalMesas` del
  * puesto; (c) `formulario` es clave conocida del dominio; (d) páginas
- * 1..N completas y continuas; (e) asset importable. La que falla NO se
- * publica y queda `BLOQUEADA: <motivo>` en consola y en el reporte
- * (cuarentena); el resto sigue. Guardrail: máx 10 assets y 2 MB totales;
- * más → BLOQUEADA del manifest completo (hoy: 8 / 1.2 MB — dentro).
+ * 1..N completas y continuas. La que falla NO se publica y queda
+ * `BLOQUEADA: <motivo>` en consola y en el reporte (cuarentena); el resto
+ * sigue. Guardrail (D25): máx 10 actas publicadas — el tope de peso/bytes
+ * de assets perdió objeto con D35 (ya no hay binarios que cargar).
  *
  * REGLA DE ORO (§0-1): la foto se UBICA, no se INTERPRETA — aquí no hay
  * OCR ni cifras de votación; solo ranuras (idEnlace + mesa + formulario
@@ -42,60 +52,23 @@ import type {
 import { validarJoinDivipola } from "../validacion-d25";
 import manifestBruto from "./actas-reales-manifest.json";
 
-// ─── Assets (imports estáticos — Next entrega { src, width, height }) ──────
-
-import fotoTransmision1 from "./assets/E14_88_335_005_02_001_TRANSMISION-1.webp";
-import fotoTransmision2 from "./assets/E14_88_335_005_02_001_TRANSMISION-2.webp";
-import fotoConsul1 from "./assets/E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.webp";
-import fotoConsul2 from "./assets/E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.webp";
-import fotoRoma1 from "./assets/E14_88_495_010_02_001_DELEGADOS-1.webp";
-import fotoRoma2 from "./assets/E14_88_495_010_02_001_DELEGADOS-2.webp";
-import fotoBarcelona1 from "./assets/E14_88_355_003_08_001_DELEGADOS-1.webp";
-import fotoBarcelona2 from "./assets/E14_88_355_003_08_001_DELEGADOS-2.webp";
-
-/** Assets importables por nombre de archivo (D24-e). */
-const ASSETS: Record<string, { src: string; width: number; height: number }> = {
-  "E14_88_335_005_02_001_TRANSMISION-1.webp": fotoTransmision1,
-  "E14_88_335_005_02_001_TRANSMISION-2.webp": fotoTransmision2,
-  "E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.webp": fotoConsul1,
-  "E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.webp": fotoConsul2,
-  "E14_88_495_010_02_001_DELEGADOS-1.webp": fotoRoma1,
-  "E14_88_495_010_02_001_DELEGADOS-2.webp": fotoRoma2,
-  "E14_88_355_003_08_001_DELEGADOS-1.webp": fotoBarcelona1,
-  "E14_88_355_003_08_001_DELEGADOS-2.webp": fotoBarcelona2,
-};
-
-/**
- * Peso en bytes de cada asset (el bundle no expone el peso del import).
- * SOLO alimenta el guardrail D25; no es dato de dominio.
- */
-const PESO_ASSETS: Record<string, number> = {
-  "E14_88_335_005_02_001_TRANSMISION-1.webp": 160_332,
-  "E14_88_335_005_02_001_TRANSMISION-2.webp": 137_352,
-  "E14_88_335_005_02_001_CONSUL_EMBAJADOR-1.webp": 173_622,
-  "E14_88_335_005_02_001_CONSUL_EMBAJADOR-2.webp": 131_546,
-  "E14_88_495_010_02_001_DELEGADOS-1.webp": 170_540,
-  "E14_88_495_010_02_001_DELEGADOS-2.webp": 146_792,
-  "E14_88_355_003_08_001_DELEGADOS-1.webp": 170_442,
-  "E14_88_355_003_08_001_DELEGADOS-2.webp": 133_140,
-};
-
 // ─── Guardrail (D25) ────────────────────────────────────────────────────────
 
-const MAX_ASSETS = 10;
-const MAX_BYTES_TOTALES = 2 * 1024 * 1024;
+const MAX_ACTAS = 10;
 
 // ─── Contratos del loader ──────────────────────────────────────────────────
 
-/** Acta real PUBLICADA para una mesa: fotos por formulario (índice =
- * página − 1) + encabezado impreso verbatim + etiqueta/barcode impresos
- * por formulario (del manifest — la etiqueta impresa «CÓNSUL/EMBAJADOR»
- * es la clave de dominio DELEGADOS, D24). */
+/** Acta real PUBLICADA para una mesa: ranuras por formulario (índice =
+ * página − 1; `null` desde D35 — foto retirada — o ausente → esa página
+ * cae al sintético D18) + encabezado impreso verbatim + etiqueta/barcode
+ * impresos por formulario (del manifest — la etiqueta impresa
+ * «CÓNSUL/EMBAJADOR» es la clave de dominio DELEGADOS, D24). */
 export interface ActaRealLista {
   idEnlace: string;
   mesa: string;
   /** fotos[formulario][página − 1]; null/ausente → esa página cae al
-   * sintético D18. */
+   * sintético D18 (desde D35: TODAS las ranuras del manifest son null —
+   * el largo del arreglo conserva la paginación real). */
   fotos: Partial<Record<FormularioTipo, (FotoActa | null)[]>>;
   /** Encabezado impreso verbatim (del manifest — se muestra, no se
    * interpreta). */
@@ -140,7 +113,8 @@ function esTexto(valor: unknown): valor is string {
   return typeof valor === "string" && valor.length > 0;
 }
 
-/** Forma mínima de UNA entrada del manifest (D24) — null si no es válida. */
+/** Forma mínima de UNA entrada del manifest (D24, metadata-only D35) —
+ * null si no es válida. */
 interface EntradaManifest {
   idEnlace: string;
   mesa: string;
@@ -151,7 +125,7 @@ interface EntradaManifest {
    *  trae, el panel degrada a «—» en vez de asumir el mismo código. */
   codigoFormaImpreso?: string;
   impresion: ImpresionActa;
-  paginas: { pagina: number; archivo: string }[];
+  paginas: { pagina: number }[];
 }
 
 function validarEntrada(bruto: unknown): EntradaManifest | null {
@@ -174,13 +148,14 @@ function validarEntrada(bruto: unknown): EntradaManifest | null {
     if (!esTexto(impresion[campo])) return null;
   }
   if (!Array.isArray(r.paginas) || r.paginas.length === 0) return null;
-  const paginas: { pagina: number; archivo: string }[] = [];
+  const paginas: { pagina: number }[] = [];
   for (const paginaBruta of r.paginas) {
     if (typeof paginaBruta !== "object" || paginaBruta === null) return null;
     const p = paginaBruta as Record<string, unknown>;
     if (typeof p.pagina !== "number" || !Number.isInteger(p.pagina)) return null;
-    if (!esTexto(p.archivo)) return null;
-    paginas.push({ pagina: p.pagina, archivo: p.archivo });
+    // D35: el manifest metadata-only NO trae `archivo` (y si lo trajera no
+    // se usa — jamás hay asset que importar).
+    paginas.push({ pagina: p.pagina });
   }
   return {
     idEnlace: r.idEnlace,
@@ -203,7 +178,7 @@ function validarEntrada(bruto: unknown): EntradaManifest | null {
   };
 }
 
-// ─── Ingesta (D24/D25) ──────────────────────────────────────────────────────
+// ─── Ingesta (D24/D25 · metadata-only D35) ──────────────────────────────────
 
 function ingestar(): ResultadoIngesta {
   const bloqueadas: ActaRealBloqueada[] = [];
@@ -219,25 +194,11 @@ function ingestar(): ResultadoIngesta {
       : null;
   const entradas = Array.isArray(manifest?.actas) ? manifest!.actas : [];
 
-  // Guardrail D25 (ANTES de publicar nada): máx 10 assets y 2 MB totales
-  // — más → BLOQUEADA del manifest completo.
-  const archivosUnicos = new Set<string>();
-  for (const entrada of entradas) {
-    if (typeof entrada !== "object" || entrada === null) continue;
-    const paginas = (entrada as { paginas?: unknown }).paginas;
-    if (!Array.isArray(paginas)) continue;
-    for (const pagina of paginas) {
-      if (typeof pagina !== "object" || pagina === null) continue;
-      const archivo = (pagina as { archivo?: unknown }).archivo;
-      if (esTexto(archivo)) archivosUnicos.add(archivo);
-    }
-  }
-  const bytesTotales = [...archivosUnicos].reduce(
-    (suma, archivo) => suma + (PESO_ASSETS[archivo] ?? 0),
-    0
-  );
-  if (archivosUnicos.size > MAX_ASSETS || bytesTotales > MAX_BYTES_TOTALES) {
-    const motivo = `guardrail de assets excedido (${archivosUnicos.size} > ${MAX_ASSETS} o ${(bytesTotales / 1024 / 1024).toFixed(2)} MB > 2 MB)`;
+  // Guardrail D25 (ANTES de publicar nada): máx 10 actas — más →
+  // BLOQUEADA del manifest completo. (El tope de peso/2 MB de assets de la
+  // v1 perdió objeto con D35: ya no hay binarios que importar.)
+  if (entradas.length > MAX_ACTAS) {
+    const motivo = `guardrail excedido (${entradas.length} actas > ${MAX_ACTAS})`;
     bloquear("(manifest)", motivo);
     return { actas: {}, bloqueadas };
   }
@@ -276,16 +237,6 @@ function ingestar(): ResultadoIngesta {
       continue;
     }
 
-    // (e) asset importable (todos los archivos de la entrada).
-    const faltantes = entrada.paginas.filter((p) => !ASSETS[p.archivo]);
-    if (faltantes.length > 0) {
-      bloquear(
-        clave,
-        `(e) asset no importable: ${faltantes.map((p) => p.archivo).join(", ")}`
-      );
-      continue;
-    }
-
     // Publicar (merge por clave — las 2 entradas del ancla comparten mesa).
     const lista =
       actas[clave] ??
@@ -303,16 +254,11 @@ function ingestar(): ResultadoIngesta {
       continue;
     }
     const ordenadas = [...entrada.paginas].sort((x, y) => x.pagina - y.pagina);
-    lista.fotos[entrada.formulario] = ordenadas.map((p) => {
-      const asset = ASSETS[p.archivo];
-      const foto: FotoActa = {
-        src: asset.src,
-        ancho: asset.width,
-        alto: asset.height,
-        archivo: p.archivo,
-      };
-      return foto;
-    });
+    // D35 — SIN foto: cada ranura queda `null` (el largo conserva la
+    // paginación real del papel; la imagen cae al placeholder/sintético).
+    lista.fotos[entrada.formulario] = ordenadas.map(
+      (_p): FotoActa | null => null
+    );
     lista.etiquetasImpresas[entrada.formulario] = entrada.etiquetaImpresa;
     lista.barcodesImpresos[entrada.formulario] = entrada.barcodeImpreso;
     // V2-01 — el código impreso viaja con la entrada (todas las copias del
@@ -329,7 +275,8 @@ function ingestar(): ResultadoIngesta {
 
 let RESULTADO: ResultadoIngesta | null = null;
 
-/** Actas reales validadas + publicadas (cuarentena aparte — D25). */
+/** Actas reales validadas + publicadas (cuarentena aparte — D25). Desde
+ * D35 solo METADATOS: las fotos reales no viven en el repo. */
 export function cargarActasReales(): ResultadoIngesta {
   if (!RESULTADO) RESULTADO = ingestar();
   return RESULTADO;

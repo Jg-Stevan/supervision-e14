@@ -2,10 +2,18 @@
  * sim-assets.ts — muestras de la SIMULACIÓN de cámara (SPEC-camara-funcional
  * §G, SPEC-e14-score-ocr §D3/D8.1).
  *
- * QUÉ ES: cinco fotos reales de actas E-14 (documentos públicos), la misma
- * entrada que produce una captura: `File` de imagen → pipeline real
- * (detect + warp + OCR + score). Están recomprimidas (≤1400 px de ancho,
- * JPEG q72) para que el repo no cargue los 3-4 MB por foto del original.
+ * QUÉ ES: fixtures de la simulación, la misma entrada que produce una
+ * captura: `File` de imagen → pipeline real (detect + warp + OCR + score).
+ * Están recomprimidas (≤1400 px de ancho, JPEG q72) para que el repo no
+ * cargue los 3-4 MB por foto del original.
+ *
+ * D35 (opción A — anonimizar, 2026-11-08): la muestra «óptima» ERA una foto
+ * real de acta (retirada del repo junto con las 8 WebP del kit actas-reales
+ * — ver SECURITY.md §D35). Su ranura cae a una FIXTURE SINTÉTICA
+ * (`acta-sim-intermedia.jpg`, la más limpia de las disponibles) con el
+ * mismo tratamiento de ranura (`sinRecorte: false` → pipeline COMPLETO
+ * con detect+warp): los índices del chip de score (§D3) y el ciclo
+ * rotativo (§G-2) NO cambian.
  *
  * CONTRATO:
  *   · ciclo rotativo óptima → intermedia → baja → extra… (§G-2)
@@ -14,7 +22,7 @@
  *     no-regresión dura AC-S2)
  *   · `sinRecorte` viaja con la ENTRADA, no con el chip (§D8.1)
  */
-import actaSimUrl from "@/modules/digitalizador/assets/acta-e14-real.jpg";
+import actaSimOptimaUrl from "@/modules/digitalizador/assets/acta-sim-intermedia.jpg";
 import actaSimIntermediaUrl from "@/modules/digitalizador/assets/acta-sim-intermedia.jpg";
 import actaSimBajaUrl from "@/modules/digitalizador/assets/acta-sim-baja.jpg";
 import actaSimExtra1Url from "@/modules/digitalizador/assets/acta-sim-extra-1.jpg";
@@ -27,12 +35,14 @@ import actaSimExtra2Url from "@/modules/digitalizador/assets/acta-sim-extra-2.jp
  * (§D8.1): el flag viaja con el asset, no con el chip.
  */
 export interface ActaSim {
-  src: typeof actaSimUrl;
+  src: typeof actaSimOptimaUrl;
   nombre: string;
   sinRecorte: boolean;
 }
 const ACTAS_SIM: readonly ActaSim[] = [
-  { src: actaSimUrl, nombre: "acta-e14-real.jpg", sinRecorte: false },
+  // Ranura «óptima» — fixture sintética desde D35 (la foto real salió del
+  // repo); `nombre` es el archivo VERDADERO que recibe el pipeline.
+  { src: actaSimOptimaUrl, nombre: "acta-sim-intermedia.jpg", sinRecorte: false },
   { src: actaSimIntermediaUrl, nombre: "acta-sim-intermedia.jpg", sinRecorte: true },
   { src: actaSimBajaUrl, nombre: "acta-sim-baja.jpg", sinRecorte: true },
   { src: actaSimExtra1Url, nombre: "acta-sim-extra-1.jpg", sinRecorte: true },

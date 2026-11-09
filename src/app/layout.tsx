@@ -38,7 +38,11 @@ const CSP_META = [
   // KIT e14-ocr-nativo-v1: el sidecar loopback (flag `ocrNativoUrl`) es un
   // fetch outbound a 127.0.0.1 — la CSP solo abre BUCLE LOCAL (nunca una
   // host externa: flags-schema ya restringe el valor a 127.0.0.1/localhost).
-  "connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*",
+  // 0.2.2 (remediación): el hub del puente entra en connect-src como origen
+  // FIJO (no un string arbitrario — no es canal de exfiltración): el sondeo
+  // autenticado GET /actas del panel puede apuntar a producción con el
+  // token de lectura (Configuración → Token de lectura del hub).
+  "connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://e14-puente.julistevan02.workers.dev",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",

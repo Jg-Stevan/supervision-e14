@@ -31,6 +31,11 @@
 import { publicarActaMasiva } from "./actas-runtime";
 import type { EntradaActaMasiva } from "./actas-runtime";
 import type { FormularioTipo, ImpresionActa } from "../domain/acta";
+// 0.2/H-2 — token de lectura: el GET del hub dejó de ser anónimo. Con
+// origen NO local (hub remoto del puente) el sondeo viaja autenticado;
+// con origen local (hub-local.mjs, LAN) NO se manda auth — mismo criterio
+// `esOrigenLocal` del hermano (ver lib/token-lectura.ts).
+import { headersDeLectura } from "../lib/token-lectura";
 
 /** Tope del contrato del hub. */
 const RUTA_HUB = "/actas";
@@ -140,7 +145,22 @@ async function traerActas(
   desde: number,
   fetchComo: FetchComo
 ): Promise<{ actas: ActaHub[]; ahora: number; total: number }> {
-  const res = await fetchComo(urlHub(desde), { headers: { accept: "application/json" } });
+  // 0.2/H-2 — el sondeo viaja con el header de lectura SOLO si el origen
+  // del hub no es local (LAN same-origin → {} — hub-local.mjs no pide
+  // auth; el modo local no se toca).
+  const origen = typeof window !== "undefined" ? window.location.origin : "";
+  const res = await fetchComo(urlHub(desde), {
+    headers: { accept: "application/json", ...headersDeLectura(origen) },
+  });
+  // 401 NUNCA es fallo mudo (H-2): el hub autenticado rechazó el sondeo
+  // sin credenciales → mensaje ACCIONABLE (la tarjeta del hub lo muestra
+  // y apunta a Configuración); el genérico `HTTP <status>` queda para el
+  // resto de errores.
+  if (res.status === 401) {
+    throw new Error(
+      "HTTP 401 — sin token de lectura: configúralo en Configuración (vista Configuración → Token de lectura del hub)"
+    );
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const cuerpo = (await res.json()) as { ok?: boolean; ahora?: number; total?: number; actas?: ActaHub[] };
   if (!cuerpo?.ok) throw new Error("respuesta sin ok");
@@ -149,7 +169,14 @@ async function traerActas(
 
 /** Una fila del hub → el sobre que consume el embudo de publicación. La foto
  *  NO viaja como dataURL en el sondeo (serían megas cada 4 s): se pasa la URL
- *  del hub, que el visor resuelve como cualquier otra imagen same-origin. */
+ *  del hub, que el visor resuelve como cualquier otra imagen same-origin.
+ *
+ *  NOTA 0.2 (auth de la foto): `fotoUrl` es `/foto/<seq>` RELATIVA — solo
+ *  existe en el hub local (same-origin/LAN, que no pide auth, coherente
+ *  con hub-local.mjs) y se resuelve contra el origen del panel. Un
+ *  `Authorization` no puede viajar en un `<img>`; si el hub remoto llegara
+ *  a servir /foto, el panel tendría que traerla por fetch autenticado
+ *  (headersDeLectura) y convertirla a blob URL — hoy no hay tal ruta. */
 function entradaDesdeHub(a: ActaHub): EntradaActaMasiva {
   const origen = typeof window !== "undefined" ? window.location.origin : "";
   return {
