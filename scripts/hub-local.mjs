@@ -20,8 +20,9 @@
  * RUTAS:
  *   GET  /…                estático del MÓVIL   (digielect14/out, basePath "")
  *   GET  /supervision/…    estático del PANEL   (supervision-e14/out, basePath /supervision)
- *   POST /actas            ← { dispositivo, actas: EntradaPuente[] }  (tope 10)
+ *   POST /v1/actas         ← { dispositivo, actas: EntradaPuente[] }  (tope 10)
  *   GET  /actas?desde=<ts> → { ok, ahora, total, actas[] }  (cursor epoch ms, exclusivo)
+ *   (`/actas` en POST se acepta como alias del contrato viejo)
  *   GET  /foto/<seq>       la foto almacenada (dataURL → bytes, con su content-type)
  *   GET  /hub/estado       contadores en vivo (para el runbook)
  *   POST /hub/reset        vacía el almacén (demo)
@@ -308,7 +309,8 @@ async function manejar(req) {
   const url = new URL(req.url);
   const ruta = url.pathname;
 
-  if (ruta === "/actas") {
+  // El móvil publica en `/v1/actas` (contrato 0.7); el panel sondea `/actas`.
+  if (ruta === "/actas" || ruta === "/v1/actas") {
     if (req.method === "POST") return recibirActas(req, url);
     if (req.method === "GET") return listarActas(url);
     return json({ ok: false, error: "método no soportado" }, 405);
