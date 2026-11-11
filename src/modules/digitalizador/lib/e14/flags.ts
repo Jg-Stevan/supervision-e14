@@ -208,6 +208,15 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // sobre el lado largo de un A4 = la de un escáner de mesa).
   // Override: {"procesoLadoMayor":4032} = el default anterior, byte a byte.
   procesoLadoMayor: 1920,
+  // Auditoría 2026-11-11 (#3) — lote DEMO (fixtures sintéticas) solo en
+  // desarrollo: el botón exige este flag + NODE_ENV !== "production".
+  // Override: {"loteDemoLocal":true} en localStorage/flags.json.
+  loteDemoLocal: false,
+  // Auditoría 2026-11-11 (#4) — ancla DEMO del panel de supervisión: el
+  // acta real de Roma mesa 001 y las notificaciones/anomalías sembradas
+  // SOLO existen con este flag + el banner DEMO visible. Default false.
+  // Override: {"anclaDemoSupervision":true} en localStorage/flags.json.
+  anclaDemoSupervision: false,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */

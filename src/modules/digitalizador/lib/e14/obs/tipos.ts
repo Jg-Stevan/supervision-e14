@@ -81,6 +81,17 @@ export interface FlagsApp {
   ocrColaGlobal: boolean; // default false (hoy, byte-idéntico) — UN solo cliente a la vez de las sesiones ORT (det/cls/rec del reconocer, det del probe y lote de rec del probe). Con poolWorkers=2 dos actas llaman al MISMO singleton y sus session.run() se solapan: el lote queda COLGADO después de un `det run OK` y la `celda` nunca aparece (benches gpu8 sin GPU y gpu13 con WebGPU, 2026-11-03). Serializar el EP (un solo device, nada se pierde) libera al otro acta para lo que sí es CPU — warp, decode y QR — que es el solapamiento que el pool 2 busca. true = con cola.
   // ─── KIT e14-proceso-lado-v1 — campo ADITIVO AL FINAL (D57) ───
   procesoLadoMayor: number; // default 1920 — lado mayor del lienzo de SALIDA del warp+enhance del lote (processImage opts.maxLongSide del core). Con cap < 4032 el JPEG se decodifica YA redimensionado (DCT, sin materializar los 12 MP) y la homografía + el modelo de sombras/Bradley/despeckle corren sobre ese lienzo: el costo es ∝ píxeles de salida y ESE es el ítem CPU más pesado del lote (procesoBwMs 34,5 s de 144,7 s de muro en gpu18, ~5,8 s por acta). El quad son fracciones 0-1 ⇒ la geometría no cambia. Curva medida en el lote demo (pool 2, perfil caliente, sonda YA fuera del muro): 4032 → 91,8 s · 2048 → 77,8 s · 1920 → 58,8-62,3 s · 1600 → 74,3 s (se aplana: no paga más). Los seis desenlaces y los seis scores de 1920 son IDÉNTICOS a los de 4032 y el blob guardado se revisó a ojo: recorte, sombras fuera y letra leíble. Rango sanado [1024, 4032].
+  // ─── Auditoría 2026-11-11 (#3) — campo ADITIVO AL FINAL (D57) ───
+  /** Lote DEMO en CARGA MASIVA (fixtures sintéticas). Solo desarrollo:
+   *  default false — el botón no existe en producción. */
+  loteDemoLocal: boolean;
+  // ─── Auditoría 2026-11-11 (#4) — campo ADITIVO AL FINAL (D57) ───
+  /** Ancla DEMO del panel de supervisión (acta real de Roma mesa 001 +
+   *  notificaciones/anomalías sembradas). Default false: sin el flag el
+   *  panel arranca VACÍO y muestra el banner DEMO — los estados sembrados
+   *  jamás se presentan como datos reales. Override:
+   *  {"anclaDemoSupervision":true} en localStorage/flags.json. */
+  anclaDemoSupervision: boolean;
 }
 
 export interface ReporteSesion {

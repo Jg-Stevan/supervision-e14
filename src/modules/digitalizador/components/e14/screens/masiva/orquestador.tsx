@@ -39,9 +39,12 @@ import { prescanYIniciar, usePrescanQrEstado, usePrescanStore } from "@/modules/
 // KIT e14-gama-adaptativa-v1 (D74): chip de gama adaptada — el tier detectado
 // consume presupuestos de recursos en BAJO/MEDIO (transparencia del dueño).
 import { planGamaActual, refrescarPlanGama, type PlanGama } from "@/modules/digitalizador/lib/e14/gama";
-// KIT visor-masiva-redesign-v1: lote DEMO (6 fotos REALES del dueño) — entra
+// KIT visor-masiva-redesign-v1: lote DEMO (4 fixtures SINTÉTICAS) — entra
 // por agregarFiles (misma puerta de siempre, pipeline completo sin atajos).
 import { fetchActasDemo } from "@/modules/digitalizador/lib/e14/actas-demo";
+// Auditoría 2026-11-11 (#3): el botón DEMO vive detrás de flag + fuera del
+// build de producción (doble cerradura).
+import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
 // Traza de la siembra demo (mismo logger del módulo — D51 formato congelado).
 import { logger } from "@/modules/digitalizador/lib/logger";
 // KIT visor-masiva-redesign-v1 — MOSTRAR ORIGINAL: el acta ENVIADA duerme su
@@ -219,9 +222,15 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   }, []);
 
   // ── KIT visor-masiva-redesign-v1 — SEMBRADO DEL LOTE DEMO (preview) ──
-  // reiniciarEnvios (cola + ledger — mismo corte del dueño) → las 6 fotos
-  // REALES entran como Files → pre-scan QR + runner de siempre.
+  // reiniciarEnvios (cola + ledger — mismo corte del dueño) → las 4 fixtures
+  // SINTÉTICAS entran como Files → pre-scan QR + runner de siempre.
   const [demoSembrando, setDemoSembrando] = useState(false);
+  const [loteDemoActivo, setLoteDemoActivo] = useState(false);
+  useEffect(() => {
+    setLoteDemoActivo(
+      leerFlags().loteDemoLocal === true && process.env.NODE_ENV !== "production",
+    );
+  }, []);
   const sembrarDemo = useCallback(async () => {
     if (demoSembrando || corriendo) return;
     setDemoSembrando(true);
@@ -731,22 +740,26 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
             </div>
 
             {/* KIT visor-masiva-redesign-v1 — botón DEMO del preview: siembra
-                el lote real del dueño (6 fotos) y arranca el pipeline. */}
-            <button
-              type="button"
-              onClick={() => void sembrarDemo()}
-              disabled={demoSembrando || corriendo}
-              aria-label="Sembrar el lote demo de 6 fotos reales y procesarlo"
-              title="Siembra el lote demo (6 fotos reales) y procesa la cola"
-              className="flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {demoSembrando ? (
-                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden />
-              ) : (
-                <span className="h-2 w-2 rounded-full border border-amber-400" aria-hidden />
-              )}
-              {demoSembrando ? "SEMBRANDO…" : "DEMO ×6"}
-            </button>
+                el lote de fixtures sintéticas y arranca el pipeline. Doble
+                cerradura (auditoría 2026-11-11, hallazgo #3): flag
+                loteDemoLocal + fuera del build de producción. */}
+            {loteDemoActivo ? (
+              <button
+                type="button"
+                onClick={() => void sembrarDemo()}
+                disabled={demoSembrando || corriendo}
+                aria-label="Sembrar el lote demo de fixtures sintéticas y procesarlo"
+                title="Siembra el lote demo (fixtures sintéticas) y procesa la cola"
+                className="flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {demoSembrando ? (
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden />
+                ) : (
+                  <span className="h-2 w-2 rounded-full border border-amber-400" aria-hidden />
+                )}
+                {demoSembrando ? "SEMBRANDO…" : "DEMO ×4"}
+              </button>
+            ) : null}
 
             {/* KIT e107-prescan-qr-cola-v1 (§D.3) + P0.3 (informe 2 §3 A7):
                 banner HOJA auto-subscrita — los emitir() del pre-scan
