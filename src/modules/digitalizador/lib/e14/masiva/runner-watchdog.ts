@@ -16,9 +16,10 @@ import { getScannerWorker, warmUpScannerWorker } from "@jg-stevan/scanner-core/c
 // el reintento pagaba sesión+calor completos (~27 s fríos medidos).
 import { rapidOcrPrecalentar, rapidOcrReiniciar } from "../ocr/rapidocr";
 import { flagsMasivaEfectivos, reportarPresionGama } from "../gama";
-// D65 (T1.3): semilla para el acta de timeout del watchdog — la MISMA que el
-// bridge usa en SU acta de timeout (solo lectura de la forma; cero criterios).
-import { ACTA_MOCK } from "@jg-stevan/scanner-core/dominio/seed";
+// D65 (T1.3) + auditoría 2026-11-11 (#10): el acta de timeout usa el MISMO
+// fallback honesto que acta-factory — sin puesto, candidaturas, jurados ni
+// barcode inventados.
+import { camposSinIdentificar, firmasSinIdentificar } from "../acta-factory";
 import type { Acta, EtapaAnalisis } from "../types";
 
 /** Espejo del DETALLE_TIMEOUT del bridge (constante PRIVADA allí): el string
@@ -136,39 +137,18 @@ async function matarYRecrearWorkers(): Promise<void> {
  *  PROCESADO EXCEDIDO — nada inventado: es el veredicto de «murió el
  *  procesado» de siempre). Sin esto la cola se congelaba para siempre. */
 function actaTimeoutWatchdog(filaId: string): Acta {
+  // Auditoría 2026-11-11 (#10): una fila RECHAZADA por timeout no hereda
+  // «ROMA» ni candidaturas ficticias. La mesa "001" es el criterio del
+  // hermano (numeroMesa sin objetivo), no un dato de un puesto real.
+  const base = camposSinIdentificar("001");
   return {
     id: `acta-watchdog-${filaId}`,
-    titulo: ACTA_MOCK.titulo,
-    // MISMA forma de ubicación del bridge (ACTA_MOCK plano + mesa seed 001 —
-    // ver construirActa del bridge: numeroMesa "001" sin objetivo).
-    ubicacion: {
-      departamento: ACTA_MOCK.departamento,
-      municipio: ACTA_MOCK.municipio,
-      zona: ACTA_MOCK.zona,
-      puesto: ACTA_MOCK.puesto,
-      mesa: "001",
-    },
-    tipo: ACTA_MOCK.tipo,
+    titulo: base.titulo,
+    ubicacion: base.ubicacion,
+    tipo: base.tipo,
     pagina: { index: 1, total: 2 },
-    candidatos: ACTA_MOCK.candidatos.map((c) => ({ ...c })),
-    firmas: [
-      {
-        nombre: ACTA_MOCK.firmas[0].nombre,
-        jurado: ACTA_MOCK.firmas[0].jurado,
-        estado: "OK",
-      },
-      {
-        nombre: ACTA_MOCK.firmas[1].nombre,
-        jurado: ACTA_MOCK.firmas[1].jurado,
-        estado: "NO_DETECTADO", // RECHAZADA — misma regla de firmas del bridge
-      },
-      {
-        nombre: ACTA_MOCK.firmas[2].nombre,
-        jurado: ACTA_MOCK.firmas[2].jurado,
-        estado: "OK",
-      },
-    ],
-    codigoBarras: ACTA_MOCK.codigoBarras,
+    candidatos: base.candidatos,
+    firmas: firmasSinIdentificar("NO_DETECTADO"),
     score: 0,
     status: "RECHAZADA",
     rechazo: { tipo: "ILEGIBLE", detalle: DETALLE_TIMEOUT },

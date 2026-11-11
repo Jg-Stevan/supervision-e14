@@ -22,11 +22,42 @@
  *     resuelta (§1) + campos reales §3.1 + señal QR (red line 10)
  */
 import { canvasCon } from "./image-utils"; // SPRINT-A A3 — factory de canvas
-import { ACTA_MOCK } from "@jg-stevan/scanner-core/dominio/seed";
 import { tituloYUbicacionDe, type ClasificacionE14 } from "@jg-stevan/scanner-core/dominio/clasificador";
 import type { PageFilter, PageQuality, Quad } from "@jg-stevan/scanner-core/core/types";
 import type { Acta, ActaFirma, ActaStatus } from "./types";
 import type { OpcionesEscaneo } from "./bridge";
+
+/** Fallback HONESTO para un acta REAL sin clasificación (auditoría
+ *  2026-11-11, hallazgos #9/#10): sin puesto de mentira, sin candidaturas
+ *  con votos, sin nombres de jurados ni barcode inventado. La mesa se
+ *  conserva cuando el llamador la conoce (mismo criterio del hermano
+ *  digielect14: scanner-core-bridge.ts, construirActa). */
+export function camposSinIdentificar(
+  numeroMesa: string,
+): Pick<Acta, "titulo" | "ubicacion" | "tipo" | "candidatos"> {
+  return {
+    titulo: "ACTA SIN IDENTIFICAR",
+    ubicacion: {
+      departamento: "—",
+      municipio: "—",
+      zona: "—",
+      puesto: "—",
+      mesa: numeroMesa,
+    },
+    tipo: "SIN CLASIFICAR",
+    candidatos: [],
+  };
+}
+
+/** Firmas de pantalla sin nombres inventados: conserva la señal de calidad
+ *  (OK/TENUE/NO_DETECTADO) y el rótulo del jurado. */
+export function firmasSinIdentificar(estadoCentral: ActaFirma["estado"]): ActaFirma[] {
+  return [
+    { nombre: "—", jurado: "JURADO 1", estado: "OK" },
+    { nombre: "—", jurado: "JURADO 2", estado: estadoCentral },
+    { nombre: "—", jurado: "JURADO 3", estado: "OK" },
+  ];
+}
 
 /** Contador de id del acta (`acta-<Date.now()>-<n>`) — era `RealCoreBridge
  *  #contador`; ver cabecera del módulo (M5b) para la equivalencia. */
@@ -110,19 +141,23 @@ export function construirActa(
     campos.status === "ADVERTENCIA" ? "TENUE" : campos.status === "RECHAZADA" ? "NO_DETECTADO" : "OK";
 
   // §1.2 (SPEC-titulo-ubicacion): clasificación AUTO → el acta nace con
-  // título/ubicación REALES; sin ella se conserva el seed (no se inventa).
-  const titUbi = tituloYUbicacionDe(campos.clasificacion ?? null);
+  // título/ubicación REALES; sin ella el fallback es HONESTO (auditoría
+  // 2026-11-11, hallazgos #9/#10) — ningún campo viene ya del acta de
+  // demostración.
+  const clasif = campos.clasificacion ?? null;
+  const titUbi = tituloYUbicacionDe(clasif);
+  const base = camposSinIdentificar(numeroMesa);
+  const tipoHonesto =
+    clasif?.tipo === "TRANSMISION"
+      ? "SENADO DE LA REPÚBLICA"
+      : clasif?.tipo === "DELEGADOS"
+        ? "CÓNSUL/EMBAJADOR"
+        : base.tipo;
   return {
     id: `acta-${Date.now()}-${contadorActa}`,
-    titulo: titUbi?.titulo ?? ACTA_MOCK.titulo,
-    ubicacion: titUbi?.ubicacion ?? {
-      departamento: ACTA_MOCK.departamento,
-      municipio: ACTA_MOCK.municipio,
-      zona: ACTA_MOCK.zona,
-      puesto: ACTA_MOCK.puesto,
-      mesa: numeroMesa,
-    },
-    tipo: ACTA_MOCK.tipo,
+    titulo: titUbi?.titulo ?? base.titulo,
+    ubicacion: titUbi?.ubicacion ?? base.ubicacion,
+    tipo: tipoHonesto,
     // §6: página REAL del «Ver/Pag/de» cuando la clasificación la leyó.
     // KIT actas-vivas-paginas-v1 (FASE B): la página viaja COMO VENGA de
     // la clasificación (null incluido — DESCONOCIDA: el chip muestra
@@ -135,13 +170,8 @@ export function construirActa(
           index: opciones.objetivo?.pagina ?? 1,
           total: 2,
         },
-    candidatos: ACTA_MOCK.candidatos.map((c) => ({ ...c })),
-    firmas: [
-      { nombre: ACTA_MOCK.firmas[0].nombre, jurado: ACTA_MOCK.firmas[0].jurado, estado: "OK" },
-      { nombre: ACTA_MOCK.firmas[1].nombre, jurado: ACTA_MOCK.firmas[1].jurado, estado: estadoFirma2 },
-      { nombre: ACTA_MOCK.firmas[2].nombre, jurado: ACTA_MOCK.firmas[2].jurado, estado: "OK" },
-    ],
-    codigoBarras: ACTA_MOCK.codigoBarras,
+    candidatos: base.candidatos,
+    firmas: firmasSinIdentificar(estadoFirma2),
     score: campos.score,
     status: campos.status,
     rechazo: campos.rechazo,

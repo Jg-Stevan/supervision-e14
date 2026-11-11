@@ -88,6 +88,22 @@ function clasificacion(nivel: string, codigoUnico?: { crudo: string; kit: number
 const SERIE = "710000393010102";
 const CODIGO = { crudo: SERIE, kit: 39, tipoDigito: "3", ver: 1, pagina: 1, total: 2 };
 
+/** G5 (dueño, 2026-11-11): sin join DIVIPOL completo NO hay envío. Las
+ *  fixtures que caracterizan la fase de ENVÍO llevan una clasificación AUTO
+ *  con join completo; las que prueban otras fases siguen sin códigos. */
+function clasificacionConJoin() {
+  return {
+    ...clasificacion("AUTO"),
+    departamento: { codigo: "88", nombre: "ARCHIPIELAGO DE SAN ANDRES" },
+    municipio: { codigo: "495", nombre: "ITALIA" },
+    zona: { codigo: "10" },
+    puesto: { codigo: "02", nombre: "Roma - Consulado" },
+    mesa: 1,
+    tipo: "TRANSMISION",
+    pagina: { index: 1, total: 1 },
+  };
+}
+
 function actaFixture(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ...structuredClone(ACTA_MOCK),
@@ -188,7 +204,12 @@ describe("R8 · A — fases de procesarUno (fixtures de entrada sintética)", ()
     const fila = filaFixture();
     prepararFila(fila, fileFixture("optima.jpg"));
     CONTROL.escanearActa = async () =>
-      actaFixture({ id: `acta-${fila.id}`, status: "OPTIMA", score: 9.5 });
+      actaFixture({
+        id: `acta-${fila.id}`,
+        status: "OPTIMA",
+        score: 9.5,
+        clasificacion: clasificacionConJoin(),
+      });
 
     await procesarUno(fila as never);
 
@@ -234,7 +255,7 @@ describe("R8 · A — fases de procesarUno (fixtures de entrada sintética)", ()
     prepararFila(fila, fileFixture("bajo.jpg"));
     const colaActas = [
       actaFixture({ status: "RECHAZADA", score: 4, rechazo: { tipo: "BAJO", detalle: "NO SE RECONOCE INFORMACIÓN" } }),
-      actaFixture({ status: "OPTIMA", score: 9.8 }),
+      actaFixture({ status: "OPTIMA", score: 9.8, clasificacion: clasificacionConJoin() }),
     ];
     CONTROL.escanearActa = async () => {
       const a = colaActas.shift();
@@ -394,7 +415,8 @@ describe("R8 · B — las 8 puertas de dedup (fixture por puerta)", () => {
     const gemela = filaFixture({ qrPrevio: "PAYLOAD-APLAZ-1" });
     prepararFila(gemela, fileFixture("gemela2.jpg"));
     CONTROL.desenlaceQr = "techo";
-    CONTROL.escanearActa = async () => actaFixture({ status: "OPTIMA" });
+    CONTROL.escanearActa = async () =>
+      actaFixture({ status: "OPTIMA", clasificacion: clasificacionConJoin() });
 
     await procesarUno(gemela as never);
 
@@ -485,7 +507,8 @@ describe("R8 · B — las 8 puertas de dedup (fixture por puerta)", () => {
     store.registrarQrPayload("PAYLOAD-VETO-1", portadora.id);
     const fila = filaFixture({ qrPrevio: "PAYLOAD-VETO-1", agregadaEn: portadora.agregadaEn + 5 });
     prepararFila(fila, fileFixture("veto.jpg"));
-    CONTROL.escanearActa = async () => actaFixture({ status: "OPTIMA" });
+    CONTROL.escanearActa = async () =>
+      actaFixture({ status: "OPTIMA", clasificacion: clasificacionConJoin() });
 
     await procesarUno(fila as never);
 
@@ -778,7 +801,9 @@ describe("R8 · G — error REAL del bridge: un reintento antes de sentenciar (K
   test("throw en intento 1 → OPTIMA en el reintento → ENVIADA (la acta NO pasa a ERROR)", async () => {
     const fila = filaFixture();
     prepararFila(fila, fileFixture("ort-1.jpg"));
-    const colaActas = [actaFixture({ status: "OPTIMA", score: 9.8 })];
+    const colaActas = [
+      actaFixture({ status: "OPTIMA", score: 9.8, clasificacion: clasificacionConJoin() }),
+    ];
     let llamada = 0;
     CONTROL.escanearActa = async () => {
       llamada += 1;

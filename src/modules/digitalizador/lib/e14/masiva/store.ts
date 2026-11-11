@@ -8,7 +8,7 @@
  */
 import { create } from "zustand";
 import { getBridge } from "../get-bridge";
-import { useE14Store } from "@/modules/digitalizador/store/store-e14";
+import { useE14Store, joinDeActa } from "@/modules/digitalizador/store/store-e14";
 import {
   agregarLote,
   borrar,
@@ -1461,6 +1461,9 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         const registro = await leerRegistro(fila.id);
         const acta = registro.acta;
         if (!acta || acta.status !== "ADVERTENCIA") continue;
+        // G5 (dueño, 2026-11-11): sin join DIVIPOL completo no se envía —
+        // misma regla que publicarDesdeActa ya exige para el monitor.
+        if (!joinDeActa(acta)) continue;
         // La MISMA vía que el envío manual del flujo normal (T3.3) —
         // historial + completadas + hueco archivado + cola offline.
         // KIT e14-masiva-ux-v1 (T3.2): si la conexión estaba OFFLINE el
@@ -1534,6 +1537,8 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     // (el sync no escribió si no coincidió — aquí se re-verifica honesto).
     if (!acta || !actaViva || acta.id !== actaViva.id) return false;
     if (acta.status === "ENVIADA") return true; // ya enviada — idempotente
+    // G5 (dueño, 2026-11-11): sin join DIVIPOL completo no se envía.
+    if (!joinDeActa(acta)) return false;
     set({ enviandoLote: true });
     try {
       // 2) La MISMA vía que el envío manual del lote (T3.3) — historial +

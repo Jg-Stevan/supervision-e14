@@ -28,7 +28,7 @@ import {
   descartarMaestro,
   peekMaestro,
 } from "./precalor";
-import { useE14Store } from "@/modules/digitalizador/store/store-e14";
+import { joinDeActa, useE14Store } from "@/modules/digitalizador/store/store-e14";
 import { guardarRegistro, leerRegistroRaw } from "./cola";
 import {
   enviadaPorPayload, // e65b — KIT e65b-historico-enviadas-v1 (T-4): capa 0 contra el histórico
@@ -772,7 +772,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
       // El sidecar respondió y NO leyó QR — pero su barrido ya cubrió el warp
       // Y el fotograma completo (zxing-cpp, 3 pasadas cada uno), así que el
       // hecho es suficientemente fuerte para no pagar la escalera. MEDIDO en
-      // 20261028_084939.jpg (página 2 de un acta: no lleva QR): la escalera
+      // una foto real (página 2 de un acta: no lleva QR): la escalera
       // tardó 22,3 s con hard-kill del worker, respawn, tiers de zoom y rescate
       // vencido, y terminó exactamente igual — sin payload. En una máquina de 4
       // núcleos esos segundos son, además, el acta del vecino más lenta. NO se
@@ -1936,11 +1936,15 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
     //   aterrizar en el monitor — una ADVERTENCIA sin AUTO cae al contador de
     //   motivos como siempre. TODA la maquinaria de vetos de abajo (H1
     //   ledger, remoto WAVE3, dedup) corre IDÉNTICA para ambos umbrales.
+    // G5 (dueño, 2026-11-11): sin join DIVIPOL completo no hay envío — la
+    // misma regla que publicarDesdeActa ya aplica al monitor. Evita marcar
+    // ENVIADA un acta real sin clasificación.
     const enviableAuto =
-      actaDesenlace.status === "OPTIMA" ||
-      (leerFlags().autoEnvioUmbral === "advertencia" &&
-        actaDesenlace.status === "ADVERTENCIA" &&
-        actaDesenlace.clasificacion?.nivel === "AUTO");
+      joinDeActa(actaDesenlace) !== null &&
+      (actaDesenlace.status === "OPTIMA" ||
+        (leerFlags().autoEnvioUmbral === "advertencia" &&
+          actaDesenlace.status === "ADVERTENCIA" &&
+          actaDesenlace.clasificacion?.nivel === "AUTO"));
     if (enviableAuto) {
       // HOTFIX H1 (fix/ya-enviada-veto-postocr-v1) — veto ya-enviada POST-OCR:
       // si el payload del QR (presente en el desenlace) ya pertenece a una

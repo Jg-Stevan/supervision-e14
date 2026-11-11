@@ -230,7 +230,7 @@ export interface DiagnosticoActa {
 
 export interface Acta {
   id: string;
-  titulo: string; // "ROMA - CONSULADO"
+  titulo: string; // título legible del acta (real o "ACTA SIN IDENTIFICAR")
   ubicacion: ActaUbicacion;
   tipo: string; // "SENADO DE LA REPÚBLICA"
   /** Página del acta (KIT actas-vivas-paginas-v1, FASE B — nullable): la
@@ -240,7 +240,10 @@ export interface Acta {
   pagina: { index: number; total: number } | null;
   candidatos: ActaCandidato[];
   firmas: ActaFirma[];
-  codigoBarras: string; // "*E14-SEN-2026-001*"
+  /** Código de barras del acta — SOLO si se leyó de una fuente real
+   *  verificada (QR capa 0 / código impreso). Sin valor verificado se
+   *  OMITE: jamás se inventa (auditoría 2026-11-11, hallazgo #2). */
+  codigoBarras?: string;
   score: number; // 0..10 SIEMPRE /10 (D2)
   /** Score visual = bruto de scoreDeCalidad ANTES de los caps del sitio (para
    *  diagnóstico/REVISIÓN — no altera el desenlace). */
