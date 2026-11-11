@@ -113,9 +113,10 @@ export function joinDeActa(acta: Acta): { idEnlace: string; mesa: string; tipo: 
  *  el 1D decodificado del papel por el pipeline (codigoUnico.crudo — los
  *  dígitos reales del escaneo, gramática codigoUnicoE14) o, como respaldo
  *  honesto, el barcodeImpreso del manifiesto de actas reales (verbatim del
- *  formulario). NUNCA el código de tracking del sistema (acta.codigoBarras
- *  «*E14-SEN-…*» — ese NO está impreso en el acta). Única fuente para el
- *  panel del modal y la impresión publicada al monitor (D23). */
+ *  formulario). NUNCA un código de tracking del sistema: ese no está impreso
+ *  en el acta (auditoría 2026-11-11 — el campo se omite si no hay lectura
+ *  real). Única fuente para el panel del modal y la impresión publicada al
+ *  monitor (D23). */
 export function barcodeRealDeActa(acta: Acta): string {
   const crudo = acta.clasificacion?.codigoUnico?.crudo;
   if (crudo) return crudo;

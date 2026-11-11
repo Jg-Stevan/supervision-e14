@@ -4,3 +4,9 @@
 # phantom deps que el hoisted exponía). Se conserva el layout histórico.
 [install]
 linker = "hoisted"
+
+# Auditoría 2026-11-11 (#4/#7) — el ANCLA DEMO del panel se activa en el
+# preload: la suite depende del guion del mockup y bun comparte el registro
+# de módulos entre archivos (la siembra se memoiza).
+[test]
+preload = ["./src/test-preload.ts"]

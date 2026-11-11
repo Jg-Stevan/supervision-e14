@@ -53,6 +53,7 @@ import {
 import type { ActaMesa, FormularioTipo, PaginaActa } from "../domain/acta";
 import { consultarActaRuntime } from "./actas-runtime";
 import { ID_ENLACE_ROMA, cargarCatalogoDivipola } from "./divipola-adapter";
+import { anclaDemoActiva } from "./ancla-demo";
 import { crearRandomDeterministico } from "../domain/acta";
 import { diaDeNombrePuesto } from "../domain/jornada";
 // Ronda «reloj real»: zona horaria IANA del PAÍS EMISOR (cada puesto vive
@@ -642,7 +643,10 @@ export function initSupervisionDatos(): ResultadoInitSupervision {
   const MIN = 60_000;
 
   const anclaRoma = PUESTOS.find((p) => p.id === ID_ENLACE_ROMA) ?? PUESTOS[0];
-  if (anclaRoma) {
+  // Auditoría 2026-11-11 (#4/#6) — notificaciones y anomalías sembradas
+  // son DEMO: sin `anclaDemoSupervision` el panel arranca VACÍO (el banner
+  // DEMO explica el estado). Con el flag ON se siembra el guion del mockup.
+  if (anclaRoma && anclaDemoActiva()) {
     // España/México/Países Bajos: puestos REALES del catálogo para las
     // semillas (determinístico — §0-9). INGLATERRA existe en el catálogo
     // (Londres); su anomalía es de puesto (sin mesa).

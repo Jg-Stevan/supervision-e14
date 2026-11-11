@@ -66,9 +66,10 @@ export interface EventoActa {
 }
 
 /** Acta de una mesa (kit T1). Todo dato se deriva por seed de la mesa
- * (§0-7); Roma mesa 1 es EXACTA al mockup (§0-6). */
+ * (§0-7); la única excepción es el acta DEMO de Roma mesa 1 (exacta al
+ * mockup, gated por `anclaDemoSupervision`). */
 export interface ActaMesa {
-  /** "#A92-F" */
+  /** ID legible generado por seed (p. ej. "#CHU-Z"). */
   id: string;
   mesaId: string;
   puestoId: string;

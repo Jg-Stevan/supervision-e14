@@ -931,8 +931,8 @@ export async function correrPipelineL2(
     // sitio (SIM del escaneo vs recorte siempre real) entra como `aplica`.
     // KIT e14-velocidad-5s-v1: el perdón entra por `pisoPerfecto`/`recortada`
     // (regla en perdonFaltaFiduciales, compartida con el repo del celular —
-    // evidencia 20261028_084854: 9 anclas, sharpness 100, recortada:false y
-    // RECHAZADA 6.4 por 0/4 fiduciales).
+    // evidencia (foto real de la jornada): 9 anclas, sharpness 100,
+    // recortada:false y RECHAZADA 6.4 por 0/4 fiduciales).
     if (vetoCuatroEsquinas({ esquinas, aplica: !opciones.simular, pisoPerfecto, recortada })) {
       completa = false;
     }

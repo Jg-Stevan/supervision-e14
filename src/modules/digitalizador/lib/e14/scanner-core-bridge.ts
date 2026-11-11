@@ -81,7 +81,7 @@ import { ocrTextIsValid } from "@jg-stevan/scanner-core/core/ocr";
 import { defaultQuad } from "@jg-stevan/scanner-core/core/types";
 // (R7b M5b: PageQuality viaja con construirActa — acta-factory.ts.)
 import type { PageFilter, Quad } from "@jg-stevan/scanner-core/core/types";
-// (R7b M5b: ACTA_MOCK viaja con construirActa — acta-factory.ts.)
+// (R7b M5b: construirActa vive en acta-factory.ts con fallback honesto — sin datos de demostración.)
 import { cargarDivipol } from "@jg-stevan/scanner-core/dominio/divipol";
 import {
   clasificarCabecera,

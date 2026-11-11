@@ -1015,8 +1015,9 @@ function ModalRevisorBase({
   // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — rondas 2
   //    y 3): el 1D REAL leído al papel por el pipeline o el manifiesto de
   //  actas reales como respaldo — UNA sola fuente (barcodeRealDeActa del
-  //  adaptador, la misma que publica el monitor). NUNCA el código de
-  //  tracking del sistema (acta.codigoBarras «*E14-SEN-…*»).
+  //  adaptador, la misma que publica el monitor). NUNCA un código de
+  //  tracking del sistema: el campo se omite si no hay lectura real
+  //  (auditoría 2026-11-11).
   const barcodeEscaneado = barcodeRealDeActa(acta);
   // ── V2-01/V3-04 — código IMPRESO entre las X: del manifiesto del acta
   //    (join real); sin dato → «—» (jamás el mismo código para todas).

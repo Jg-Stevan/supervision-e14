@@ -42,6 +42,7 @@ import { partesDeZona } from "../domain/reloj-jornada";
 import { zonaDePuesto } from "../domain/zonas-emisor";
 import type { ActaRealLista } from "./actas-reales/actas-reales";
 import { ID_ENLACE_ROMA, cargarCatalogoDivipola } from "./divipola-adapter";
+import { anclaDemoActiva } from "./ancla-demo";
 import { cargarActasReales } from "./actas-reales/actas-reales";
 
 // M13 — reglas de derivación CANÓNICAS en el dominio: `delegadosAcreditados`
@@ -219,7 +220,10 @@ const ROMA_MESA_1: ActaMesa = {
 };
 
 function esRomaMesa1(puestoId: string, mesaId: string): boolean {
-  return puestoId === ID_ENLACE_ROMA && mesaId === "001";
+  // Auditoría 2026-11-11 (#7) — el ancla #A92-F es DEMO: sin el flag
+  // `anclaDemoSupervision` la mesa cae a la ruta normal (loader real o
+  // acta sintética), jamás al texto sembrado del mockup.
+  return anclaDemoActiva() && puestoId === ID_ENLACE_ROMA && mesaId === "001";
 }
 
 // ─── Acta REAL del digitalizador (SUP-6 / D26 · generalizada D44) ────────

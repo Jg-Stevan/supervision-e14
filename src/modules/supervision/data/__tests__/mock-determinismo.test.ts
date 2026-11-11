@@ -41,6 +41,9 @@ import {
 import { ID_ENLACE_ROMA } from "@/modules/supervision/data/divipola-adapter";
 import type { Puesto } from "@/modules/supervision/domain/types";
 
+// Auditoría 2026-11-11 (#7): el acta #A92-F es el ANCLA DEMO — el setup
+// global (src/test-preload.ts vía bunfig [test].preload) la activa.
+
 // ─── Referencia verbatim de mock-repository.ts (la contraparte de estos
 // umbrales vive en el mock; si el mock cambia, este test lo delata) ────────
 

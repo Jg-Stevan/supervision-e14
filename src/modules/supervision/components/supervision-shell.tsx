@@ -486,6 +486,18 @@ function ShellInterno() {
           </div>
         </header>
 
+        {/* Auditoría 2026-11-11 (#4) — el panel corre sobre estados
+            SEMBRADOS: el rótulo es persistente y no descartable (G3=A). */}
+        <div
+          role="status"
+          className="sticky top-12 z-20 flex items-center justify-center border-b border-(--amber)/50 bg-(--amber)/10 px-3 py-1.5 text-center"
+        >
+          <span className="label-caps text-(--amber)">
+            PANEL EN MODO DEMO — estados sembrados localmente; sin conexión
+            con el digitalizador real
+          </span>
+        </div>
+
         <main className="flex-1">
           {cargando && vista !== "monitor" ? (
             <div className="space-y-4 p-4 md:p-6">

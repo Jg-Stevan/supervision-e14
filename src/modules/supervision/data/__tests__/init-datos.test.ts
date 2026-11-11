@@ -26,6 +26,9 @@ import {
   mockSupervisionRepository,
 } from "@/modules/supervision/data/mock-repository";
 
+// Auditoría 2026-11-11 (#4): las semillas T5/T6 son del ANCLA DEMO — el
+// setup global (src/test-preload.ts vía bunfig [test].preload) la activa.
+
 describe("initSupervisionDatos — Result explícito e idempotente (C1)", () => {
   test("siembra el catálogo completo: 949 puestos · 67 países · 3.670 mesas", () => {
     const resultado = initSupervisionDatos();

@@ -11,6 +11,9 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+// PUNTO DE INTERCAMBIO — reemplazar por SupervisionRepository real
+// (hallazgo auditoría 2026-11-11 #4). Hoy la única implementación es el
+// mock: el panel muestra estados sembrados y el banner DEMO lo declara.
 import {
   initSupervisionDatos,
   mockSupervisionRepository,
