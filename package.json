@@ -6,7 +6,7 @@
     "dev": "next dev -p 3000",
     "predev": "bun run preparar",
     "prebuild": "bun run preparar",
-    "preparar": "bun packages/scanner-core/scripts/build-capa0-worker.mjs && bun scripts/sincronizar-vendor.mjs && bun scripts/preparar-assets.mjs",
+    "preparar": "bun packages/scanner-core/scripts/build-capa0-worker.mjs && bun packages/scanner-core/scripts/build-reescalar-import-worker.mjs && bun scripts/sincronizar-vendor.mjs && bun scripts/preparar-assets.mjs",
     "assets": "bun scripts/preparar-assets.mjs",
     "build": "next build",
     "start": "next start",

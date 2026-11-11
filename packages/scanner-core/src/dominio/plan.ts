@@ -39,6 +39,10 @@ export interface OpcionesPlan {
     pie: number;
     bordesRescate: number;
   };
+  /** E3 — UN solo `getImageData` por lote del tensor (atlas contiguo en vez
+   *  de una lectura por canvas). Default ausente = comportamiento de hoy:
+   *  N lecturas. La app la inyecta desde su flag `ocrTensorAtlas`. */
+  atlasTensorOcr?: () => boolean;
 }
 
 const DEFAULTS: OpcionesPlan = {

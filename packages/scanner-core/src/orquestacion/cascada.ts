@@ -73,6 +73,10 @@ export interface PasadaCascada extends PasadaOcr {
   /** ms ESPERANDO el run() del rec (wasm + IPC) — la resta con msRec es hilo
    *  principal. Solo RapidOCR lo separa. */
   msRunRec?: number;
+  /** E1 (Ola E) — recortes de píxeles de ESTA pasada (rapidocr.ts ya lo
+   *  mide). Antes la cascada lo descartaba y `tramos.msCrops` llegaba null;
+   *  sin esto no se puede atribuir el tiempo entre det/rec/recortes. */
+  msCrops?: number;
 }
 
 /** Esquema de eventos de lectura (ítem 3.6 — motor intentado,
@@ -130,7 +134,9 @@ export function pasadaRoiCompuesta(
   if (utiles.length === 0) return null;
   const texto = utiles.map((p) => p.texto.trim()).join("\n");
   const conf = utiles.reduce((s, p) => s + p.conf, 0) / utiles.length;
-  return { texto, conf, cap: "roi" };
+  // E1: la compuesta conserva los recortes de AMBOS ROIs (msCrops por sitio).
+  const msCrops = utiles.reduce((s, p) => s + (p.msCrops ?? 0), 0);
+  return { texto, conf, cap: "roi", msCrops };
 }
 
 /** Dependencias INYECTADAS de la cascada (producción: bridge; tests: mocks).
@@ -209,6 +215,9 @@ interface SalidaCascada {
   nBoxes?: number;
   nLineas?: number;
   msRunRec?: number;
+  /** E1 (Ola E) — recortes de TODAS las pasadas que corrieron (intento 1 +
+   *  core 1280/1920 + ROIs). Es el tramo que el PerfActa publicaba null. */
+  msCrops?: number;
 }
 
 /** Emisión a prueba de fallos — la telemetría jamás tumba la cascada. */
@@ -271,6 +280,8 @@ export async function correrCascadaOcr(
   const r1 = await deps.intento1(foto);
   const msIntento1 = Math.round(performance.now() - t1);
   const motorIntento1 = esRapidOcr(r1) ? "rapidocr" : "tesseract";
+  // E1: recortes de todas las pasadas (el downstream los publica como tramo).
+  let msCrops = r1.msCrops ?? 0;
   const validacion1 = gateSeguro(deps, r1.texto);
   emitir(deps, { paso: "intento1", motor: motorIntento1, validacion: validacion1, aceptada: false, ms: msIntento1 });
   if (validacion1 === "AUTO") {
@@ -292,6 +303,7 @@ export async function correrCascadaOcr(
       nBoxes: r1.nBoxes,
       nLineas: r1.nLineas,
       msRunRec: r1.msRunRec,
+      msCrops: Math.round(msCrops),
     };
   }
 
@@ -310,6 +322,7 @@ export async function correrCascadaOcr(
     const t = performance.now();
     acumulado = await deps.ocr1280(foto);
     ms1280 = Math.round(performance.now() - t);
+    msCrops += acumulado.msCrops ?? 0;
     emitir(deps, { paso: "1280", motor: "rapidocr", validacion: gateSeguro(deps, acumulado.texto), aceptada: false, ms: ms1280 });
   }
   let ms1920: number | null = null;
@@ -317,6 +330,7 @@ export async function correrCascadaOcr(
     const t = performance.now();
     const r2 = await deps.ocr1920(foto);
     ms1920 = Math.round(performance.now() - t);
+    msCrops += r2.msCrops ?? 0;
     emitir(deps, { paso: "1920", motor: "rapidocr", validacion: gateSeguro(deps, elegirMejor(acumulado, r2).texto), aceptada: false, ms: ms1920 });
     // MISMO motor SIEMPRE aquí (1280 vs 1920 RapidOCR) — §2.4 del kit.
     acumulado = elegirMejor(acumulado, r2);
@@ -349,6 +363,7 @@ export async function correrCascadaOcr(
     msRoi = Math.round(performance.now() - t);
     const compuesta = pasadaRoiCompuesta(rTop, rBottom);
     if (compuesta) {
+      msCrops += compuesta.msCrops ?? 0;
       emitir(deps, { paso: "roi", motor: "rapidocr", validacion: gateSeguro(deps, compuesta.texto), aceptada: false, ms: msRoi });
       // SOLO pasadas RapidOCR (1280|1920 core + ROI cap 1920) — mismo
       // motor, mismo espacio de conf (§1: entre motores decidió el GATE).
@@ -392,6 +407,7 @@ export async function correrCascadaOcr(
         nBoxes: rm.nBoxes,
         nLineas: rm.nLineas,
         msRunRec: rm.msRunRec,
+        msCrops: Math.round(msCrops),
       };
     }
   }
@@ -429,5 +445,6 @@ export async function correrCascadaOcr(
     nBoxes: acumulado.nBoxes,
     nLineas: acumulado.nLineas,
     msRunRec: acumulado.msRunRec,
+    msCrops: Math.round(msCrops),
   };
 }

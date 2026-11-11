@@ -754,7 +754,66 @@ function pixelesSuaves(c: HTMLCanvasElement, rw: number, h: number): Uint8Clampe
   return ctx.getImageData(0, 0, rw, h).data;
 }
 
-function tensorDeCanvases(
+/** E3 — lote en UN atlas: pinta los canvas contiguos en un único lienzo y
+ *  hace UNA lectura. En la rama nearest cada canvas se copia 1:1 (mismos
+ *  bytes); en la suave el remuestreo lo hace el `drawImage` al rect destino
+ *  — EXACTAMENTE la misma operación de `pixelesSuaves` (misma escala, mismo
+ *  filtro, offset entero), pero sin un canvas y una lectura por línea.
+ *  null = no se pudo armar (fallback a la ruta de hoy, jamás rompe). */
+interface AtlasLote {
+  datos: Uint8ClampedArray;
+  ancho: number;
+  offsets: number[];
+}
+
+/** Lienzo del atlas reutilizado entre lotes (mismo patrón que `lienzoSuave`):
+ *  crear un canvas de miles de px por lote era una asignación evitable. */
+let lienzoAtlas: HTMLCanvasElement | null = null;
+
+function leerLoteEnAtlas(
+  canvases: HTMLCanvasElement[],
+  anchos: number[],
+  h: number,
+  suave: boolean,
+): AtlasLote | null {
+  const PAD = 1; // separación de 1 px: cada ítem cae en un offset entero
+  const offsets: number[] = new Array(canvases.length);
+  let ancho = 0;
+  let alto = h;
+  for (let i = 0; i < canvases.length; i++) {
+    const c = canvases[i]!;
+    offsets[i] = ancho;
+    ancho += (suave ? anchos[i]! : c.width) + PAD;
+    if (!suave) alto = Math.max(alto, c.height);
+  }
+  // Tolera lotes patológicos sin arriesgar un canvas gigante en el móvil.
+  if (ancho <= 0 || ancho > 16384 || alto <= 0 || alto > 16384) return null;
+  try {
+    let lienzo = lienzoAtlas;
+    if (!lienzo) lienzo = lienzoAtlas = canvasCon(ancho, alto);
+    else if (lienzo.width !== ancho || lienzo.height !== alto) {
+      // Cambiar el tamaño RESETA el estado del contexto (incluidos los flags
+      // de suavizado) — por eso se fijan DESPUÉS, como en `pixelesSuaves`.
+      lienzo.width = ancho;
+      lienzo.height = alto;
+    }
+    const ctx = ctxDe(lienzo);
+    ctx.imageSmoothingEnabled = suave;
+    ctx.imageSmoothingQuality = "high";
+    for (let i = 0; i < canvases.length; i++) {
+      const c = canvases[i]!;
+      if (suave) ctx.drawImage(c, offsets[i]!, 0, anchos[i]!, h);
+      else ctx.drawImage(c, offsets[i]!, 0, c.width, c.height);
+    }
+    return { datos: ctx.getImageData(0, 0, ancho, alto).data, ancho, offsets };
+  } catch {
+    return null;
+  }
+}
+
+/** Exportada SOLO para el test de equivalencia del atlas E3: la ruta de hoy
+ *  y la del atlas tienen que producir el MISMO tensor float32. */
+export function tensorDeCanvases(
   ort: OrtModule,
   canvases: HTMLCanvasElement[],
   targetW: number,
@@ -763,15 +822,49 @@ function tensorDeCanvases(
 ): OrtValue {
   const b = canvases.length;
   const data = new Float32Array(b * 3 * h * targetW);
+  // resize PaddleOCR: h fija (knob `ocrRecAltura`), ancho objetivo
+  // min(ceil(h·ratio), targetW) (pad de ceros a la derecha — el buffer ya
+  // nace en 0). Se calcula antes para que el atlas conozca los anchos.
+  const anchos: number[] = new Array(b);
   for (let i = 0; i < b; i++) {
-    const c = canvases[i];
+    const c = canvases[i]!;
+    anchos[i] = Math.min(Math.max(1, Math.ceil((h * c.width) / c.height)), targetW);
+  }
+  const atlas = opcionesPlan.atlasTensorOcr?.() ? leerLoteEnAtlas(canvases, anchos, h, suave) : null;
+  for (let i = 0; i < b; i++) {
+    const c = canvases[i]!;
     const { width: cw, height: ch } = c;
-    // resize PaddleOCR: h fija (knob `ocrRecAltura`), ancho objetivo
-    // min(ceil(h·ratio), targetW) (pad de ceros a la derecha — el buffer ya
-    // nace en 0).
-    const rw = Math.min(Math.max(1, Math.ceil((h * cw) / ch)), targetW);
+    const rw = anchos[i]!;
     const base = i * 3 * h * targetW;
     const paso = h * targetW;
+    if (atlas) {
+      const { datos, ancho, offsets } = atlas;
+      const off = offsets[i]!;
+      if (suave) {
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < rw; x++) {
+            const idx = (y * ancho + off + x) * 4;
+            const o = base + y * targetW + x;
+            data[o] = (datos[idx + 2]! / 255 - 0.5) / 0.5; // B
+            data[o + paso] = (datos[idx + 1]! / 255 - 0.5) / 0.5; // G
+            data[o + 2 * paso] = (datos[idx]! / 255 - 0.5) / 0.5; // R
+          }
+        }
+      } else {
+        for (let y = 0; y < h; y++) {
+          const sy = Math.min(ch - 1, Math.floor((y * ch) / h));
+          for (let x = 0; x < rw; x++) {
+            const sx = Math.min(cw - 1, Math.floor((x * cw) / rw));
+            const idx = (sy * ancho + off + sx) * 4;
+            const o = base + y * targetW + x;
+            data[o] = (datos[idx + 2]! / 255 - 0.5) / 0.5; // B
+            data[o + paso] = (datos[idx + 1]! / 255 - 0.5) / 0.5; // G
+            data[o + 2 * paso] = (datos[idx]! / 255 - 0.5) / 0.5; // R
+          }
+        }
+      }
+      continue;
+    }
     if (suave) {
       // El ImageData YA tiene el tamaño del destino ⇒ copia directa (el
       // remuestreo lo hizo el filtro del canvas, no este bucle).
@@ -780,9 +873,9 @@ function tensorDeCanvases(
         for (let x = 0; x < rw; x++) {
           const idx = (y * rw + x) * 4;
           const o = base + y * targetW + x;
-          data[o] = (px[idx + 2] / 255 - 0.5) / 0.5; // B
-          data[o + paso] = (px[idx + 1] / 255 - 0.5) / 0.5; // G
-          data[o + 2 * paso] = (px[idx] / 255 - 0.5) / 0.5; // R
+          data[o] = (px[idx + 2]! / 255 - 0.5) / 0.5; // B
+          data[o + paso] = (px[idx + 1]! / 255 - 0.5) / 0.5; // G
+          data[o + 2 * paso] = (px[idx]! / 255 - 0.5) / 0.5; // R
         }
       }
       continue;
@@ -795,9 +888,9 @@ function tensorDeCanvases(
         const sx = Math.min(cw - 1, Math.floor((x * cw) / rw));
         const idx = (sy * cw + sx) * 4;
         const o = base + y * targetW + x;
-        data[o] = (img.data[idx + 2] / 255 - 0.5) / 0.5; // B
-        data[o + paso] = (img.data[idx + 1] / 255 - 0.5) / 0.5; // G
-        data[o + 2 * paso] = (img.data[idx] / 255 - 0.5) / 0.5; // R
+        data[o] = (img.data[idx + 2]! / 255 - 0.5) / 0.5; // B
+        data[o + paso] = (img.data[idx + 1]! / 255 - 0.5) / 0.5; // G
+        data[o + 2 * paso] = (img.data[idx]! / 255 - 0.5) / 0.5; // R
       }
     }
   }

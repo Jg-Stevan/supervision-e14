@@ -37,6 +37,18 @@ export interface EsquinasActa {
  *  desconocida → false en faltaSeccionInferior; mismo espíritu). */
 export const ESQUINAS_OK: EsquinasActa = { tl: true, tr: true, bl: true, br: true };
 
+/** E3 — opciones de lectura. Sin opciones = comportamiento de hoy byte a
+ *  byte (canvas completo, una sola pasada). */
+export interface OpcionesMarcasEsquina {
+  /** Lee SOLO las 4 regiones de esquina (≈10% del área del acta) en vez del
+   *  canvas completo. La lectura de cada región se expande por el lado máximo
+   *  de la ventana (2·sMax cubre el anillo, que sale s px por cada lado), así
+   *  que todo rectángulo evaluado queda CONTENIDO en su región y el clamp
+   *  coincide con el de la imagen → resultado idéntico, menos píxeles
+   *  copiados y menos memoria de la imagen integral. */
+  porRegiones?: boolean;
+}
+
 /**
  * Marcas fiduciales de esquina sobre el crop YA enderezado (mismo contenido
  * que evalúa calidadDeActa — el bridge le pasa la fotoProcesada warpeada).
@@ -46,7 +58,8 @@ export const ESQUINAS_OK: EsquinasActa = { tl: true, tr: true, bl: true, br: tru
  * (esquinasDeActa envuelve con try/catch y trazaEsquinas imprime n/d).
  *
  * Algoritmo (§2 del kit — una sola pasada, SIN dependencias nuevas):
- *  1. luminancia `getImageData` UNA vez (pesos 0.2126/0.7152/0.0722 como hoy);
+ *  1. luminancia `getImageData` UNA vez (pesos 0.2126/0.7152/0.0722 como hoy;
+ *     con `porRegiones`, solo las 4 esquinas — mismo resultado);
  *  2. imagen integral (W+1)×(H+1) Uint32 → media de cualquier rectángulo O(1);
  *  3. por esquina, región de búsqueda con margen 2× sobre las posiciones
  *     medidas (sup y∈[0,10%H] · inf y∈[90%H,H] · izq x∈[0,14%W] · der
@@ -58,46 +71,20 @@ export const ESQUINAS_OK: EsquinasActa = { tl: true, tr: true, bl: true, br: tru
  *     núcleo más oscuro que cumpla AMBOS.
  * Presupuesto: <30 ms por acta (las medias O(1) caen en regiones pequeñas).
  */
-export function marcasEsquina(canvas: HTMLCanvasElement): EsquinasActa | null {
+export function marcasEsquina(
+  canvas: HTMLCanvasElement,
+  opciones?: OpcionesMarcasEsquina,
+): EsquinasActa | null {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx || canvas.width < 80 || canvas.height < 120) return null;
   const W = canvas.width;
   const H = canvas.height;
-  const img = ctx.getImageData(0, 0, W, H).data;
   // Cuantización de la luminancia a 6 bits (0-63): sin ella, la suma integral
   // de una captura de alta resolución desbordaría Uint32 (>16.8M px con luma
   // 0-255). Error por píxel ≤ 1/126 ≈ 0.008 → en la media de una ventana
   // (≥23² px) queda ≈0.001, despreciable frente a las holguras de los
   // umbrales (núcleo >2×, anillo 0.14).
   const ESCALA = 63 / 255;
-  const iw = W + 1;
-  const integral = new Uint32Array(iw * (H + 1));
-  for (let y = 0; y < H; y += 1) {
-    let fila = 0;
-    const iFila = (y + 1) * iw;
-    const iPrev = y * iw;
-    const iImg = y * W * 4;
-    for (let x = 0; x < W; x += 1) {
-      const i = iImg + x * 4;
-      fila += Math.round((0.2126 * img[i] + 0.7152 * img[i + 1] + 0.0722 * img[i + 2]) * ESCALA);
-      integral[iFila + x + 1] = integral[iPrev + x + 1] + fila;
-    }
-  }
-  /** Media 0-1 del rectángulo clampado a la imagen (coordenadas de imagen). */
-  const media = (x0: number, y0: number, w: number, h: number): number => {
-    const xa = Math.max(0, x0);
-    const ya = Math.max(0, y0);
-    const xb = Math.min(W, x0 + w);
-    const yb = Math.min(H, y0 + h);
-    const area = (xb - xa) * (yb - ya);
-    if (area <= 0) return 1;
-    const suma =
-      integral[yb * iw + xb] -
-      integral[ya * iw + xb] -
-      integral[yb * iw + xa] +
-      integral[ya * iw + xa];
-    return suma / area / 63;
-  };
 
   // // Fuente: §0-F1 — regiones con margen 2× sobre las posiciones medidas
   // (marcas: y 2.2-5.2% sup · 97.6-97.9% inf · x 3.8-8% izq · 97.2% der).
@@ -118,15 +105,83 @@ export function marcasEsquina(canvas: HTMLCanvasElement): EsquinasActa | null {
   const UMBRAL_NUCLEO = 0.3;
   const UMBRAL_ANILLO = 0.75;
 
-  const buscaEsquina = (r: (typeof regiones)[number]): boolean => {
+  /** Integral de una sub-imagen: `datos` es contiguo (fila = w·4) y empieza
+   *  en (x0, y0) de la imagen ORIGINAL. */
+  interface Fuente {
+    integral: Uint32Array;
+    iw: number;
+    x0: number;
+    y0: number;
+    w: number;
+    h: number;
+  }
+  const construir = (
+    datos: Uint8ClampedArray,
+    x0: number,
+    y0: number,
+    w: number,
+    h: number,
+  ): Fuente => {
+    const iw = w + 1;
+    const integral = new Uint32Array(iw * (h + 1));
+    for (let y = 0; y < h; y += 1) {
+      let fila = 0;
+      const iFila = (y + 1) * iw;
+      const iPrev = y * iw;
+      const iImg = y * w * 4;
+      for (let x = 0; x < w; x += 1) {
+        const i = iImg + x * 4;
+        fila += Math.round((0.2126 * datos[i] + 0.7152 * datos[i + 1] + 0.0722 * datos[i + 2]) * ESCALA);
+        integral[iFila + x + 1] = integral[iPrev + x + 1] + fila;
+      }
+    }
+    return { integral, iw, x0, y0, w, h };
+  };
+  /** Media 0-1 del rectángulo clampado a la FUENTE (coordenadas de imagen). */
+  const media = (f: Fuente, x0: number, y0: number, w: number, h: number): number => {
+    const xa = Math.max(f.x0, x0);
+    const ya = Math.max(f.y0, y0);
+    const xb = Math.min(f.x0 + f.w, x0 + w);
+    const yb = Math.min(f.y0 + f.h, y0 + h);
+    const area = (xb - xa) * (yb - ya);
+    if (area <= 0) return 1;
+    const en = (yy: number, xx: number) => f.integral[(yy - f.y0) * f.iw + (xx - f.x0)];
+    const suma = en(yb, xb) - en(ya, xb) - en(yb, xa) + en(ya, xa);
+    return suma / area / 63;
+  };
+
+  let fuentes: Fuente[];
+  if (opciones?.porRegiones === true) {
+    // El anillo de una ventana en el extremo alcanza s px MÁS ALLÁ de la
+    // región de búsqueda → la lectura se expande 2·sMax por cada lado (el
+    // clamp a la imagen se conserva en W/H).
+    const sMax = Math.max(...lados);
+    fuentes = regiones.map((r) => {
+      const x0 = Math.max(0, r.x0 - sMax);
+      const y0 = Math.max(0, r.y0 - sMax);
+      const x1 = Math.min(W, r.x1 + sMax);
+      const y1 = Math.min(H, r.y1 + sMax);
+      const w = x1 - x0;
+      const h = y1 - y0;
+      return construir(ctx.getImageData(x0, y0, w, h).data, x0, y0, w, h);
+    });
+  } else {
+    const img = ctx.getImageData(0, 0, W, H).data;
+    const global = construir(img, 0, 0, W, H);
+    fuentes = [global, global, global, global];
+  }
+
+  const buscaEsquina = (i: number): boolean => {
+    const r = regiones[i]!;
+    const f = fuentes[i]!;
     let mejor = Infinity;
     for (const s of lados) {
       if (s < 2) continue;
       for (let y = r.y0; y + s <= r.y1; y += 2) {
         for (let x = r.x0; x + s <= r.x1; x += 2) {
-          const nucleo = media(x, y, s, s);
+          const nucleo = media(f, x, y, s, s);
           if (nucleo >= UMBRAL_NUCLEO || nucleo >= mejor) continue;
-          const anillo = media(x - s, y - s, 3 * s, 3 * s);
+          const anillo = media(f, x - s, y - s, 3 * s, 3 * s);
           if (anillo > UMBRAL_ANILLO) mejor = nucleo;
         }
       }
@@ -135,10 +190,10 @@ export function marcasEsquina(canvas: HTMLCanvasElement): EsquinasActa | null {
   };
 
   return {
-    tl: buscaEsquina(regiones[0]),
-    tr: buscaEsquina(regiones[1]),
-    bl: buscaEsquina(regiones[2]),
-    br: buscaEsquina(regiones[3]),
+    tl: buscaEsquina(0),
+    tr: buscaEsquina(1),
+    bl: buscaEsquina(2),
+    br: buscaEsquina(3),
   };
 }
 
