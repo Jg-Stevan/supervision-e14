@@ -53,12 +53,20 @@ LAZO = ("http://localhost:", "http://127.0.0.1:", "https://localhost:", "https:/
 
 
 def origen_permitido(origen: str) -> bool:
-    """`null`/vacío = file://, una página que YA está en esta máquina (el export
-    abierto a doble clic); lazo = dev, `serve-export.py` y `pages dev`; y el
-    proyecto de Pages con sus previsualizaciones (`https://<hash>.supervision-e14.pages.dev`).
+    """C-22 — `null`/vacío se RECHAZA: un iframe sandbox (`allow-scripts`) de
+    cualquier sitio público también manda `Origin: null`, así que aceptarlo
+    deja que una página ajena encole actas en el CPU del visitante. La página
+    del dueño SIEMPRE manda origen real (Pages/lazo); el modo file:// del
+    dueño, si algún día hace falta, se allowlista EXPLÍCITO con
+    `E14_ORIGENES="null"` (o el origen concreto) — nunca por omisión.
+    Lazo = dev, `serve-export.py` y `pages dev`; y el proyecto de Pages con
+    sus previsualizaciones (`https://<hash>.supervision-e14.pages.dev`).
     `E14_ORIGENES` añade dominios propios separados por coma sin tocar el código."""
     if origen in ("", "null"):
-        return True
+        # C-22 — por defecto RECHAZADO; solo entra si el dueño lo allowlistó
+        # EXPLÍCITO en E14_ORIGENES (modo file:// de custodia del dueño).
+        extra = os.environ.get("E14_ORIGENES", "")
+        return origen in {x.strip() for x in extra.split(",") if x.strip()}
     if origen.startswith(LAZO):
         return True
     if origen == f"https://{PROYECTO_PAGES}":
@@ -213,12 +221,15 @@ def _dataurl_calentamiento() -> str | None:
     aqui = os.path.dirname(os.path.abspath(__file__))
     patrones = [
         os.path.join(aqui, "calentamiento", "*.jpg"),
-        # native/ DENTRO del repo (la forma versionada del KIT).
+        # C-23 — fixtures SINTÉTICAS vigentes del modo SIM (`acta-sim-*.jpg`),
+        # directamente en `assets/` (la subcarpeta `actas-demo/` ya no existe:
+        # el lote de fotos reales salió del HEAD con D87). native/ DENTRO del
+        # repo (la forma versionada del KIT).
         os.path.join(aqui, "..", "src", "modules",
-                     "digitalizador", "assets", "actas-demo", "*.jpg"),
+                     "digitalizador", "assets", "acta-sim-*.jpg"),
         # native/ HERMANO del repo (la copia de trabajo donde nació).
         os.path.join(aqui, "..", "supervision-e14", "src", "modules",
-                     "digitalizador", "assets", "actas-demo", "*.jpg"),
+                     "digitalizador", "assets", "acta-sim-*.jpg"),
     ]
     for p in patrones:
         for ruta in sorted(glob.glob(p)):
@@ -235,21 +246,35 @@ class Manejador(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def _cabeceras(self, codigo: int, cuerpo: bytes):
+        # C-22 — la validación de origen va ANTES de emitir la línea de
+        # estado: no se puede enviar `200` y luego un `403` (dos status lines
+        # = respuesta rota). Origen no permitido → ÚNICA respuesta: 403.
+        origen = self.headers.get("Origin", "")
+        if not origen_permitido(origen):
+            # C-22 — 403 EXPLÍCITO (antes se enviaba el cuerpo sin ACAO y el
+            # navegador lo tapaba: negación invisible). Un iframe sandbox de
+            # un sitio público obtiene 403 visible; el flujo legítimo de la
+            # app (origen Pages o lazo) no pasa por aquí. Se loggeda porque
+            # desde el navegador el síntoma sería «el acelerador no aparece».
+            self.log_error("CORS: origen NO permitido: %r (añádelo a E14_ORIGENES si es tuyo)", origen or "null")
+            cuerpo_403 = json.dumps(
+                {"error": "origen", "detalle": "origen no permitido", "origen": origen or "null"},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(cuerpo_403)))
+            # Deliberadamente SIN Access-Control-Allow-Origin ni
+            # Access-Control-Allow-Private-Network: las cabeceras permissivas
+            # jamás se emiten a orígenes fuera de la allowlist (C-22).
+            self.end_headers()
+            self.wfile.write(cuerpo_403)
+            return
         self.send_response(codigo)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(cuerpo)))
-        # CORS: la app es OTRO origen (http://localhost:3000, file://, el sitio
-        # publicado) y bajo COEP require-corp todo subrecurso necesita el permiso
-        # explícito.
-        origen = self.headers.get("Origin", "")
-        if not origen_permitido(origen):
-            # Sin ACAO el navegador no entrega el cuerpo y la app cae al motor JS
-            # (que es el camino de siempre). Se loggeda porque desde el navegador
-            # el síntoma es solo «el acelerador no aparece».
-            self.log_error("CORS: origen NO permitido: %r (añádelo a E14_ORIGENES si es tuyo)", origen)
-            self.end_headers()
-            self.wfile.write(cuerpo)
-            return
+        # CORS: la app es OTRO origen (lazo local o el sitio publicado) y bajo
+        # COEP require-corp todo subrecurso necesita el permiso explícito.
         # Eco en vez de `*`: ver `origen_permitido`. `Vary: Origin` porque la
         # respuesta cambia con el Origin y una caché compartida mezclaría permisos.
         self.send_header("Access-Control-Allow-Origin", origen or "null")

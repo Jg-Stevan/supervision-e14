@@ -183,8 +183,18 @@ describe("hub-local — el puente del celular usa el embudo de siempre", () => {
     expect(consultarActaRuntime(INEXISTENTE, "001")).toBeNull();
   });
 
-  test("el cursor avanza solo en ciclo limpio y el sondeo pide desde él", async () => {
-    await sincronizarHubLocal(fetchComo({ ok: true, ahora: 900, total: 1, actas: [] }));
+  test("el cursor (SEQ) avanza solo en ciclo limpio y el sondeo pide desde él (C-06)", async () => {
+    // Página drenada con filas: el cursor queda en el proximoSeq del hub.
+    await sincronizarHubLocal(
+      fetchComo({
+        ok: true,
+        ahora: 900,
+        total: 1,
+        hay: false,
+        proximoSeq: 900,
+        actas: [filaHub()],
+      })
+    );
     expect(almacenFalso.get("e14-hub-curso")).toBe("900");
 
     let pedido = "";
@@ -198,6 +208,23 @@ describe("hub-local — el puente del celular usa el embudo de siempre", () => {
     expect(pedido).toContain("desde=900");
     expect(almacenFalso.get("e14-hub-curso")).toBe("900");
     expect(estadoHubLocal().ultimoError).toBe("respuesta sin ok");
+  });
+
+  test("el cursor legacy en epoch ms se migra a SEQ sin saltar filas (C-06)", async () => {
+    // Un panel que venía del contrato viejo guarda 1.7e12 (epoch ms): debe
+    // resetearse a 0 — un seq nunca alcanza esa escala.
+    almacenFalso.set("e14-hub-curso", "1793821040388");
+    await sincronizarHubLocal(
+      fetchComo({ ok: true, ahora: 1, total: 0, hay: false, proximoSeq: 0, actas: [] })
+    );
+    expect(almacenFalso.get("e14-hub-curso")).toBe("0");
+
+    let pedido = "";
+    await sincronizarHubLocal(async (u: string) => {
+      pedido = u;
+      return { ok: true, json: async () => ({ ok: true, total: 0, hay: false, proximoSeq: 0, actas: [] }) } as unknown as Response;
+    });
+    expect(pedido).toBe("https://192.168.1.8:8443/actas?desde=0");
   });
 
   test("5 fallos seguidos autodetienen el sondeo (criterio del puente del móvil)", async () => {

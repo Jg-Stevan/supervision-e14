@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentProps,
 } from "react";
 import {
@@ -32,9 +33,14 @@ import { SUPERVISOR } from "../data/mock-repository";
 // Recepción.
 import { esLlegadaViva, suscribirseRecepcion } from "../data/recepcion-log";
 // E2E local — el sondeo del hub vive en el SHELL (no en la vista): si viviera
-// en Recepción, cambiar de vista cortaría el feed del celular.
-import { iniciarHubLocal } from "../data/hub-local";
-import { StatusDot } from "./status-dot";
+// en Recepción, cambiar de vista cortaría el feed del celular. C-24 — el chip
+// Online del header también lee su estado (último sondeo) para el semáforo.
+import {
+  estadoHubLocal,
+  iniciarHubLocal,
+  suscribirseHubLocal,
+  type EstadoHubLocal,
+} from "../data/hub-local";
 import { Esqueleto } from "./esqueleto";
 import { DatosProvider, useDatos, useDatosAcciones } from "./datos-provider";
 // R4-M7 — espejo de la sesión en location.hash (D11: espejo, NO router).
@@ -332,6 +338,82 @@ function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
   );
 }
 
+/**
+ * C-24 — chip ONLINE honesto del header (semáforo, documentado):
+ *  · ROJO — sin red (`navigator.onLine === false`) O el último sondeo al hub
+ *    FALLÓ (`ultimoError` != null o autodetenido `detenido`): la conectividad
+ *    extremo a extremo NO está confirmada.
+ *  · ÁMBAR — hay red, pero el sondeo del hub AÚN NO CORRIÓ (hub prendido y
+ *    sin primera sync): no se puede afirmar nada — no verde prematuro.
+ *  · VERDE — hay red y nada fallando. Con el hub APAGADO la red manda (el
+ *    apagón del puente es decisión del dueño, no un fallo de red; la tarjeta
+ *    «Hub local» muestra su propio estado). Semántica simple verde/ámbar/rojo.
+ */
+/** C-24 — suscripción al estado de red del navegador (`online`/`offline`).
+ *  Viva a nivel de módulo para `useSyncExternalStore`: el estado de red
+ *  existe FUERA de React y este es su contrato canónico — sin setState
+ *  síncrono dentro del efecto (lint react-hooks/set-state-in-effect). */
+function suscribirseARed(alCambiar: () => void): () => void {
+  window.addEventListener("online", alCambiar);
+  window.addEventListener("offline", alCambiar);
+  return () => {
+    window.removeEventListener("online", alCambiar);
+    window.removeEventListener("offline", alCambiar);
+  };
+}
+
+function ChipOnline() {
+  const [hub, setHub] = useState<EstadoHubLocal>(() => estadoHubLocal());
+  // C-24 — `navigator.onLine` vía useSyncExternalStore (React 19);
+  // `getServerSnapshot` neutro (true): el SSR pinta «Online» y el primer
+  // render del cliente corrige sin cascada (el chip no decide nada: el
+  // estado real lo manda el sondeo al hub).
+  const enLinea = useSyncExternalStore(
+    suscribirseARed,
+    () => navigator.onLine,
+    () => true,
+  );
+  useEffect(() => {
+    const desuscribir = suscribirseHubLocal(() => setHub(estadoHubLocal()));
+    return desuscribir;
+  }, []);
+  const sondeoFallo = hub.ultimoError !== null || hub.detenido;
+  const sondeoPendiente = hub.activo && hub.ultimaSyncTs === null;
+  const tono = !enLinea || sondeoFallo ? "danger" : sondeoPendiente ? "warning" : "success";
+  const etiqueta = !enLinea ? "Offline" : "Online";
+  const detalle = !enLinea
+    ? "Sin conexión de red"
+    : sondeoFallo
+      ? `Con red, pero el último sondeo al hub falló${
+          hub.detenido ? ` (${hub.fallosSeguidos} fallos seguidos)` : ""
+        }`
+      : sondeoPendiente
+        ? "Con red — esperando el primer sondeo al hub"
+        : "Con red y sondeo del hub sin fallos";
+  return (
+    <span
+      className={cn(
+        "label-caps flex items-center gap-1.5",
+        tono === "danger" && "text-(--danger)",
+        tono === "warning" && "text-(--warning)",
+        tono === "success" && "text-(--success)"
+      )}
+      title={`${etiqueta}: ${detalle}`}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "inline-block size-2 shrink-0 rounded-full",
+          tono === "danger" && "bg-(--danger)",
+          tono === "warning" && "bg-(--warning)",
+          tono === "success" && "bg-(--success)"
+        )}
+      />
+      {etiqueta}
+    </span>
+  );
+}
+
 export function SupervisionShell() {
   return (
     <PerfilProvider>
@@ -368,7 +450,9 @@ function ShellInterno() {
 
   useEffect(() => {
     return suscribirseRecepcion((entrada) => {
-      if (!esLlegadaViva(entrada.origen)) return; // la semilla no cuenta
+      // C-16 — `null` = purga del log (reset del hub): no es una llegada, el
+      // badge de llegadas nuevas no cuenta.
+      if (!entrada || !esLlegadaViva(entrada.origen)) return; // la semilla no cuenta
       if (vistaRef.current === "recepcion") return;
       setRecepcionesNuevas((n) => n + 1);
     });
@@ -417,7 +501,10 @@ function ShellInterno() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    // C-18 — el shell ocupa EXACTAMENTE el viewport (h-dvh) y NO hace scroll
+    // de documento: cada vista hace scroll INTERNO (main: min-h-0 +
+    // overflow-y-auto — mismo patrón del shell del móvil).
+    <div className="h-dvh overflow-hidden bg-background">
       {/* Scrim del overlay (clic fuera cierra — kit T1). Sin sombras: la
           separación es el borde derecho 1px outline-variant + scrim. */}
       {menuAbierto && (
@@ -452,7 +539,7 @@ function ShellInterno() {
       </div>
 
       {/* El contenido ocupa TODO el ancho (la sidebar ya no es fija). */}
-      <div className="flex min-h-screen flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <header className="sticky top-0 z-30 flex h-12 items-center justify-between gap-3 border-b border-border bg-card px-3 md:px-4">
           <div className="flex min-w-0 items-center gap-1.5">
             <button
@@ -471,10 +558,8 @@ function ShellInterno() {
 
           <div className="flex shrink-0 items-center gap-2 md:gap-3">
             <ChipGamaHeader onAbrir={() => elegirVista("perfil")} />
-            <span className="label-caps flex items-center gap-1.5 text-(--success)">
-              <StatusDot />
-              Online
-            </span>
+            {/* C-24 — Online honesto: refleja red + último sondeo al hub. */}
+            <ChipOnline />
             <span className="hidden items-center gap-2 md:flex">
               <span className="label-caps text-muted-foreground">
                 {SUPERVISOR.nombre}
@@ -498,7 +583,9 @@ function ShellInterno() {
           </span>
         </div>
 
-        <main className="flex-1">
+        {/* C-18 — zona de scroll INTERNA: el documento no scrollea; la
+            vista activa scrollea aquí dentro (min-h-0 es la clave del flex). */}
+        <main className="min-h-0 flex-1 overflow-y-auto">
           {cargando && vista !== "monitor" ? (
             <div className="space-y-4 p-4 md:p-6">
               <Esqueleto className="h-11 w-full max-w-md" />
@@ -513,8 +600,12 @@ function ShellInterno() {
                 // T9 (KIT VISOR-MONITOR-GLOBAL-v1): el modo «limpio» quedó
                 // ABSORBIDO — el visor unificado ya es limpio y su única
                 // acción es REPORTAR ANOMALIA; aterrizaje idéntico al resto.
+                // C-17 — el TIPO del sobre viaja al visor (abrir la página
+                // del formulario correcto); fallback "TRANSMISION" SOLO para
+                // filas antiguas que no lo traigan (datos-provider respeta
+                // opciones.tipo y defaulta igual, aquí se hace explícito).
                 elegirVista("monitor");
-                abrirVisor(puestoId, mesaId, tipo ? { tipo } : undefined);
+                abrirVisor(puestoId, mesaId, { tipo: tipo ?? "TRANSMISION" });
               }}
             />
           )}

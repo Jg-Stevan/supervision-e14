@@ -377,12 +377,31 @@ export async function vaciar(): Promise<void> {
  *  PENDIENTE — una app que murió a mitad de OCR no debe dejar entradas
  *  zombis. Se llama en el arranque de MASIVA (T4, cargarFilas).
  *  FIX C6: el cursor solo RETIENE los zombis (mapper null para el resto) —
- *  el historial completo jamás se materializa. */
-export async function recuperarCola(): Promise<void> {
+ *  el historial completo jamás se materializa.
+ *  C-14 (plan 2026-11-11) — `excluir`: IDs EN VUELO del runner de ESTA
+ *  sesión (`idsEnVuelo()`). Re-montar la vista MASIVA a mitad de OCR llama
+ *  por aquí: sin el guard, una fila genuinamente PROCESANDO re-armaba a
+ *  PENDIENTE 0 % (el «rearme» del informe) y el runner en vivo la re-tomaba
+ *  después — doble trabajo y progreso perdido. Un id excluido NO es zombi:
+ *  su vuelo vive; los zombis reales (caída/recarga, runner muerto) no
+ *  pueden estar en el set porque el set nace con la sesión. Traza de
+ *  observabilidad con el conteo — distinguir «procesando» de «colgada»
+ *  queda registrado. */
+export async function recuperarCola(excluir?: ReadonlySet<string>): Promise<void> {
   const zombis = await listarMapeados((r) =>
     r.estado === "PROCESANDO" ? r : null,
   );
+  let recuperados = 0;
   for (const r of zombis) {
+    if (excluir?.has(r.id)) continue; // en vuelo AHORA — no es zombi
     await guardarRegistro({ ...r, estado: "PENDIENTE" });
+    recuperados++;
+  }
+  if (recuperados > 0) {
+    console.info("[e14] masiva recuperarCola", {
+      zombis: zombis.length,
+      recuperados,
+      vivosRespetados: zombis.length - recuperados,
+    });
   }
 }

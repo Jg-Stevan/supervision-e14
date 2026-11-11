@@ -71,13 +71,19 @@ function Separador() {
  * El icono check sale en desktop y el punto en móvil (mismo chip, dos
  * variantes del diseño). Ámbar = token único --amber #ffb800 (T-03 de la
  * auditoría diseños — antes #e9c400 suelto, hoy un solo ámbar en el tema).
+ *
+ * C-20 — el score es telemetría del OCR y pudo venir fuera de rango (un
+ * «13.7» de un motor desbocado): se CLAMPEA a [0, 10] antes de mostrar.
+ * El umbral óptimo sigue siendo `score >= 9` (dominio — no cambia con el
+ * clamp: fuera de rango por arriba sigue siendo óptimo, por abajo no).
  */
 function ChipScore({ score }: { score: number }) {
-  const optimo = score >= 9;
+  const clampeado = Math.min(10, Math.max(0, score));
+  const optimo = clampeado >= 9;
   return (
     <span
       role="status"
-      aria-label={`Score OCR de la página: ${score} de 10`}
+      aria-label={`Score OCR de la página: ${clampeado.toFixed(1)} de 10`}
       title="Score OCR de la página (telemetría del digitalizador)"
       className={cn(
         "inline-flex items-center gap-1.5 rounded-[4px] border px-2 py-0.5 font-mono text-[11px] font-bold tracking-wider",
@@ -98,7 +104,7 @@ function ChipScore({ score }: { score: number }) {
         aria-hidden
       />
       <span className="text-muted-foreground">SCORE:</span>
-      <span className="tabular-nums">{Math.round(score)}/10</span>
+      <span className="tabular-nums">{clampeado.toFixed(1)}/10</span>
     </span>
   );
 }

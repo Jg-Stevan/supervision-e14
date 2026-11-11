@@ -81,11 +81,20 @@ export interface EntradaRecepcion {
   clave?: string;
   /** Ronda C (R5/R6) — epoch ms del ESCANEO en el puesto emisor (el «antes
    * de transmitir»): habilita la hora dual REC/ORIGEN y la latencia media.
-   * Sin dato → la fila solo muestra la hora de recepción (honestidad). */
+   * Sin dato → la fila solo muestra la hora de recepción (honestidad).
+   * C-07 — `registrarRecepcion` JAMÁS fabrica este campo: si el origen no lo
+   * trae, la fila no tiene hora de origen y la vista muestra «ORIGEN —».
+   * Los únicos `fechaOrigen` sintéticos del sistema son los del ancla DEMO
+   * (asegurarSemilla, §0-7 — doctrina demo documentada). */
   fechaOrigen?: number;
   /** Ronda C (R6) — zona IANA del país emisor (mapa zonas-emisor) para
    * formatear `fechaOrigen` en la hora LOCAL del país. */
   tzOrigen?: string;
+  /** C-15 — epoch ms de LLEGADA AL HUB (`ts` que el hub estampa en cada fila):
+   * la hora REC honesta del flujo puente-local. Solo lo trae el sobre del hub
+   * (`entradaDesdeHub`); otros orígenes no lo inventan — la vista cae a
+   * `fecha` cuando falta (filas viejas / bandeja local). */
+  fechaRecepcionHub?: number;
 }
 
 export interface RecepcionPublicada {
@@ -93,14 +102,16 @@ export interface RecepcionPublicada {
   entrada: EntradaRecepcion;
 }
 
-type Oyente = (entrada: EntradaRecepcion) => void;
+type Oyente = (entrada: EntradaRecepcion | null) => void;
 
 const ENTRADAS: EntradaRecepcion[] = [];
 const oyentes = new Set<Oyente>();
 let contador = 0;
 
 /** Suscripción a llegadas (patrón del módulo: sin libs nuevas). El oyente
- * caído jamás rompe el registro (mismo gesto de actas-runtime). */
+ * caído jamás rompe el registro (mismo gesto de actas-runtime). Con `null`
+ * el oyente solo re-lee el log: señal de un cambio ESTRUCTURAL sin llegada
+ * (hoy, la purga C-16 tras un reset del hub). */
 export function suscribirseRecepcion(oyente: Oyente): () => void {
   oyentes.add(oyente);
   return () => {
@@ -118,31 +129,22 @@ function notificar(entrada: EntradaRecepcion) {
   }
 }
 
-/** Ronda C (R5/R6) — latencia de transmisión SIMULADA (demo, §0-7: nada
- * aleatorio): ciclo FIJO por llegada del pipeline masiva. La media ronda
- * el 1.8 s del diseño r5. Documentado como telemetría de demostración. */
-const LATENCIA_CICLO_S = [1.8, 1.4, 2.2, 1.6] as const;
-
-/** Registra UNA página recibida (más nuevas primero) y notifica. Si el
- * emisor no trae telemetría de origen, se estampa la del ciclo fijo + la
- * zona IANA del país (mapa zonas-emisor — ronda «reloj real»). */
+/** Ronda C (R5/R6) — C-07 (honestidad): aquí NO se fabrica telemetría. La
+ * latencia simulada del pipeline masiva (LATENCIA_CICLO_S) quedó eliminada:
+ * si la entrada no trae `fechaOrigen`, la fila no tiene hora de origen y la
+ * vista muestra «ORIGEN —». Los únicos `fechaOrigen` sintéticos del sistema
+ * son los del ancla DEMO (`asegurarSemilla`, §0-7 — doctrina demo). */
+/** Registra UNA página recibida (más nuevas primero) y notifica. */
 export function registrarRecepcion(
   entrada: Omit<EntradaRecepcion, "id">
 ): EntradaRecepcion {
   const id = `recepcion-${Date.now()}-${contador++}`;
-  const latenciaS =
-    entrada.fechaOrigen === undefined
-      ? LATENCIA_CICLO_S[contador % LATENCIA_CICLO_S.length]
-      : undefined;
   const tzOrigen =
     entrada.tzOrigen ??
     (entrada.pais ? zonaDePuesto(entrada.pais, entrada.lugar ?? "") : undefined);
   const completa: EntradaRecepcion = {
     ...entrada,
     id,
-    ...(latenciaS !== undefined
-      ? { fechaOrigen: entrada.fecha - latenciaS * 1000 }
-      : {}),
     ...(tzOrigen !== undefined ? { tzOrigen } : {}),
   };
   ENTRADAS.unshift(completa);
@@ -153,6 +155,24 @@ export function registrarRecepcion(
 /** Copia del log (más nuevas primero). */
 export function consultarRecepciones(): EntradaRecepcion[] {
   return [...ENTRADAS];
+}
+
+/**
+ * C-16 — purga el log EN MEMORIA y notifica (con `null`: cambio estructural,
+ * no una llegada — los oyentes re-leen y la vista queda vacía, honesta).
+ * ÚNICO llamador: `hub-local.ts` al detectar un cambio de generación (reset
+ * destructivo del hub). La semilla del ancla demo NO se re-siembra aquí: el
+ * guard `sembrado` de `asegurarSemilla` evita que vuelva en esta sesión.
+ */
+export function purgarRecepciones(): void {
+  ENTRADAS.length = 0;
+  for (const oyente of oyentes) {
+    try {
+      oyente(null);
+    } catch {
+      /* un oyente caído jamás rompe la purga */
+    }
+  }
 }
 
 /** Conteo por desenlace (KPIs de la vista; semilla incluida). */

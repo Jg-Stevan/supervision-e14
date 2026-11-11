@@ -89,7 +89,10 @@ export default function RootLayout({
         <meta httpEquiv="Content-Security-Policy" content={CSP_META} />
         <script dangerouslySetInnerHTML={{ __html: SW_REGISTRO }} />
       </head>
-      <body className="min-h-screen bg-background font-sans">
+      {/* C-18 — cero scroll de documento del panel: el body ocupa exactamente
+          el viewport y el shell (h-dvh overflow-hidden) reparte zonas internas
+          de scroll por vista (min-h-0 + overflow-y-auto). */}
+      <body className="h-dvh overflow-hidden bg-background font-sans">
         {children}
         <Toaster theme="dark" position="bottom-right" />
       </body>

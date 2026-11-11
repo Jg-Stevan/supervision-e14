@@ -66,3 +66,7 @@ local-*
 # Hub local de E2E (scripts/hub-local.mjs): actas REALES recibidas del
 # celular + certificados self-signed. Dato de sesión, jamás al repo.
 /.hub-local/
+# Certificado TLS del hub local — vive FUERA del almacén (C-02): el reset
+# del hub borra actas, nunca el certificado (los celulares no re-aceptan
+# el aviso de privacidad tras un reset).
+/.hub-local-cert/

@@ -54,7 +54,7 @@ import { cablearStoreMasiva } from "./store-api";
 // INYECCIÓN (store-api.ts, cableada abajo tras create). Sentido único:
 // store → núcleo. Este import (iniciar/pausar/rearrancar para las actions
 // de UI) es la ÚNICA arista store→runner y NO tiene retorno.
-import { iniciarRunner, pausarRunner, rearrancarTrasEncolar } from "./runner";
+import { iniciarRunner, pausarRunner, rearrancarTrasEncolar, idsEnVuelo } from "./runner";
 // D66 — KIT e14-decode-unico-precalor-v1: cableado del PRECALOR (T3) — la
 // suscripción al mini-store vive aquí (zona del kit: «flag transitorio
 // precalentada + cola de precalor») DESPUÉS de crear el store. R8: precalor
@@ -986,7 +986,11 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         set({ filas: [], colaDisponible: true, avisoCola: null });
         return;
       }
-      await recuperarCola(); // PROCESANDO zombi → PENDIENTE (caída a mitad de OCR)
+      // C-14 (plan 2026-11-11): los ids EN VUELO del runner de ESTA sesión
+      // se excluyen de la recuperación — re-montar la vista a mitad de OCR
+      // ya NO re-arma la fila a PENDIENTE 0 % (los zombis reales de una
+      // caída sí se recuperan: su vuelo murió con la página).
+      await recuperarCola(idsEnVuelo()); // PROCESANDO zombi → PENDIENTE (caída a mitad de OCR); en vuelo → intacto
       // FIX C6: mapper DENTRO del cursor — los registros completos (acta con
       // dataURLs) viven un instante; la bandeja solo retiene filas livianas.
       const filas = await listarMapeados(filaDeRegistro);

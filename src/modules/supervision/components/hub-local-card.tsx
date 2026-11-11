@@ -1,13 +1,25 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { RefreshCw, RadioTower, WifiOff } from "lucide-react";
+import { RefreshCw, RadioTower, Trash2, WifiOff } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { tiempoRelativo } from "./tiempo";
 import {
   alternarHubLocal,
   estadoHubLocal,
+  reiniciarHubRemoto,
   suscribirseHubLocal,
   sincronizarHubLocal,
   type EstadoHubLocal,
@@ -18,13 +30,19 @@ import {
  *
  * El panel y el digitalizador móvil los sirve UN solo servidor
  * (`scripts/hub-local.mjs`): el celular hace `POST {origen}/actas` y esta
- * tarjeta sondea `GET {origen}/actas?desde=` para traerlas al embudo de
- * siempre (`publicarActaMasiva` con origen `puente-local`).
+ * tarjeta sondea `GET {origen}/actas?desde=<seq>` (C-06: cursor por SEQ con
+ * drenaje) para traerlas al embudo de siempre (`publicarActaMasiva` con
+ * origen `puente-local`).
  *
  * Por qué un interruptor y no arranque automático: en GitHub Pages no hay hub,
  * y un sondeo fallando cada 4 s sería ruido + 5 errores consecutivos en el
  * log del supervisor. El default es APAGADO; lo prende quien esté probando el
  * flujo (queda en `localStorage`, así que sobrevive al recargo).
+ *
+ * C-16 — muestra el aviso de reconciliación cuando la `generacion` del hub
+ * cambió (reset destructivo) y expone el RESET manual con diálogo de
+ * confirmación: `POST /hub/reset` con el segundo factor `x-hub-reset:
+ * confirmar` (sin él el hub responde 428).
  */
 
 function Chip({ tono, children }: { tono: string; children: ReactNode }) {
@@ -38,13 +56,29 @@ function Chip({ tono, children }: { tono: string; children: ReactNode }) {
 export function HubLocalCard() {
   const [estado, setEstado] = useState<EstadoHubLocal>(() => estadoHubLocal());
   const [enCurso, setEnCurso] = useState(false);
+  const [resetEnCurso, setResetEnCurso] = useState(false);
+  const [confirmarReset, setConfirmarReset] = useState(false);
 
   useEffect(() => suscribirseHubLocal(() => setEstado(estadoHubLocal())), []);
 
   const sincronizar = async () => {
     setEnCurso(true);
-    await sincronizarHubLocal();
+    const r = await sincronizarHubLocal();
     setEnCurso(false);
+    if (r.error) toast.error(`El hub no respondió: ${r.error}`);
+  };
+
+  const reiniciar = async () => {
+    setResetEnCurso(true);
+    const r = await reiniciarHubRemoto();
+    setResetEnCurso(false);
+    if (r.ok) {
+      toast.success(
+        `Hub reiniciado — almacén vacío (generación nueva ${r.generacion ?? "…"}); recepción re-sincronizada`
+      );
+    } else {
+      toast.error(`No se pudo reiniciar el hub: ${r.error}`);
+    }
   };
 
   const encendido = estado.activo;
@@ -77,7 +111,9 @@ export function HubLocalCard() {
               }
             >
               {estado.detenido
-                ? "DETRANSPORTE · 5 fallos seguidos"
+                ? // C-24 — término correcto en español + N real de fallos
+                  // consecutivos (antes: «DETRANSPORTE · 5» pegado y falso).
+                  `EN TRANSPORTE · ${estado.fallosSeguidos} fallos seguidos`
                 : encendido
                   ? "SONDEANDO CADA 4 S"
                   : "APAGADO"}
@@ -108,6 +144,20 @@ export function HubLocalCard() {
               local esté corriendo.
             </p>
           )}
+          {/* C-16 — aviso de reconciliación: la generación del hub cambió
+              (reset destructivo): cursor a 0, log de recepción purgado y
+              re-sincronización completa (la semilla demo no se re-siembra). */}
+          {estado.aviso && (
+            <p
+              role="status"
+              className="body-md mt-2 rounded-[4px] border border-(--warning)/50 bg-(--warning)/10 px-3 py-2 text-(--warning)"
+            >
+              {estado.aviso}
+              {estado.generacion && (
+                <span className="font-data"> · generación {estado.generacion}</span>
+              )}
+            </p>
+          )}
           <p className="body-md mt-2 max-w-xl text-muted-foreground">
             En el celular, abra la misma dirección del panel sin la ruta
             <span className="font-data"> /supervision</span> (o sea{" "}
@@ -117,7 +167,7 @@ export function HubLocalCard() {
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -127,6 +177,8 @@ export function HubLocalCard() {
           >
             {encendido ? "Apagar hub" : "Prender hub"}
           </Button>
+          {/* C-16 — re-sincronización manual (drena TODO lo pendiente desde
+              el cursor SEQ, no solo una página). */}
           <Button
             variant="outline"
             size="sm"
@@ -135,10 +187,55 @@ export function HubLocalCard() {
             disabled={enCurso}
           >
             <RefreshCw className={cn("size-4", enCurso && "animate-spin")} aria-hidden />
-            Sincronizar ahora
+            Re-sincronizar con el hub
+          </Button>
+          {/* C-16 — reset destructivo del hub (demo): el botón SOLO abre el
+              diálogo; el POST con el segundo factor sale confirmado. */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="label-caps h-11 text-(--warning) hover:text-(--warning)"
+            onClick={() => setConfirmarReset(true)}
+            disabled={resetEnCurso}
+            title="Vacía el almacén del hub local (destructivo)"
+          >
+            <Trash2 className="size-4" aria-hidden />
+            Reiniciar hub
           </Button>
         </div>
       </div>
+
+      {/* C-16 — confirmación del reset destructivo (shadcn alert-dialog). */}
+      <AlertDialog
+        open={confirmarReset}
+        onOpenChange={(abierto) => !resetEnCurso && setConfirmarReset(abierto)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Reiniciar el hub local?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vacía TODAS las filas del almacén del hub en{" "}
+              <span className="font-data">{origen}</span> (acción destructiva:
+              las fotos y metadatos se pierden, queda registro en el log del
+              servidor). El panel detectará la generación nueva y
+              re-sincronizará la recepción desde cero. El hub puede volver a
+              llenarse en cuanto el celular envíe de nuevo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetEnCurso}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={resetEnCurso}
+              onClick={(e) => {
+                e.preventDefault(); // el diálogo NO se cierra hasta terminar
+                void reiniciar().then(() => setConfirmarReset(false));
+              }}
+            >
+              {resetEnCurso ? "Reiniciando…" : "Reiniciar hub"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

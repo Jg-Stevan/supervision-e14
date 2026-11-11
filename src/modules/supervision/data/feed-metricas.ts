@@ -33,6 +33,10 @@ export interface MetricasFeed {
   buckets: number[];
   /** Media de (fecha − fechaOrigen) en segundos; null si ninguna fila la trae. */
   latenciaMedia: number | null;
+  /** C-07 — pares REALES (fechaOrigen presente y coherente) con los que se
+   * calculó la media: la vista solo muestra el indicador con ≥ 2 muestras
+   * (con una sola, una «media» sería un invento estadístico). */
+  latenciaMuestras: number;
   /** Llegadas contadas en la ventana (para el «N en cola» del feed). */
   llegadasVentana: number;
 }
@@ -97,6 +101,7 @@ export function calcularMetricasFeed(
     tono,
     buckets,
     latenciaMedia: muestras > 0 ? suma / muestras / 1000 : null,
+    latenciaMuestras: muestras,
     llegadasVentana,
   };
 }

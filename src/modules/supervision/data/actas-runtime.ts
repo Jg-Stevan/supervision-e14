@@ -57,6 +57,10 @@ export interface EntradaActaMasiva {
   /** Informativo (telemetría de la bandeja del digitalizador). */
   score: number;
   statusActa: string;
+  /** C-15 — epoch ms de llegada AL HUB (solo el sobre que trae
+   * `hub-local.ts` desde la fila del sondeo). El embudo NO lo inventa:
+   * los demás orígenes no lo mandan y el log cae a su `fecha`. */
+  fechaRecepcionHub?: number;
 }
 
 export type ResultadoPublicacion =
@@ -199,6 +203,10 @@ export async function publicarActaMasiva(
       statusActa: entrada.statusActa,
       nombreArchivo: entrada.nombreArchivo,
       clave,
+      // C-15 — solo si el sobre lo trae (fila del hub); jamás inventado.
+      ...(entrada.fechaRecepcionHub !== undefined
+        ? { fechaRecepcionHub: entrada.fechaRecepcionHub }
+        : {}),
     });
     return { ok: false, clave, motivo: motivoJoin };
   }
@@ -304,6 +312,10 @@ export async function publicarActaMasiva(
     statusActa: entrada.statusActa,
     nombreArchivo: entrada.nombreArchivo,
     clave,
+    // C-15 — solo si el sobre lo trae (fila del hub); jamás inventado.
+    ...(entrada.fechaRecepcionHub !== undefined
+      ? { fechaRecepcionHub: entrada.fechaRecepcionHub }
+      : {}),
   });
   return { ok: true, clave };
 }

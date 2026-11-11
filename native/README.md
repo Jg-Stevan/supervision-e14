@@ -58,8 +58,11 @@ Qué debes ver (las dos líneas, tal como las imprime `servidor.py:346`):
 ```
 
 La segunda línea es la que importa: mientras no diga `LISTO`, el `/salud` ya
-responde pero la primera acta paga el calentamiento del grafo. Desde el ZIP del
-visitante dirá `LISTO (sin acta de ejemplo: no calentada)` — ver D81.
+responde pero la primera acta paga el calentamiento del grafo. C-23 — la
+calentada usa las fixtures sintéticas vigentes (`acta-sim-*.jpg`); si el clon
+no las tiene, arranca frío sin error y dirá `LISTO (sin acta de ejemplo: no calentada)` —
+en ese caso la PRIMERA acta paga el arranque frío (~13 s medidos en el informe
+del sidecar) y las siguientes van calientes. Ver D81.
 
 Opciones: `--motor v4|v5` · `--puerto 8765` · `--sesiones N` (los núcleos se
 reparten entre ellas) · `--hilos N` · `--con-cls` (volteo 180° por línea, más

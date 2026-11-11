@@ -142,7 +142,13 @@ function FilaRecepcion({
 }: {
   entrada: EntradaRecepcion;
   nueva: boolean;
-  onVerEnMonitor?: (puestoId: string, mesaId: string) => void;
+  // C-17 — el sobre trae el formulario (`entrada.formulario`): viaja al visor
+  // para abrir el acta en el TIPO correcto (no siempre TRANSMISION).
+  onVerEnMonitor?: (
+    puestoId: string,
+    mesaId: string,
+    tipo?: FormularioTipo
+  ) => void;
 }) {
   const conJoin = entrada.estado === "PUBLICADA" && entrada.idEnlace !== "—";
   return (
@@ -156,15 +162,19 @@ function FilaRecepcion({
         {/* Miniatura */}
         <Miniatura entrada={entrada} />
 
-        {/* Hora dual (ronda C R6): REC = recepción en Colombia · ORIGEN =
-            escaneo en la hora local del país emisor. Sin telemetría de
-            origen → solo REC (honestidad — jamás proyectar la hora). */}
+        {/* Hora dual (ronda C R6): REC = hora de RECEPCIÓN en Colombia —
+            C-15: en filas del hub se muestra la LLEGADA REAL AL HUB
+            (`fechaRecepcionHub`, el `ts` que el hub estampa), y solo si falta
+            (filas viejas / bandeja local) cae a `fecha` del sondeo. ORIGEN =
+            escaneo en la hora local del país emisor; C-07: si la fila no trae
+            `fechaOrigen`, se muestra «ORIGEN —» (honestidad — jamás
+            proyectar la hora del escaneo). */}
         <span className="w-40 shrink-0">
           <span className="font-data block whitespace-nowrap text-[12px] leading-4">
-            REC {horaColombia(entrada.fecha)}{" "}
+            REC {horaColombia(entrada.fechaRecepcionHub ?? entrada.fecha)}{" "}
             <span className="text-muted-foreground">(COL)</span>
           </span>
-          {entrada.fechaOrigen !== undefined && entrada.tzOrigen && (
+          {entrada.fechaOrigen !== undefined && entrada.tzOrigen ? (
             <span
               className="font-data block truncate text-[11px] text-muted-foreground"
               title={
@@ -177,6 +187,13 @@ function FilaRecepcion({
               {entrada.pais
                 ? ` (${entrada.pais.replace(/^\d+\s*-\s*/, "")})`
                 : ""}
+            </span>
+          ) : (
+            <span
+              className="font-data block truncate text-[11px] text-muted-foreground"
+              title="El origen no reportó la hora de escaneo — no se inventa"
+            >
+              ORIGEN —
             </span>
           )}
           <span className="font-data block text-[11px] text-muted-foreground">
@@ -270,7 +287,15 @@ function FilaRecepcion({
           aria-label={`Ver en monitor: ${entrada.idEnlace} mesa ${entrada.mesa}`}
           onClick={
             conJoin && onVerEnMonitor
-              ? () => onVerEnMonitor(entrada.idEnlace, entrada.mesa)
+              ? () =>
+                  onVerEnMonitor(
+                    entrada.idEnlace,
+                    entrada.mesa,
+                    // C-17 — el formulario del sobre manda; null (SIN_JOIN)
+                    // no llega aquí (botón deshabilitado), pero undefined
+                    // deja que el shell aplique su fallback honesto.
+                    entrada.formulario ?? undefined
+                  )
               : undefined
           }
         >
@@ -313,7 +338,12 @@ function Sparkline({ buckets }: { buckets: readonly number[] }) {
 export function VistaRecepcion({
   onVerEnMonitor,
 }: {
-  onVerEnMonitor?: (puestoId: string, mesaId: string) => void;
+  // C-17 — misma firma que la vista Carga Masiva: el TIPO viaja al visor.
+  onVerEnMonitor?: (
+    puestoId: string,
+    mesaId: string,
+    tipo?: FormularioTipo
+  ) => void;
 }) {
   // null = primera carga (skeleton — T2/T3). Cero lecturas en render SSR.
   const [entradas, setEntradas] = useState<EntradaRecepcion[] | null>(null);
@@ -367,8 +397,10 @@ export function VistaRecepcion({
     }
     const desuscribir = suscribirseRecepcion((entrada) => {
       if (!vivo) return;
+      // C-16 — `null` = cambio estructural sin llegada (purga tras reset del
+      // hub): re-lee el log, sin destello (no es una llegada viva).
       setEntradas(consultarRecepciones());
-      if (!esLlegadaViva(entrada.origen)) return;
+      if (!entrada || !esLlegadaViva(entrada.origen)) return;
       setFrescas((prev) => new Set(prev).add(entrada.id));
       const t = setTimeout(() => {
         setFrescas((prev) => {
@@ -497,8 +529,11 @@ export function VistaRecepcion({
             {ultima && !pausado
               ? ` · última ${tiempoRelativo(ultima.fecha).toLowerCase()}`
               : ""}
-            {/* Ronda C (R5) — latencia media rec vs origen (si hay telemetría). */}
-            {metricas.latenciaMedia !== null && (
+            {/* Ronda C (R5) — latencia media rec vs origen. C-07: SOLO con
+                pares reales (fechaOrigen presente → recibida) y con ≥ 2
+                muestras: con menos, una «media» sería un invento (la fila
+                se oculta — ni división por cero ni cifras fabricadas). */}
+            {metricas.latenciaMedia !== null && metricas.latenciaMuestras >= 2 && (
               <span className="font-data label-caps text-[10px] text-muted-foreground">
                 · Latencia media: {metricas.latenciaMedia.toFixed(1)}s
               </span>

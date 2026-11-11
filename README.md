@@ -111,8 +111,10 @@ Los detalles operativos —y la matriz de errores— están en
 - **DIVIPOLA:** el catálogo maestro (14.438 puestos) vive en el repo pero
   **nunca se importa**; el código consume solo el derivado exterior validado
   (949 puestos, 67 países, 3.670 mesas).
-- **Actas de demostración:** son documentos públicos, recomprimidos para no
-  inflar el repo (JPEG q70–q72 y WebP q75; ~3,3 MB en total). No se versionan
+- **Actas de demostración:** 4 fixtures sintéticas del modo SIM
+  (`acta-sim-*.jpg` en `src/modules/digitalizador/assets/`). Las fotos reales
+  que poblaron el lote DEMO original fueron retiradas del HEAD (D87, 2026-11-11)
+  y su purga de historia está preparada (D90 — Fase 3 del dueño). No se versionan
   fotos de particulares ni datos personales.
 - **Sin telemetría remota:** no hay backend, ni cuentas, ni envío de datos a
   terceros. El histórico de deduplicación y las métricas viven en IndexedDB local.

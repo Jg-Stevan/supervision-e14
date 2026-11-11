@@ -159,3 +159,36 @@ Lo mismo con el puerto: `native/servidor.py --puerto` (8765) y la flag compilada
 | `/salud` no contesta en el runner | otro proceso en 8799 o el exe abortó | el script imprime las últimas 2000 chars del stdout del exe al fallar |
 | La tarjeta del sitio sigue apuntando al ZIP viejo | cache del navegador o la release quedó marcada prerelease | `curl -sI …/releases/latest/download/…` para ver qué sirve `latest` |
 | Arranque > 60 s y el job rojo | otra cosa: no el antivirus | el script vuelca la salida del exe; revisa si `e14nativo` está buscando `public/` (rama `_MEIPASS` tocada) |
+
+### B.6 Prueba de origen (C-22 — plan 2026-11-11)
+
+El sidecar rechaza con `403` EXPLÍCITO todo origen fuera de la allowlist
+(lazo, `https://supervision-e14.pages.dev`, previsualizaciones de un nivel y
+`E14_ORIGENES`). El caso que motiva la prueba: un iframe sandbox
+(`allow-scripts`) de un sitio público manda `Origin: null` — antes pasaba,
+ahora no. Con el sidecar corriendo en `127.0.0.1:8765`:
+
+```bash
+# → 403 {"error":"origen",...}: iframe sandbox de sitio público (Origin: null)
+curl -i -X OPTIONS http://127.0.0.1:8765/salud -H "Origin: null"
+
+# → 403: origen vacío (mismo trato que null)
+curl -i http://127.0.0.1:8765/salud -H "Origin:"
+
+# → 403: sitio ajeno
+curl -i http://127.0.0.1:8765/salud -H "Origin: https://evil.example"
+
+# → 200 + Access-Control-Allow-Origin: flujo legítimo (página publicada)
+curl -si http://127.0.0.1:8765/salud -H "Origin: https://supervision-e14.pages.dev" | head -8
+
+# → 200: dev local
+curl -si http://127.0.0.1:8765/salud -H "Origin: http://localhost:3000" | head -8
+
+# file:// de custodia del dueño: SOLO con allowlist explícito
+E14_ORIGENES="null" python native/servidor.py   # → Origin: null pasa
+python native/servidor.py                        # → Origin: null da 403
+```
+
+Criterio: los tres primeros dan `403` con cuerpo JSON y SIN cabeceras
+permissivas (ni `Access-Control-Allow-Origin` ni
+`Access-Control-Allow-Private-Network`); los dos siguientes dan `200`.

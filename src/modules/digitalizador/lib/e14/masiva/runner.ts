@@ -252,6 +252,17 @@ export function __resetAparcadasDedupParaTest(): void {
   dedupAparcadas.clear();
 }
 
+/** C-14 (plan 2026-11-11) — IDs EN VUELO del runner: la reserva nace ANTES
+ *  del pipeline y muere en el finally del vuelo, así que un id presente aquí
+ *  está genuinamente PROCESANDO en ESTA sesión. La restauración del store
+ *  (`cargarFilas → recuperarCola`) lo consume para distinguir «procesando
+ *  vivo» de «zombi de una caída» — sin este guard, re-montar la vista MASIVA
+ *  a mitad de OCR re-armaba la fila a PENDIENTE 0 % (el rearme del informe).
+ *  Snapshot barato y SIN acceso de escritura: el caller jamás muta el set. */
+export function idsEnVuelo(): Set<string> {
+  return new Set(reservadas);
+}
+
 /** Mutex simple (kit Opt-3: «Mutex simple o encolar la verificación de
  *  dedup en un solo hilo») — promesa-cadena FIFO: cada sección crítica se
  *  encola detrás de la anterior y JAMÁS se intercala. Solo la protege lo

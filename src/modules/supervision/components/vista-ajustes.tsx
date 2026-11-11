@@ -20,9 +20,19 @@
  * export estático y sin `setState` dentro de un efecto.
  */
 import { useSyncExternalStore, useState } from "react";
-import { EyeOff, KeyRound, Lock, ScrollText, Trash2 } from "lucide-react";
+import { Eraser, EyeOff, KeyRound, Lock, ScrollText, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   borrarTokenLectura,
   fijarTokenLectura,
@@ -39,6 +49,51 @@ function suscribirToken(avisar: () => void): () => void {
   return () => {
     window.removeEventListener("storage", avisar);
     window.removeEventListener(EVENTO_TOKEN, avisar);
+  };
+}
+
+// ── C-13 — clave ADMIN del hub local (expurgo DELETE autenticado) ──────────
+// Misma disciplina H-2 que el token de lectura: vive SOLO en el localStorage
+// de este navegador (`e14-hub-admin`), jamás en el bundle ni en el repo. La
+// clave la imprime `hub-local.mjs` en su consola al arrancar.
+
+const CLAVE_ADMIN_LS = "e14-hub-admin";
+const EVENTO_ADMIN = "e14-hub-admin-cambio";
+
+function claveAdmin(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(CLAVE_ADMIN_LS) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function fijarClaveAdmin(valor: string): boolean {
+  try {
+    window.localStorage.setItem(CLAVE_ADMIN_LS, valor.trim());
+    window.dispatchEvent(new Event(EVENTO_ADMIN));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function borrarClaveAdmin(): void {
+  try {
+    window.localStorage.removeItem(CLAVE_ADMIN_LS);
+    window.dispatchEvent(new Event(EVENTO_ADMIN));
+  } catch {
+    /* nada que borrar */
+  }
+}
+
+function suscribirAdmin(avisar: () => void): () => void {
+  window.addEventListener("storage", avisar);
+  window.addEventListener(EVENTO_ADMIN, avisar);
+  return () => {
+    window.removeEventListener("storage", avisar);
+    window.removeEventListener(EVENTO_ADMIN, avisar);
   };
 }
 

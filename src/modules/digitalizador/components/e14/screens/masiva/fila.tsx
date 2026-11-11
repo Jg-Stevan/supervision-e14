@@ -186,7 +186,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               Etiqueta SIEMPRE visible (el color jamás es el único
               portador de información — accesibilidad/daltonismo);
               refleja el desenlace heredado (jamás inventa — kit §1).
-              Convive con QR chip / ≡ original / YA ENVIADA (flex-wrap
+              Convive con QR chip / ≡ original / YA PUBLICADA (flex-wrap
               del contenedor — red line 5). Icono: CheckIcon propio
               del repo (el icono del kit era opcional y lucide no
               existe en el repo — sistema de diseño propio manda). */}
@@ -240,12 +240,13 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               ≡ {nombreOriginal ?? "OTRA FILA"}
             </span>
           )}
-          {/* e65-dedup-enviadas-v1 (T-7): chip YA ENVIADA — la
-              fila nació con contenido ya enviado (bytes/dhash);
-              cero OCR, cero envío. JUNTO al chip DUPLICADA. */}
+          {/* e65-dedup-enviadas-v1 (T-7): chip YA PUBLICADA (C-14 — copy
+              honesto: la fila nació con contenido ya publicado en sesiones
+              previas (bytes/dhash); cero OCR, cero publicación — LOCAL, D8).
+              JUNTO al chip DUPLICADA. */}
           {f.estado === "YA-ENVIADA" && (
             <span className="rounded border border-[#00e599]/60 bg-[#00e599]/10 px-1.5 py-0.5 text-[10px] text-[#00e599]">
-              YA ENVIADA
+              YA PUBLICADA
             </span>
           )}
           {f.estado === "ERROR" && f.error && (

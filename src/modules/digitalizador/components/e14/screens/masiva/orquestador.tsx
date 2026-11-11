@@ -421,10 +421,11 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
           terminadas++;
           yaEnviadas++;
           // U-5 (INFORME-PRUEBAS-Y-AUDITORIA): la YA-ENVIADA es un desenlace
-          // ENVIADO por construcción (RL-e65b-2 — la píldora de la fila lo
-          // dice: «YA ENVIADA»), así que cuenta en ENVIADAS del encabezado.
-          // Antes el lote 6/6 cerraba con «ENVIADAS 0» cuando las filas
-          // migraban al histórico — contradecía a las propias filas.
+          // PUBLICADO por construcción (RL-e65b-2 — la píldora de la fila lo
+          // dice: «YA PUBLICADA»), así que cuenta en PUBLICADAS del encabezado
+          // (C-14 — copy honesto: publicación LOCAL, D8). Antes el lote 6/6
+          // cerraba con «ENVIADAS 0» cuando las filas migraban al histórico
+          // — contradecía a las propias filas.
           enviadas++;
           break;
         case "ERROR":

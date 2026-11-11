@@ -29,7 +29,10 @@ import { FilaMasivaVista } from "./fila";
 /** Filtros + línea de conteos + botón ENVIAR ADVERTENCIAS.
  *  P0.2 (informe 2 §6.2): memo — props primitivos + acciones estables; el
  *  orquestador re-renderiza por otras señales (gama, drag, avisos) sin que
- *  los conteos cambien y esta barra ya no paga reconciliación. */
+ *  los conteos cambien y esta barra ya no paga reconciliación.
+ *  C-14 — copys honestos: «PUBLICADAS» (no «ENVIADAS») porque la publicación
+ *  es LOCAL — monitor en memoria de sesión + ledger IDB (D8, export
+ *  estático): nada sale por red desde la masiva. */
 export const BandejaFiltros = memo(function BandejaFiltros({
   filtro,
   setFiltro,
@@ -79,10 +82,10 @@ export const BandejaFiltros = memo(function BandejaFiltros({
     <div className="flex flex-wrap items-center gap-2">
       <span
         className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-gray-400"
-        aria-label={`Conteos: ${enviadas} enviadas, ${enCola} en cola, ${pendientes} pendientes, ${duplicadas} duplicadas, ${yaEnviadas} ya enviadas, ${errores} errores`}
+        aria-label={`Conteos: ${enviadas} publicadas, ${enCola} en cola, ${pendientes} pendientes, ${duplicadas} duplicadas, ${yaEnviadas} ya publicadas, ${errores} errores`}
       >
         <span>
-          ENVIADAS <strong className="font-bold text-white">{enviadas}</strong>
+          PUBLICADAS <strong className="font-bold text-white">{enviadas}</strong>
         </span>
         <span className="text-gray-600" aria-hidden>·</span>
         <span>
@@ -104,7 +107,7 @@ export const BandejaFiltros = memo(function BandejaFiltros({
           <>
             <span className="text-gray-600" aria-hidden>·</span>
             <span>
-              YA ENVIADAS <strong className="font-bold text-white">{yaEnviadas}</strong>
+              YA PUBLICADAS <strong className="font-bold text-white">{yaEnviadas}</strong>
             </span>
           </>
         )}
