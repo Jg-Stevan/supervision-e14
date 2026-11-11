@@ -24,6 +24,7 @@ public/vendor/opencv-4.5.5-core.js
 public/wasm/zxing_reader.wasm
 public/wasm/zbar.wasm
 public/models/tesseract/*.traineddata.gz
+public/models/tesseract/**
 public/models/rapidocr/*.onnx
 
 # Sidecar nativo: se versiona el código (native/*.py), no lo que produce
