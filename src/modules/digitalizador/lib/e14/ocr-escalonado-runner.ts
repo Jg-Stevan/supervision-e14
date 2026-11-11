@@ -41,6 +41,11 @@ import { loadImageMemo, canvasCon } from "./image-utils";
 // KIT e14-ocr-nativo-v1 — sidecar nativo del det+rec (aceleración opcional;
 // null = camino de siempre en WASM).
 import { ladoNativoDisponible, ocrNativo } from "./ocr/nativo";
+// Decisión del dueño 2026-11-11 — motor de D por defecto en S: Tesseract
+// fast → GATE → RapidOCR v4 escalonado. El sidecar nativo (si está
+// instalado) corre ANTES: aceleración opcional, nunca requisito.
+import { reconocerOcrCascada } from "./ocr-cascada";
+import { leerFlags } from "./flags";
 import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
 // FASE C del plan post-v2.3 (medición §6.7): telemetría por etapa — el sink
 // YA existe en el paquete; este runner lo alimenta sin cambiar ninguna
@@ -282,6 +287,18 @@ export async function reconocerRapidOcrEscalonado(
       telemetria("nativo"),
     );
     if (salida) return salida;
+  }
+  // Cascada por defecto (flag `ocrCascada`, default ON): Tess fast primero,
+  // gate real y, si no hay AUTO, el escalonado RapidOCR de siempre. SIM NO
+  // entra (los chips de simulación se miden contra el motor de siempre) y
+  // `ocrCascada:false` devuelve el escalonado byte a byte (kill-switch).
+  if (!escalonado.simular && leerFlags().ocrCascada !== false) {
+    return await reconocerOcrCascada(fotoOcr, onProgress, {
+      presupuestoMs: escalonado.presupuestoMs,
+      inicioMs: escalonado.inicioMs,
+      esperaSink: escalonado.esperaSink,
+      onEvento: escalonado.onEvento,
+    });
   }
   const rt = await rapidOcrInit(); // sesión ÚNICA (§2.1 — pre-warm en bg)
   if (escalonado.simular) {

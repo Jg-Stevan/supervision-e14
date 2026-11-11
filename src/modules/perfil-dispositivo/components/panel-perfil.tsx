@@ -30,7 +30,6 @@ import {
   RefreshCw,
   Sparkles,
   Wifi,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -49,28 +48,19 @@ import {
   planGamaActual,
 } from "@/modules/digitalizador/lib/e14/gama";
 import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
-// KIT ocr-router-v1 fase 4 — el override manual del dueño (D6) viaja por la
-// puerta OFICIAL de overrides (la misma de todos los kill-switches): escribe
-// en e14-flags-overrides; la lectura ya pasa por la DOBLE whitelist
-// (sanearFlags + leerOverridesFlags — registrada en fase 2).
-import { guardarOverridesFlags } from "@/modules/digitalizador/lib/e14/obs/politica";
 // POST-F3 (mapa v2.3): el ROUTER murió — su información vive en la
-// TELEMETRÍA de la cascada y en el ORDEN CONFIGURADO (estado-motores —
+// TELEMETRÍA de la cascada y en la CONFIGURACIÓN fija (estado-motores —
 // ítem 3.6). El panel muestra configuración + evidencia real; sin priors
 // inflables: la cascada decide DESPUÉS de leer, contra invariantes del acta.
 import {
-  presionReciente,
   resolverMotor,
-  type MotorOcr,
   type PerfilMinimo,
   type ResolucionMotor,
 } from "@/modules/digitalizador/lib/e14/ocr/estado-motores";
 import type { PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 // R9 (ola-3) — ADOPCIÓN de capa shared (R2, reporte 04 §B2 #8/#9):
-// · fmtDuracion — canónico en @/shared/format/tiempo (copia local borrada).
 // · colorDeTono — mapa tono→token canónico en @/shared/ui/tono (el ternario
 //   de KpiPerfil, antes aquí L85-92, era una de las 3 copias del mapa).
-import { fmtDuracion } from "@/shared/format/tiempo";
 import { colorDeTono, type Tono } from "@/shared/ui/tono";
 
 // ─── piezas locales (mismo lenguaje visual del kit) ────────────────────────
@@ -173,38 +163,7 @@ function fmtN(v: number | null, sufijo: string): string {
   return v === null ? "no informado" : `${v} ${sufijo}`;
 }
 
-// ─── POST-F3 — el orden de motores es CONFIGURACIÓN (mapa §3.4) ────────────
-
-const ETIQUETA_MOTOR: Record<MotorOcr, string> = {
-  rapidocr: "RapidOCR v4 (producción)",
-  tesseract: "Tesseract spa-best + psm 4",
-};
-/** Alias históricos del router (overrides viejos que puedan quedar en
- *  localStorage — el fixture del paquete conserva el registro). */
-const ETIQUETA_MOTOR_HISTORICA: Record<string, string> = {
-  "tesseract-best-psm4": "RapidOCR v4 (histórico)",
-  ppocrv5: "PP-OCRv5 (histórico)",
-  "tesseract-spa-best-psm4": "Tesseract spa-best + psm 4",
-};
-const etiquetaDe = (motor: string): string =>
-  ETIQUETA_MOTOR[motor as MotorOcr] ?? ETIQUETA_MOTOR_HISTORICA[motor] ?? motor;
-
-// POST-F3 — opciones del selector (D6: la app muestra; el dueño decide).
-// null = Automático: el ORDEN CONFIGURADO corre (rapidocr primero en lotes —
-// §3.4). Los motores son los del PAQUETE (3.2: wrappers viejos muertos);
-// la cascada valida cada intento y cae al siguiente eslabón si falla.
-const OPCIONES_MOTOR: Array<{
-  valor: MotorOcr | null;
-  etiqueta: string;
-  sub: string;
-}> = [
-  { valor: null, etiqueta: "Automático", sub: "orden configurado · recomendado" },
-  { valor: "rapidocr", etiqueta: "RapidOCR v4", sub: "motor base · producción" },
-  { valor: "tesseract", etiqueta: "Tesseract spa-best", sub: "psm 4 · 13,5 MB · 94,4 %" },
-];
-
-// R9 — fmtDuracion adoptado de @/shared/format/tiempo (copia verbatim de
-// la que vivía aquí: L202-209 — misma salida min/h/d, test de paridad R2).
+// ─── POST-F3 — motor del orden configurado (una sola cascada) ──────────────
 
 /** Adapta el `PerfilRecursos` del kit a la estructura mínima que espera
  *  estado-motores (`PerfilMinimo`). null = sin señales aún (SSR / primer
@@ -223,32 +182,11 @@ function perfilMinimoDe(perfil: PerfilRecursos): PerfilMinimo | null {
   };
 }
 
-/** Resuelve el motor que el ORDEN CONFIGURADO correría aquí (POST-F3):
- *  override manual ← telemetría (presión) ← configuración. Jamás lanza. */
+/** Resuelve el motor del orden configurado para este equipo (cascada fija:
+ *  Tesseract fast → RapidOCR v4 escalonado). Jamás lanza. */
 function resolverMotorDelDispositivo(perfil: PerfilRecursos): ResolucionMotor | null {
   try {
-    const p = perfilMinimoDe(perfil);
-    if (!p) return null;
-    const flags = leerFlags();
-    return resolverMotor(p, {
-      overrideManual: (flags.ocrMotor as MotorOcr | null) ?? null,
-      presionReciente: presionReciente(),
-    });
-  } catch {
-    return null;
-  }
-}
-
-/** POST-F3 — el orden SIN override (para la advertencia honesta cuando
- *  el dueño fija un motor distinto del configurado). Jamás lanza. */
-function resolverRecomendacionCascada(perfil: PerfilRecursos): ResolucionMotor | null {
-  try {
-    const p = perfilMinimoDe(perfil);
-    if (!p) return null;
-    return resolverMotor(p, {
-      overrideManual: null, // la voz de la configuración SIN la del dueño
-      presionReciente: presionReciente(),
-    });
+    return resolverMotor(perfilMinimoDe(perfil));
   } catch {
     return null;
   }
@@ -318,11 +256,6 @@ export function VistaPerfil() {
         flagAuto: boolean;
         /** POST-F3 — motor del orden configurado, para informe y tarjeta. */
         motor: ResolucionMotor | null;
-        /** Override manual vigente en e14-flags-overrides (null = el orden
-         *  configurado decide; «rapidocr» | «tesseract» = el dueño fijó). */
-        overrideManual: string | null;
-        /** El orden SIN override (advertencia honesta del selector). */
-        motorSinOverride: ResolucionMotor | null;
       }
   >(null);
   // D38 — resolución EN MONTAJE (no en render) para hydration-safe con el
@@ -336,9 +269,7 @@ export function VistaPerfil() {
         poolOcr: flagsMasivaEfectivos().poolWorkers,
         hilosOcr: flagsMasivaEfectivos().ocrThreadsTope,
         flagAuto: f.masivaAdaptativoGama !== false,
-        overrideManual: f.ocrMotor ?? null,
         motor: resolverMotorDelDispositivo(perfil),
-        motorSinOverride: resolverRecomendacionCascada(perfil),
       });
     } catch {
       setAuto(null); // jamás tumba el panel
@@ -376,48 +307,9 @@ export function VistaPerfil() {
     }
   };
 
-  // KIT selector-motor-v1 fase 5 — el DUEÑO fija el motor (D6: la app
-  // muestra y escribe SOLO lo que el dueño pide). Escribe el override en
-  // e14-flags-overrides (puerta oficial — DOBLE whitelist de fase 2); null
-  // = retirar (el whitelist lo descarta ⇒ el router recupera la decisión).
-  // El arranque del OCR lo lee en la PRÓXIMA init — el singleton vigente no
-  // se toca (usar APLICAR AHORA para reiniciar sin recargar; el reinicio
-  // seguro rechaza si hay OCR en vuelo — la corrida manda).
-  const fijarMotor = (valor: MotorOcr | null) => {
-    try {
-      guardarOverridesFlags({ ocrMotor: valor });
-      resolverAuto(); // re-resuelve con el override vigente
-      toast.success(
-        valor === null
-          ? "Automático — el orden configurado decide (cascada con validación)"
-          : `${ETIQUETA_MOTOR[valor]} fijado — la próxima corrida del OCR lo aplica (o usa APLICAR AHORA)`,
-      );
-    } catch {
-      toast.error("No se pudo escribir el override");
-    }
-  };
-
   // POST-F3: el castigo de la sonda v5 murió con el router — la telemetría
-  // de la cascada (estado-motores) reemplaza su evidencia.
-
-  // fase 5 — aplicar SIN recargar: import dinámico (el módulo del motor
-  // pre-calienta al importarse — cargarlo solo cuando el dueño lo pide).
-  const [reiniciandoMotor, setReiniciandoMotor] = useState(false);
-  const reiniciarMotorAhora = async () => {
-    setReiniciandoMotor(true);
-    try {
-      const { reiniciarMotorOcrSiInactivo } = await import(
-        "@/modules/digitalizador/lib/e14/ocr/rapidocr"
-      );
-      const ok = await reiniciarMotorOcrSiInactivo();
-      if (ok) toast.success("Motor reiniciado — el próximo arranque del OCR aplica tu elección");
-      else toast.error("Hay un OCR en curso — espera a que termine la corrida");
-    } catch {
-      toast.error("No se pudo reiniciar el motor");
-    } finally {
-      setReiniciandoMotor(false);
-    }
-  };
+  // de la cascada (estado-motores) reemplaza su evidencia. La elección de
+  // motor también murió (2026-11-11): corre la cascada por defecto.
 
   return (
     <div className="space-y-4 p-4 md:p-6">
@@ -638,11 +530,7 @@ export function VistaPerfil() {
                   evidencia REAL de lectura la emite la cascada (3.6). */}
               <Fila
                 k="Motor OCR"
-                v={
-                  auto.motor
-                    ? `${etiquetaDe(auto.motor.motor)} · ${auto.motor.origen}`
-                    : "—"
-                }
+                v={auto.motor ? `${auto.motor.motor} · ${auto.motor.origen}` : "—"}
                 titulo={auto.motor?.motivo}
               />
               <Fila
@@ -662,87 +550,6 @@ export function VistaPerfil() {
                 />
               )}
             </div>
-            {/* POST-F3 — el DUEÑO elige el modelo (D6). Automático por
-                defecto (el ORDEN CONFIGURADO corre; la cascada valida cada
-                intento y cae al siguiente eslabón si falla — jamás tumba la
-                corrida). Si el dueño fija un motor, su decisión se RESPETA
-                (la configuración manda — §3.4). */}
-            {auto.motor && (
-              <div className="mt-3 rounded-[4px] border border-(--outline-variant) bg-(--hover-row) p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Zap className="size-4 shrink-0 text-(--primary)" aria-hidden />
-                  <p className="label-caps text-foreground">Motor OCR — elige el modelo</p>
-                  {auto.overrideManual && (
-                    <span
-                      className="ml-auto inline-flex items-center gap-1 rounded-full border border-(--primary)/40 bg-(--primary)/10 px-2 py-0.5 font-data text-[10px] uppercase tracking-wider text-(--primary)"
-                      title="Override manual del dueño (e14-flags-overrides) — el router NO decide (D6)"
-                    >
-                      Override activo
-                    </span>
-                  )}
-                </div>
-                <div
-                  role="radiogroup"
-                  aria-label="Motor OCR a utilizar"
-                  className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
-                >
-                  {OPCIONES_MOTOR.map((op) => {
-                    const activo = auto.overrideManual === op.valor;
-                    return (
-                      <button
-                        key={op.etiqueta}
-                        type="button"
-                        role="radio"
-                        aria-checked={activo}
-                        onClick={() => fijarMotor(op.valor)}
-                        className={cn(
-                          "rounded-[4px] border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-(--primary)",
-                          activo
-                            ? "border-(--primary)/60 bg-(--primary)/10"
-                            : "border-border bg-card hover:bg-(--accent)",
-                        )}
-                      >
-                        <span className="label-caps block text-foreground">{op.etiqueta}</span>
-                        <span className="body-md mt-0.5 block font-data text-muted-foreground">
-                          {op.sub}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="body-md mt-3 text-muted-foreground">
-                  {auto.overrideManual === "tesseract"
-                    ? "Fijado a mano (D6): el Tesseract REAL del benchmark (spa-best + psm 4, 94,4 % de dígitos, ~67 MB) vía tesseract.js — la primera vez descarga ~12 MB (traineddata gz). Si la init falla (o falla en vuelo), la cascada cae al motor base — sin riesgo."
-                    : auto.overrideManual === "rapidocr"
-                      ? "Fijado a mano (D6): motor base — RapidOCR v4, la producción de siempre — primero en todos los arranques."
-                      : `Automático (recomendado): el orden configurado corre y la cascada valida después de cada intento. Correría «${etiquetaDe(auto.motor.motor)}» (${auto.motor.origen}).`}
-                </p>
-                {presionReciente() && (
-                  <div className="mt-2 flex items-start gap-2 rounded-[4px] border border-(--warning)/40 bg-(--warning)/10 p-2">
-                    <CircleAlert className="mt-0.5 size-4 shrink-0 text-(--warning)" aria-hidden />
-                    <p className="body-md text-muted-foreground">
-                      Presión reciente: la telemetría de la cascada vio fallos consecutivos sin
-                      lectura aceptada. Se recupera sola con la próxima aceptación (self-healing,
-                      sin castigos de 7 días — eso moría con el router).
-                    </p>
-                  </div>
-                )}
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={reiniciarMotorAhora}
-                    disabled={reiniciandoMotor}
-                    className="label-caps inline-flex h-10 items-center gap-2 rounded-[4px] border border-(--primary)/40 bg-card px-3 text-(--primary) hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary) disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <RefreshCw className={cn("size-4", reiniciandoMotor && "animate-spin")} aria-hidden />
-                    {reiniciandoMotor ? "REINICIANDO…" : "APLICAR AHORA (reinicia el motor)"}
-                  </button>
-                  <span className="body-md text-muted-foreground">
-                    sin recargar la página — evítalo en medio de una corrida
-                  </span>
-                </div>
-              </div>
-            )}
             <p className="body-md mt-3 text-muted-foreground">
               La app administra los recursos sola: detecta el equipo, aplica presupuestos
               (CPU/memoria/reló) y se degrada preventivamente bajo presión observada (hard-kills).

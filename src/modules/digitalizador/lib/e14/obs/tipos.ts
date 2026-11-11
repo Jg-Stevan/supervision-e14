@@ -53,9 +53,8 @@ export interface FlagsApp {
   masivaAdaptativoGama: boolean; // default true — capa adaptativa de GAMA para masiva+OCR: el tier detectado (obs/dispositivo §4.4) aplica SOLO presupuestos de recursos (pool/threads/warp/watchdog/master/QR/dhash — tabla en gama.ts) en BAJO/MEDIO; el override MANUAL del dueño manda clave a clave (D6) y false = byte-idéntico a hoy en TODOS los dispositivos (D74)
   // ─── KIT e14-capa0-qr-worker-v1 (D40) — campo ADITIVO AL FINAL (D57) ───
   capa0QrWorker: boolean; // default true — la CAPA 0 QR (decode+ladder+barridos jsQR) corre en WORKER dedicado (capa0-qr.worker.js) y el hilo UI deja de comerse los ~15-17 s SYNC del peor caso sin QR; el tier zxing queda en main como rescate único (cobertura EXACTA); false = camino de hoy byte-idéntico (cadena completa en main)
-  // ─── KIT ocr-router-v1 — campos ADITIVOS AL FINAL (D57) ───
-  ocrMotorAdaptativo: boolean; // default true — ROUTER de motor OCR por dispositivo (docs/ESTRATEGIA-ocr-router-v1.md): BAJO/MEDIO = Tesseract best+psm4 (94,4 %, ~67 MB) · ALTO+SIMD = PP-OCRv5 (100 %, ~487 MB, sonda de carga + gobernador reactivo); false = Tesseract en TODOS los dispositivos (byte-idéntico a hoy)
-  ocrMotor: "ppocrv5" | "tesseract-best-psm4" | "tesseract-spa-best-psm4" | "rapidocr" | "tesseract" | null; // default null = el ORDEN CONFIGURADO decide (POST-F3 — el router murió); no-null = override MANUAL del dueño (D6). Valores del mundo nuevo: «rapidocr» | «tesseract» (motores del paquete — 3.2); los históricos se conservan para overrides viejos en localStorage (D57 append-only)
+  // ─── Decisión del dueño 2026-11-11 — cascada OCR por defecto (D57) ───
+  ocrCascada: boolean; // default true — Tesseract fast (spa 4.0.0_fast) → GATE de producción → RapidOCR PP-OCRv4 escalonado 1280→1920→ROI. false = el escalonado RapidOCR de siempre byte a byte (kill-switch del dueño); SIM nunca corre la cascada
   // ─── KIT e75-qr-zoom-zbar-v1 — campo ADITIVO AL FINAL (D57) ───
   qrZoomTl: boolean; // default true — tier ZOOM TL re-escalado + zbar-wasm en la capa 0 (lab 12 imágenes: 3 páginas del escáner rescatadas con píxeles nativos del QR + 2 que SOLO zbar vio); false = cadena de hoy byte-idéntica (kill-switch del dueño)
   // ─── R1.2 — KIT qr-cache-negativa-v1 — campo ADITIVO AL FINAL (D57) ───

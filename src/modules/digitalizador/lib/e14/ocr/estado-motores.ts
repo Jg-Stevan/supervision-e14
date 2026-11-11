@@ -1,26 +1,18 @@
 /**
- * estado-motores.ts (POST-F3 · mapa v2.3) — la información del motor que el
- * router-ocr.ts resolvía ANTES de leer, ahora sale de la TELEMETRÍA de la
- * cascada (EventoLectura — ítem 3.6) y de la CONFIGURACIÓN (orden de motores
- * = datos, §3.4). Los consumidores históricos (panel-perfil, motor-ocr,
- * metricas) siguen encontrando su API aquí — sin priors inflables.
- *
- * El router MORÍA (§4.1): decidía antes de leer; la cascada decide DESPUÉS
- * contra invariantes del acta. Lo que sobrevive es la OBSERVACIÓN.
+ * estado-motores.ts (POST-F3 · mapa v2.3) — la información del motor sale de
+ * la CONFIGURACIÓN (una cascada fija, decisión del dueño 2026-11-11) y de la
+ * TELEMETRÍA de la cascada (EventoLectura — ítem 3.6). El router murió: no
+ * hay elección de motor ni override que respetar. Lo que sobrevive es la
+ * OBSERVACIÓN.
  */
 import type { EventoLectura } from "@jg-stevan/scanner-core/obs-base/eventos-lectura";
-import { leerFlags } from "../flags";
-
-/** Motores del mundo nuevo (los wrappers históricos mueren en 3.2). */
-export type MotorOcr = "rapidocr" | "tesseract";
 
 export interface PerfilMinimo {
   tier: "ALTO" | "MEDIO" | "BAJO" | (string & {});
   /** benchmark de CPU (0-1000) — informativo. */
   benchmark: unknown;
-  /** Señales del perfil-dispositivo (runtime/sync/async/gpu/forma) — la
-   *  resolución del mundo nuevo SOLO usa el tier; se aceptan completas para
-   *  que el panel no cambie su adaptador. */
+  /** Señales del perfil-dispositivo (runtime/sync/async/gpu/forma) — se
+   *  aceptan completas para que el panel no cambie su adaptador. */
   runtime?: unknown;
   sync?: unknown;
   async?: unknown;
@@ -28,20 +20,21 @@ export interface PerfilMinimo {
   forma?: unknown;
 }
 
-/** Igual forma que ResolucionMotor del router (los consumidores no cambian). */
+/** Motor del orden por defecto — descriptivo (el panel lo muestra tal cual). */
 export interface ResolucionMotor {
-  motor: MotorOcr;
+  motor: string;
   motivo: string;
-  origen: "flag-off" | "override-manual" | "configuracion" | "telemetria-presion";
+  origen: "configuracion" | "telemetria-presion";
   requiereSondaCarga: boolean;
   condicionesUpgrade: string[];
 }
+
+const MOTOR_POR_DEFECTO = "Tesseract fast → RapidOCR v4";
 
 // ─── telemetría viva (la cascada emite; aquí se acumula) ────────────────────
 // Los agregados históricos del router quedaron como fixture del paquete
 // (tests/fixtures/agregados-router.json — 3.10): mismos umbrales, nueva fuente.
 const FALLOS_PARA_DEGRADAR = 2;
-const VENTANA_PRESION_MS = 3 * 60_000;
 
 let eventos: EventoLectura[] = [];
 let ultimoAceptado: EventoLectura | null = null;
@@ -58,7 +51,7 @@ export function registrarEventoLectura(e: EventoLectura): void {
 }
 
 /** ¿Hubo fallos seguidos recientes? (mismo umbral/ventana que el router). */
-export function presionReciente(ahora = Date.now()): boolean {
+export function presionReciente(): boolean {
   // La ventana es de performance.now() en la cascada — aquí se aproxima por
   // recuento de eventos consecutivos sin aceptación (conservador).
   let fallosSeguidos = 0;
@@ -95,58 +88,31 @@ export interface MotorOcrVivo {
   motivo: string;
 }
 
-/** Qué motor corre AHORA: la CONFIGURACIÓN manda (orden = datos, §3.4). */
+/** Qué motor corre AHORA: la cascada por defecto, sin elección de motor. */
 export function motorOcrActual(): MotorOcrVivo | null {
-  try {
-    const f = leerFlags();
-    const override = (f.ocrMotor as string | null | undefined) ?? null;
-    if (override === "tesseract-spa-best-psm4" || override === "tesseract") {
-      return { motor: "tesseract", modelos: "spa-best-psm4", origen: "override-manual", motivo: "El dueño fijó Tesseract a mano (D6)." };
-    }
-    // Default del mundo nuevo: RapidOCR v4 (la red de seguridad de siempre).
-    // El orden de motores es configuración — ver crearIntento1/ORDEN_DEFAULT
-    // en el paquete (ocr/motor.ts).
-    return {
-      motor: "rapidocr",
-      modelos: "v4",
-      origen: presionReciente() ? "telemetria-presion" : "configuracion",
-      motivo: presionReciente()
-        ? "Fallos consecutivos recientes en la telemetría de la cascada."
-        : "Orden configurado: RapidOCR v4 (producción de siempre).",
-    };
-  } catch {
-    return null;
-  }
+  return {
+    motor: "tesseract+rapidocr",
+    modelos: "spa-4.0.0-fast → PP-OCRv4",
+    origen: "configuracion",
+    motivo: "Cascada por defecto: Tesseract fast y, si el gate no cierra, RapidOCR v4 escalonado.",
+  };
 }
 
 /** El motor que el ORDEN CONFIGURADO correría en este dispositivo (panel). */
-export function resolverMotor(
-  perfil: PerfilMinimo | null,
-  ops?: { overrideManual?: MotorOcr | null; presionReciente?: boolean },
-): ResolucionMotor | null {
+export function resolverMotor(perfil: PerfilMinimo | null): ResolucionMotor | null {
   if (!perfil) return null;
-  const presion = ops?.presionReciente ?? presionReciente();
-  if (ops?.overrideManual) {
+  if (presionReciente()) {
     return {
-      motor: ops.overrideManual,
-      motivo: "Override manual del dueño (D6) — la configuración manda.",
-      origen: "override-manual",
-      requiereSondaCarga: false,
-      condicionesUpgrade: [],
-    };
-  }
-  if (presion) {
-    return {
-      motor: "rapidocr",
-      motivo: `Presión reciente en la telemetría (≥ ${FALLOS_PARA_DEGRADAR} fallos consecutivos) — el motor de siempre.`,
+      motor: MOTOR_POR_DEFECTO,
+      motivo: `Presión reciente en la telemetría (≥ ${FALLOS_PARA_DEGRADAR} fallos consecutivos): la cascada sigue igual, el gate decide después de cada intento.`,
       origen: "telemetria-presion",
       requiereSondaCarga: false,
       condicionesUpgrade: ["La presión se limpia sola con la próxima lectura aceptada"],
     };
   }
   return {
-    motor: "rapidocr",
-    motivo: `Orden configurado para tier ${perfil.tier}: RapidOCR v4 — la cascada valida después de cada intento (mapa v2.3 §FASE 3).`,
+    motor: MOTOR_POR_DEFECTO,
+    motivo: `Cascada por defecto para tier ${perfil.tier}: Tesseract fast primero y RapidOCR v4 escalonado si el gate no cierra.`,
     origen: "configuracion",
     requiereSondaCarga: false,
     condicionesUpgrade: [],

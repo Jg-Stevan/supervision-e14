@@ -19,7 +19,6 @@
  *
  * Uso:
  *   node scripts/bench-navegador.mjs [--url=http://localhost:8080] [--tag=v1]
- *                                    [--motor=ppocrv5|tesseract-best-psm4]
  *                                    [--flags=json] [--espera=900]
  *                                    [--sin-coi]  mide SIN exigir aislación
  *                                    (sitio publicado: GH Pages no puede mandar
@@ -213,7 +212,6 @@ try {
 
   // Flags ANTES de montar la vista: same-origin → localStorage ya accesible.
   const overrides = argv.flags ? JSON.parse(argv.flags) : {};
-  if (argv.motor) overrides.ocrMotor = argv.motor;
   if (Object.keys(overrides).length) {
     await navegar(`${URL_BASE}/?cb=${Date.now()}`);
     await js(

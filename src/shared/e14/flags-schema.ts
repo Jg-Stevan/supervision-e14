@@ -94,14 +94,9 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
   { clave: "prescanWarpLado", sanea: numeroClampeado(256, 4032) },
   { clave: "masivaAdaptativoGama", sanea: booleano },
   { clave: "capa0QrWorker", sanea: booleano },
-  { clave: "ocrMotorAdaptativo", sanea: booleano },
-  {
-    clave: "ocrMotor",
-    sanea: (v) =>
-      v === "ppocrv5" || v === "tesseract-best-psm4" || v === "tesseract-spa-best-psm4"
-        ? v
-        : undefined,
-  },
+  // Decisión del dueño 2026-11-11 — cascada OCR por defecto (Tesseract fast
+  // → gate → RapidOCR v4 escalonado). false = escalonado de siempre.
+  { clave: "ocrCascada", sanea: booleano },
   // KIT ocr-ep-webgpu-v1 — DÓNDE se multiplica el OCR (mismos modelos ONNX, no
   // otro motor): "auto" = WebGPU con adapter real · "wasm" = camino de siempre
   // · "webgpu" = forzar el intento (con reintento automático al wasm).

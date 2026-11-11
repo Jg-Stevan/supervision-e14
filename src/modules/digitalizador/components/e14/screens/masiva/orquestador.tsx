@@ -63,7 +63,6 @@ import { OverlayDragGlobal, ZonaCarga } from "./dropzone";
 // KIT carga-masiva-redesign-v1 (diseño «CARGA MASIVA»): barra del módulo con
 // métricas de sesión + sidebar (motor OCR + informe/telemetría).
 import { BarraLote } from "./barra-lote";
-import { MotorOcr } from "./motor-ocr";
 // KIT e14-sidecar-instalable-v1 (D81): tarjeta que sondea el sidecar nativo y,
 // si falta, ofrece el .exe. Hoja auto-subscrita — no recibe props del orquestador.
 import { AceleradorNativo } from "./acelerador";
@@ -756,9 +755,6 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
 
             {/* ---------- ACELERADOR NATIVO (sidecar): sonda + descarga ---------- */}
             <AceleradorNativo />
-
-            {/* ---------- MOTOR OCR (diseño — selector REAL tess best/pp) ---------- */}
-            <MotorOcr />
 
             {/* ---------- INFORME & TELEMETRÍA (diseño — datos reales) ---------- */}
             <InformeLote metricas={metricasLote} />

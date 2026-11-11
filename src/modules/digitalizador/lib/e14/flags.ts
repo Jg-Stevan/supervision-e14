@@ -107,14 +107,12 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // de hoy). Kill-switch del dueño: false = byte-idéntico a hoy (cadena
   // completa en main con SU presupuesto de gama).
   capa0QrWorker: true,
-  // KIT ocr-router-v1 (docs/NOTAS-OCR-QR.md) — ROUTER de motor
-  // OCR por dispositivo (PR #10): BAJO/MEDIO = Tesseract best+psm4 ·
-  // ALTO+SIMD = PP-OCRv5 con sonda de carga. `ocrMotorAdaptativo` false =
-  // Tesseract en TODOS los dispositivos (kill-switch único, byte-idéntico a
-  // hoy). `ocrMotor` no-null = override MANUAL del dueño (D6): el router NO
-  // decide.
-  ocrMotorAdaptativo: true,
-  ocrMotor: null,
+  // Decisión del dueño 2026-11-11 — la cascada de D pasa a ser el motor por
+  // defecto de S: Tesseract `fast` (spa 4.0.0_fast) como intento 1 → GATE de
+  // producción (clasificarCabecera + divipol) → si no hay AUTO, RapidOCR
+  // PP-OCRv4 escalonado 1280→1920→ROI. false = escalonado RapidOCR de
+  // siempre byte a byte (kill-switch del dueño); SIM nunca la corre.
+  ocrCascada: true,
   // KIT e75-qr-zoom-zbar-v1 — tier ZOOM TL re-escalado + zbar-wasm en la capa
   // 0 (recorta la banda TL 50%×30% del ORIGINAL a píxeles nativos y la pasa
   // por zxing→zbar ANTES del rescate 4096): el lab de 12 imágenes reales

@@ -79,8 +79,7 @@ function refSanearFlags(o: unknown): Partial<FlagsApp> {
     limpio.prescanWarpLado = Math.max(256, Math.min(4032, Math.round(p.prescanWarpLado)));
   }
   if (typeof p.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = p.masivaAdaptativoGama;
-  if (typeof p.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = p.ocrMotorAdaptativo;
-  if (p.ocrMotor === "ppocrv5" || p.ocrMotor === "tesseract-best-psm4" || p.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = p.ocrMotor;
+  if (typeof p.ocrCascada === "boolean") limpio.ocrCascada = p.ocrCascada;
   return limpio;
 }
 
@@ -115,8 +114,7 @@ function refLeerOverrides(o: unknown): Partial<FlagsApp> {
   }
   if (typeof o2.masivaAdaptativoGama === "boolean") limpio.masivaAdaptativoGama = o2.masivaAdaptativoGama;
   if (typeof o2.capa0QrWorker === "boolean") limpio.capa0QrWorker = o2.capa0QrWorker;
-  if (typeof o2.ocrMotorAdaptativo === "boolean") limpio.ocrMotorAdaptativo = o2.ocrMotorAdaptativo;
-  if (o2.ocrMotor === "ppocrv5" || o2.ocrMotor === "tesseract-best-psm4" || o2.ocrMotor === "tesseract-spa-best-psm4") limpio.ocrMotor = o2.ocrMotor;
+  if (typeof o2.ocrCascada === "boolean") limpio.ocrCascada = o2.ocrCascada;
   return limpio;
 }
 
@@ -178,8 +176,7 @@ const MATRIZ_CLAVES: Array<[string, unknown[], unknown]> = [
   ["prescanWarpLado", [256, 1920, 4032], 100],
   ["masivaAdaptativoGama", [true, false], null],
   ["capa0QrWorker", [true, false], "sí"],
-  ["ocrMotorAdaptativo", [true, false], "auto"],
-  ["ocrMotor", ["ppocrv5", "tesseract-best-psm4", "tesseract-spa-best-psm4"], "gpt"],
+  ["ocrCascada", [true, false], "auto"],
 ];
 
 describe("paridad sanearFlags (flags.ts) — tabla única vs whitelist histórica", () => {
@@ -201,7 +198,7 @@ describe("paridad sanearFlags (flags.ts) — tabla única vs whitelist históric
       { sondeoQrPresupuestoMs: 99_999 }, // clamp → 30_000
       { prescanWarpLado: 10_000 }, // clamp → 4032
       { poolWorkers: "2" }, // string → rechazada
-      JSON.parse('{"poolWorkers":1,"hangEnCurso":false,"ocrMotor":"ppocrv5"}'),
+      JSON.parse('{"poolWorkers":1,"hangEnCurso":false,"ocrCascada":false}'),
       JSON.parse('{"sondeoQrPresupuestoMs":2500,"prescanWarpLado":1920}'),
     ];
     for (const entrada of entradas) {
@@ -237,7 +234,7 @@ describe("paridad leerOverridesFlags (politica.ts) — tabla única vs whitelist
       '{"poolWorkers":2,"colaPersistente":false}', // MODO PRUEBAS e64p
       '{"ocrThreadsTope":99,"prescanWarpLado":1920}',
       '{"endpointReportes":null,"telemetriaSalud":false}',
-      '{"ocrMotor":"tesseract-spa-best-psm4","ocrMotorAdaptativo":false}',
+      '{"ocrCascada":false,"masivaAdaptativoGama":false}',
       '{"capa0QrWorker":true,"masivaSondeoCrudo":false}',
       '{"claveDesconocida":1}',
       "no-json",
