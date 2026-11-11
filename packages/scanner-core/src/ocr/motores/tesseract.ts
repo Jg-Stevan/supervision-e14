@@ -2,8 +2,9 @@
  * Motor Tesseract ÚNICO del paquete (ítem 3.2 del mapa v2.3): los DOS
  * wrappers (digielect14 ocr/tesseract.ts · supervision-e14 ocr/tesseract-ocr.ts)
  * mueren. La config es EXACTA la misma que ambos probaban (LSTM_ONLY + PSM 4
- * + spa best ~12 MB — verificación 6.4/A.4 del mapa): SOLO `langPath` pasa a
- * ser parámetro (D lo sirve en /models/tess · S en /models/tesseract).
+ * + spa — hoy tessdata_fast, D88 2026-11-10; antes best ~12 MB — verificación
+ * 6.4/A.4 del mapa): SOLO `langPath` pasa a ser parámetro (D lo sirve en
+ * /models/tess/4.0.0_fast · S en /models/tesseract/4.0.0_fast).
  *
  * Fusión:
  *  · De D (GO-B): presupuestos de verdad (reconocer 60 s capado por el
@@ -21,7 +22,7 @@ import type { RapidOcrLinea, RapidOcrResultado } from "../rapidocr";
 
 /** Config del motor (langPath = ÚNICO punto que divergía entre apps — 6.4). */
 export interface OpcionesTesseract {
-  /** Ruta del traineddata bajo publicBase (D: "/models/tess" · S: "/models/tesseract"). */
+  /** Ruta del traineddata bajo publicBase (D: "/models/tess/4.0.0_fast" · S: "/models/tesseract/4.0.0_fast"). */
   langPath: string;
   /** Presupuesto de UNA recognize (default 60_000 — banco K3 §B, D76). */
   presupuestoReconocerMs: number;

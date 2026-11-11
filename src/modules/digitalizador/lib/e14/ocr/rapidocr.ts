@@ -44,8 +44,9 @@ configurarColaGlobalOcr(() => {
   }
 });
 
-// Motor Tesseract ÚNICO (3.2) con el langPath de ESTA app.
-configurarTesseract({ langPath: "/models/tesseract" });
+// Motor Tesseract ÚNICO (3.2) con el langPath de ESTA app (D88: versión del
+// sabor servido, para invalidar IndexedDB/SW/HTTP en equipos con caché previa).
+configurarTesseract({ langPath: "/models/tesseract/4.0.0_fast" });
 
 export * from "@jg-stevan/scanner-core/ocr/rapidocr";
 

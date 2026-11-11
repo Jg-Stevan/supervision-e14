@@ -3,7 +3,7 @@
   "_notas": [
     "Los PP-OCRv4 salen del commit fijo 1cfba2e9 de SWHL/RapidOCR (rama main es móvil; el commit no cambia).",
     "Los PP-OCRv5 salen de ModelScope con tag v3.9.2 (no expone commit pinneable): el hash fijado es la garantía.",
-    "spa.traineddata.gz: el archivo que se servía antes era un re-gzip local del mismo modelo (mismo traineddata de 13.570.187 bytes, sha256 e2c1ffda…); acá se baja el .gz publicado de naptha/tessdata en un commit fijo. Cambian los bytes del gzip, no el modelo que lee Tesseract.",
+    "spa.traineddata.gz: baja el .gz publicado de naptha/tessdata en un commit fijo. Desde D88 (2026-11-10) es 4.0.0_fast (1,14 MB comprimido; descomprime al tessdata_fast oficial de 2,29 MB, sha256 6f2e04d0…), el mismo sabor que sirve digielect14 por la paridad del motor. Antes era 4.0.0_best (13.570.187 bytes descomprimido). La ruta lleva versión (/models/tesseract/4.0.0_fast/) para invalidar las tres cachés del modelo: IndexedDB de tesseract.js, MOTOR_CACHE del SW y HTTP (86400 s).",
     "OpenCV es el build oficial de @techstark/opencv-js@4.5.5-release.2, servido por unpkg con la versión fija."
   ],
   "archivos": [
@@ -13,9 +13,9 @@
       "sha256": "8c33758c3ed6ead5d6d37837e1a7f2fbf7e21111e7bb9b9c41f3f6d59680e81b"
     },
     {
-      "destino": "public/models/tesseract/spa.traineddata.gz",
-      "url": "https://raw.githubusercontent.com/naptha/tessdata/806cd9adc8c6e8abc11c782db1818c990576bebc/4.0.0_best/spa.traineddata.gz",
-      "sha256": "724c20ba45cff66937906a89c74f1a4ef6ac2d10d233f2387fd81c9a8421526a"
+      "destino": "public/models/tesseract/4.0.0_fast/spa.traineddata.gz",
+      "url": "https://raw.githubusercontent.com/naptha/tessdata/806cd9adc8c6e8abc11c782db1818c990576bebc/4.0.0_fast/spa.traineddata.gz",
+      "sha256": "8db1167a8c9bb015ac8e97278384c3b07dfa9bc8271569beea071d9e296b4487"
     },
     {
       "destino": "public/models/rapidocr/ch_PP-OCRv4_det_infer.onnx",
