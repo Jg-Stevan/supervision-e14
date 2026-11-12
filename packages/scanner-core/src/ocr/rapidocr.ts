@@ -162,7 +162,7 @@ async function initReal(): Promise<RapidRuntime> {
   const hilos = opcionesPlan.topeThreadsOcr();
   ort.env.wasm.numThreads = hilos;
   try {
-    (window as any).__E14_ORT_CONFIG__ = { numThreads: hilos, proxy: true, simd: true };
+    (window as unknown as { __E14_ORT_CONFIG__?: unknown }).__E14_ORT_CONFIG__ = { numThreads: hilos, proxy: true, simd: true };
   } catch {}
   ort.env.wasm.simd = true;
   // KIT e14-optimizacion-v1 (T2, hallazgo #2 de AUDITORIA-e14-v1): proxy=true

@@ -12,11 +12,7 @@
  *    de OTRO motor (futuro Tesseract) solo vale por el GATE.
  *  · presupuesto vencido ⇒ no se abre ninguna etapa nueva.
  *  · gate/ROI a prueba de fallos (jamás tumba — conservador).
- *  · source-scan del bridge/flags (readFileSync — patrón
- *    runner-rechequeo.test.ts): call-site condicional + doble whitelist.
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "bun:test";
 import {
   cascadaActiva,
@@ -26,11 +22,6 @@ import {
   type DepsOcrCascada,
   type PasadaCascada,
 } from "../src/orquestacion/cascada";
-
-// fileURLToPath, no `.pathname`: en Windows .pathname devuelve "/C:/..." y
-// readFileSync falla — los anclas de contrato jamás corrían en ese SO.
-const raiz = fileURLToPath(new URL("../../..", import.meta.url));
-const lee = (ruta: string): string => readFileSync(`${raiz}${ruta}`, "utf8");
 
 /** Pasada de prueba — conf/comparables SOLO entre pasadas del mismo motor. */
 function pasada(

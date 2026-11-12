@@ -312,9 +312,6 @@ function poolDeCandidatos(
   lugarNorm: string,
 ): number[] {
   const indices = new Set<number>();
-  const agregarMun = (mun: string): void => {
-    for (const i of indice.porMun.get(mun) ?? []) indices.add(i);
-  };
   if (paisCodigo.exacto) {
     for (const [mun, lista] of indice.porMun) {
       if (paisCodigo.conPermutacion.has(mun)) for (const i of lista) indices.add(i);
@@ -322,7 +319,7 @@ function poolDeCandidatos(
   }
   if (paisNombreNorm) {
     // 1.189 países/municipios: comparar nombres es barato frente a 14.438 puestos.
-    for (const [mun, lista] of indice.porMun) {
+    for (const [, lista] of indice.porMun) {
       const nombre = indice.puestos[lista[0]]?.munNombreNorm ?? "";
       if (nombre && similitudDice(paisNombreNorm, nombre) >= UMBRAL_FUZZY) {
         for (const i of lista) indices.add(i);
