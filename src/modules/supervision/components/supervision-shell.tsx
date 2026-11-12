@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   Activity,
+  Bell,
   Cpu,
   Flag,
   Inbox,
@@ -362,6 +363,158 @@ function suscribirseARed(alCambiar: () => void): () => void {
   };
 }
 
+function ChipNotificaciones() {
+  // P-28 (plan 2026-11-12) — D82: el DATO de notificaciones sigue vivo en el
+  // provider (las anomalías y la carga masiva generan entradas; el flujo del
+  // visor lanza toasts) pero desde que el centro de notificaciones se BORRÓ
+  // con D82 no había ni una UI que lo renderizara. Decisión P-28:
+  // RENDERIZAR — no retirar el estado con ADR, porque las acciones del
+  // producto lo producen de verdad (registrarRescaneo/validez → notificación).
+  // El chip mínimo que honra el dato: badge de NO leídas + panel flotante con
+  // las últimas (no leídas primero), marcar leída por ítem y todas de una.
+  // Coherente con D89-sup: mismo panel en modo demo que gobierna el banner.
+  const { notificaciones, notificacionesNoLeidas } = useDatos();
+  const { marcarNotificacionLeida, marcarTodasLeidas } = useDatosAcciones();
+  const [abierto, setAbierto] = useState(false);
+  const cajaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAbierto(false);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!cajaRef.current?.contains(e.target as Node)) setAbierto(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [abierto]);
+
+  // No leídas primero, luego la más reciente; tope 8 (el resto queda en el
+  // provider). Lista corta, pero con techo de scroll por respeto a la regla
+  // de listas largas (max-h + overflow) — la semilla puede crecer en sesiones
+  // largas de demo.
+  const visibles = [...notificaciones]
+    .sort((a, b) => Number(a.leida) - Number(b.leida) || b.fecha - a.fecha)
+    .slice(0, 8);
+
+  return (
+    <div ref={cajaRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className="relative inline-flex size-11 items-center justify-center rounded-[4px] text-foreground hover:bg-(--accent) focus-visible:outline-2 focus-visible:outline-(--primary)"
+        aria-label={
+          notificacionesNoLeidas > 0
+            ? `Notificaciones: ${notificacionesNoLeidas} sin leer — abrir panel`
+            : "Notificaciones — abrir panel"
+        }
+        aria-expanded={abierto}
+        title={
+          notificacionesNoLeidas > 0
+            ? `${notificacionesNoLeidas} notificación(es) sin leer`
+            : "Notificaciones"
+        }
+      >
+        <Bell className="size-5" aria-hidden />
+        {notificacionesNoLeidas > 0 && (
+          <span
+            className="absolute right-1 top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-(--danger) px-1 text-[9px] font-bold leading-4 text-white"
+            aria-hidden
+          >
+            {notificacionesNoLeidas > 9 ? "9+" : notificacionesNoLeidas}
+          </span>
+        )}
+      </button>
+
+      {abierto && (
+        <div
+          role="region"
+          aria-label="Panel de notificaciones"
+          className="absolute right-0 top-12 z-40 w-80 max-w-[calc(100vw-1.5rem)] rounded-[4px] border border-(--outline-variant) bg-card shadow-none"
+        >
+          <div className="flex items-center justify-between border-b border-(--outline-variant) px-3 py-2">
+            <span className="label-caps text-muted-foreground">
+              NOTIFICACIONES {notificacionesNoLeidas > 0 ? `· ${notificacionesNoLeidas} SIN LEER` : ""}
+            </span>
+            {notificacionesNoLeidas > 0 && (
+              <button
+                type="button"
+                onClick={() => marcarTodasLeidas()}
+                className="label-caps text-(--primary) hover:underline"
+              >
+                MARCAR TODAS
+              </button>
+            )}
+          </div>
+          {visibles.length === 0 ? (
+            <p className="px-3 py-4 text-center text-[11px] text-muted-foreground">
+              Sin notificaciones todavía.
+            </p>
+          ) : (
+            <ul className="max-h-72 divide-y divide-(--outline-variant) overflow-y-auto">
+              {visibles.map((n) => (
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!n.leida) marcarNotificacionLeida(n.id);
+                    }}
+                    className={cn(
+                      "flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-(--accent)",
+                      n.leida ? "opacity-70" : "bg-(--amber)/5"
+                    )}
+                    title={n.leida ? "Leída" : "Marcar como leída"}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="label-caps text-muted-foreground">
+                        {n.tipo.toUpperCase()}
+                      </span>
+                      <span className="text-[10px] font-medium text-muted-foreground">
+                        {etiquetaRelativa(n.fecha)}
+                      </span>
+                    </span>
+                    <span
+                      className={cn(
+                        "body-md",
+                        n.leida ? "text-muted-foreground" : "text-foreground"
+                      )}
+                    >
+                      {n.texto}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Etiqueta relativa SOLO para el panel abierto: el chip en el prerender
+ *  estático jamás muestra horas (evita mismatch de hidratación; el panel solo
+ *  existe tras un click del usuario). */
+function etiquetaRelativa(fecha: number): string {
+  const s = Math.max(0, Math.round((Date.now() - fecha) / 1000));
+  if (s < 60) return "ahora";
+  const m = Math.round(s / 60);
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `hace ${h} h`;
+  return new Intl.DateTimeFormat("es-CO", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(fecha);
+}
+
 function ChipOnline() {
   const [hub, setHub] = useState<EstadoHubLocal>(() => estadoHubLocal());
   // C-24 — `navigator.onLine` vía useSyncExternalStore (React 19);
@@ -557,6 +710,8 @@ function ShellInterno() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 md:gap-3">
+            {/* P-28 (D82) — el dato de notificaciones por fin tiene UI. */}
+            <ChipNotificaciones />
             <ChipGamaHeader onAbrir={() => elegirVista("perfil")} />
             {/* C-24 — Online honesto: refleja red + último sondeo al hub. */}
             <ChipOnline />
