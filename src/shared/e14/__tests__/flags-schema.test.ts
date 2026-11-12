@@ -37,7 +37,7 @@ import {
   CLAVES_OVERRIDES_HISTORICAS,
   sanearConEsquema,
 } from "@/shared/e14/flags-schema";
-import { sanearFlags } from "@/modules/digitalizador/lib/e14/flags";
+import { FLAGS_DEFAULT, sanearFlags } from "@/modules/digitalizador/lib/e14/flags";
 import { leerOverridesFlags, CLAVE_OVERRIDES } from "@/modules/digitalizador/lib/e14/obs/politica";
 import type { FlagsApp } from "@/modules/digitalizador/lib/e14/obs/tipos";
 
@@ -294,5 +294,20 @@ describe("invariante nuevo de la tabla única: las 2 puertas aceptan/rechazan IG
         }
       }
     }
+  });
+});
+
+describe("D98-sup (C-2) — default del kill-switch loteDemoLocal", () => {
+  test("FLAGS_DEFAULT.loteDemoLocal === true: el botón DEMO ×4 es PÚBLICO; false lo esconde", () => {
+    // El default TRUE es la esencia de D98-sup: el lote demo (fixtures
+    // sintéticas — SEC-10: jamás actas reales) es público y el flag es el
+    // único candado junto al aviso permanente role="status". Cambiar el
+    // default a false vuelve al estado dev-only que el plan de cierre
+    // corrige (hallazgo D-31/G-2).
+    expect(FLAGS_DEFAULT.loteDemoLocal).toBe(true);
+    // El kill-switch sigue operando igual en AMBAS puertas (tabla única):
+    // false pasa el saneo y esconde el botón.
+    expect(sanearFlags({ loteDemoLocal: false })).toEqual({ loteDemoLocal: false });
+    expect(sanearConEsquema({ loteDemoLocal: false })).toEqual({ loteDemoLocal: false });
   });
 });

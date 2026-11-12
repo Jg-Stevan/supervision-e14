@@ -48,8 +48,9 @@ import { usePerfilRecursos } from "@/modules/perfil-dispositivo/perfil-provider"
 // KIT visor-masiva-redesign-v1: lote DEMO (4 fixtures SINTÉTICAS) — entra
 // por agregarFiles (misma puerta de siempre, pipeline completo sin atajos).
 import { fetchActasDemo } from "@/modules/digitalizador/lib/e14/actas-demo";
-// Auditoría 2026-11-11 (#3): el botón DEMO vive detrás de flag + fuera del
-// build de producción (doble cerradura).
+// D98-sup (C-2): el botón DEMO es PÚBLICO bajo kill-switch — flag
+// loteDemoLocal (default true en flags.ts) + aviso permanente role="status"
+// (SEC-10: fixtures sintéticas, jamás actas reales). Sin gate de NODE_ENV.
 import { leerFlags } from "@/modules/digitalizador/lib/e14/flags";
 // Traza de la siembra demo (mismo logger del módulo — D51 formato congelado).
 import { logger } from "@/modules/digitalizador/lib/logger";
@@ -237,7 +238,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   const [loteDemoActivo, setLoteDemoActivo] = useState(false);
   useEffect(() => {
     setLoteDemoActivo(
-      leerFlags().loteDemoLocal === true && process.env.NODE_ENV !== "production",
+      leerFlags().loteDemoLocal === true,
     );
   }, []);
   const sembrarDemo = useCallback(async () => {
@@ -762,9 +763,10 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
             </div>
 
             {/* KIT visor-masiva-redesign-v1 — botón DEMO del preview: siembra
-                el lote de fixtures sintéticas y arranca el pipeline. Doble
-                cerradura (auditoría 2026-11-11, hallazgo #3): flag
-                loteDemoLocal + fuera del build de producción. */}
+                el lote de fixtures sintéticas y arranca el pipeline. D98-sup
+                (sustituye al hallazgo #3 de la auditoría 2026-11-11):
+                PÚBLICO bajo kill-switch loteDemoLocal (default true) + el
+                aviso permanente role="status" de abajo (SEC-10). */}
             {loteDemoActivo ? (
               <button
                 type="button"

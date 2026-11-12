@@ -136,6 +136,19 @@ describe("acelerador — tarjeta del sidecar", () => {
     expect(fuente).toMatch(/<AceleradorNativo \/>/);
   });
 
+  test("D98-sup (C-2) — el botón DEMO no depende de NODE_ENV (kill-switch único)", () => {
+    const fuente = leer(
+      "src/modules/digitalizador/components/e14/screens/masiva/orquestador.tsx",
+    );
+    // La única cerradura del botón es el flag `loteDemoLocal === true`
+    // (default TRUE en FLAGS_DEFAULT). El gate `process.env.NODE_ENV` de la
+    // auditoría 2026-11-11 (#3) se retiró — volver a añadirlo revienta aquí.
+    expect(fuente).toMatch(/leerFlags\(\)\.loteDemoLocal === true/);
+    expect(fuente).not.toMatch(/process\.env\.NODE_ENV/);
+    // El aviso PERMANENTE del modo demostración acompaña al botón (SEC-10).
+    expect(fuente).toMatch(/role="status"/);
+  });
+
   test("el href apunta al repo remoto real (no a un placeholder)", () => {
     const git = leer(".git/config");
     // `git remote add` y `actions/checkout` escriben la URL sin `.git`; exigir el

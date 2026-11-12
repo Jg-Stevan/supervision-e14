@@ -148,7 +148,8 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
   // KIT e14-ocr-nativo-v1 (FASE 2) — acta COMPLETA en el sidecar. Solo tiene
   // sentido con `ocrNativoUrl` vivo; sin sidecar el pipeline JS corre igual.
   { clave: "actaNativa", sanea: booleano },
-  // Auditoría 2026-11-11 (#3) — lote DEMO solo en desarrollo.
+  // Auditoría 2026-11-11 (#3) — lote DEMO. D98-sup: kill-switch del botón
+  // DEMO ×4 (default true en FLAGS_DEFAULT; false lo esconde).
   { clave: "loteDemoLocal", sanea: booleano },
   // Auditoría 2026-11-11 (#4) — ancla DEMO del panel de supervisión.
   { clave: "anclaDemoSupervision", sanea: booleano },
