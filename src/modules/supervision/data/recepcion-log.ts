@@ -9,6 +9,10 @@
  *   · BLOQUEADA  — cuarentena D25: validación (a)/(b)/(d) falló; con motivo.
  *   · SIN_JOIN   — llegó sin clasificación AUTO: sin join confiable; solo
  *                  registro local (honestidad — jamás inventar ubicación).
+ *   · DUPLICADA  — reenvío de una página ya publicada con el MISMO contenido
+ *                  (reintento de la cola del móvil, ack perdido o re-sondeo
+ *                  del hub): se registra para que el supervisor lo vea, pero
+ *                  NO se republica ni se reprocesa (actas-runtime).
  *
  * QUIÉN ESCRIBE (punto único de verdad):
  *   · `actas-runtime.publicarActaMasiva()` → PUBLICADA y BLOQUEADA (es el
@@ -34,7 +38,7 @@ import { zonaDePuesto } from "../domain/zonas-emisor";
 import { cargarActasReales } from "./actas-reales/actas-reales";
 
 /** Desenlace de la recepción (mismos términos del kit D27/PublicacionChip). */
-export type EstadoRecepcion = "PUBLICADA" | "BLOQUEADA" | "SIN_JOIN";
+export type EstadoRecepcion = "PUBLICADA" | "BLOQUEADA" | "SIN_JOIN" | "DUPLICADA";
 
 /** De dónde llegó el acta.
  *  · `puente-local` — E2E local: llegó por red desde el digitalizador móvil,
@@ -71,8 +75,11 @@ export interface EntradaRecepcion {
   /** Encabezado impreso verbatim (país y lugar del puesto), si viajó. */
   pais: string | null;
   lugar: string | null;
-  /** Motivo de cuarentena D25 / de sin-join (solo los dos estados). */
+  /** Motivo de cuarentena D25 / de sin-join / de duplicado. */
   motivo?: string;
+  /** DUPLICADA — id del registro de Recepción de la página ORIGINAL (mismo
+   *  puntero `dupOf` que estampan las DUPLICADA de masiva). */
+  dupOf?: string;
   /** Telemetría de la bandeja del digitalizador (informativo). */
   score?: number;
   statusActa?: string;
@@ -181,16 +188,19 @@ export function contarRecepciones(): {
   publicadas: number;
   bloqueadas: number;
   sinJoin: number;
+  duplicadas: number;
 } {
   let publicadas = 0;
   let bloqueadas = 0;
   let sinJoin = 0;
+  let duplicadas = 0;
   for (const e of ENTRADAS) {
     if (e.estado === "PUBLICADA") publicadas += 1;
     else if (e.estado === "BLOQUEADA") bloqueadas += 1;
+    else if (e.estado === "DUPLICADA") duplicadas += 1;
     else sinJoin += 1;
   }
-  return { total: ENTRADAS.length, publicadas, bloqueadas, sinJoin };
+  return { total: ENTRADAS.length, publicadas, bloqueadas, sinJoin, duplicadas };
 }
 
 // ─── Semilla de INGESTA INICIAL (ancla estático SUP-6) ──────────────────────

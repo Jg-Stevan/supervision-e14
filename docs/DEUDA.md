@@ -28,6 +28,7 @@ operación; **P2** mejora deseable.
 | P2 | R2 de calidad no ejecutada | Filtro de documento, deskew de fotos, recorte al marco, nitidez y PDF de entrega. Cada uno con flag. |
 | P2 | R1.5 presupuesto dinámico del prescan | Opcional; no se hizo. |
 | P2 | Sidecar sin firma | SmartScreen advierte; requiere VC++ 2015-2022; doble instancia en 8765 reparte tráfico. |
+| P2 | Dedup del puente móvil solo por SHA-256 exacto | El embudo (`actas-runtime.publicarActaMasiva`) detecta reenvíos con `hashSha256` (identidad de página + hash de bytes), la misma capa exacta de masiva. Las otras dos capas de masiva — dhash64 perceptual (Hamming ≤ 6) y payload QR exacto — NO viajan en `EntradaPuente`: una acta re-fotografiada (bytes distintos, misma imagen) entraría como página nueva. Reactivar: añadir `dhash64` y el payload QR al sobre del hub (`digielect14/src/lib/e14/puente/tipos.ts`) y al índice del embudo. |
 
 ## 3. Operación y despliegue
 

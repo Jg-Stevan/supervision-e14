@@ -18,6 +18,16 @@
  * hay OCR ni cifras de votación; solo ranuras (idEnlace + mesa + formulario
  * + página) y la información impresa del encabezado.
  *
+ * ANTI-REPROCESO: el mismo par (página, contenido) que llega dos veces
+ * —reintento de la cola del móvil, ack perdido o re-sondeo del hub— se
+ * registra como DUPLICADA en Recepción y NO se republica (no re-mide la
+ * foto, no emite evento, no suma publicación). La identidad de la página es
+ * idEnlace + mesa + formulario + página; la huella es ÚNICAMENTE el SHA-256
+ * de la foto (`hashSha256`, C-08) — igual que la dedup de masiva, jamás
+ * nombre de archivo ni fecha. Sin huella (sobre viejo) no se marca nada.
+ * Una foto DISTINTA para la misma página es un reescaneo legítimo: se
+ * publica y la huella se actualiza.
+ *
  * MEMORIA DE SESIÓN (§0-5 / D8): sin persistencia y sin backend — el export
  * estático no cambia. Recargar la página restablece el estado (misma
  * disciplina del resto del dashboard); la cola durable del digitalizador
@@ -64,10 +74,22 @@ export interface EntradaActaMasiva {
   /** C-07 — epoch ms del gate del MÓVIL (`tsEscaneo` del sobre). Solo lo
    * trae la ruta del hub; ausente → «ORIGEN —» (jamás sintetizar). */
   fechaOrigen?: number;
+  /** C-08 — SHA-256 (hex 64) de los BYTES de la foto que mandó el móvil.
+   * Es la huella de CONTENIDO del anti-reproceso: un reenvío del mismo
+   * sobre la conserva; un reescaneo produce otra. Ausente en sobres viejos
+   * → sin huella comparable NO se marca duplicado (conservador, igual que
+   * la dedup de masiva). */
+  hashSha256?: string;
 }
 
 export type ResultadoPublicacion =
-  | { ok: true; clave: string }
+  | {
+      ok: true;
+      clave: string;
+      /** La página ya estaba publicada con el MISMO contenido: no se
+       * republicó ni se contó de nuevo (anti-reproceso). */
+      duplicada?: true;
+    }
   | { ok: false; clave: string; motivo: string };
 
 /** Evento que emite cada publicación exitosa (consumidores: datos-provider). */
@@ -85,6 +107,43 @@ type Oyente = (evento: EventoActaPublicada) => void;
 
 const RUNTIME = new Map<string, ActaRealLista>();
 const oyentes = new Set<Oyente>();
+
+// ─── Anti-reproceso (duplicados enviados desde el móvil) ────────────────────
+// Mismo criterio que la dedup de MASIVA (masiva/dedup.ts): SOLO contenido —
+// JAMÁS nombre de archivo ni fecha. La única capa que el sobre del hub
+// transporta hoy es el SHA-256 exacto de los bytes de la foto (`hashSha256`,
+// C-08). La identidad de la página (idEnlace + mesa + formulario + página)
+// acota la comparación para que dos fotos idénticas de actas distintas no se
+// confundan. Misma página + misma huella = duplicado → se registra con
+// `dupOf` (como el `dupOf` de las DUPLICADA de masiva) y NO se republica.
+// Sin huella comparable no se marca nada (conservador: jamás inventar).
+// NOTA DE PARIDAD: dhash64 (gemelas perceptuales) y payload QR exacto existen
+// en masiva, pero NO viajan en `EntradaPuente`; ver docs/DEUDA.md.
+interface PaginaIndexada {
+  huella: string;
+  /** id del registro de Recepción de la página original. */
+  idRecepcion: string;
+}
+
+const HUELLAS_PAGINA = new Map<string, PaginaIndexada>();
+
+function identidadDePagina(e: EntradaActaMasiva): string {
+  return `${e.idEnlace}::${e.mesa}::${e.formulario}::${e.paginaIndex}`;
+}
+
+/** Huella de CONTENIDO del sobre — null si el móvil no la trajo (sobre viejo
+ *  o contexto sin crypto.subtle): conservador, no se puede comparar. */
+function huellaDeContenido(e: EntradaActaMasiva): string | null {
+  return typeof e.hashSha256 === "string" && /^[0-9a-f]{64}$/.test(e.hashSha256)
+    ? e.hashSha256
+    : null;
+}
+
+/** Vacía el índice anti-duplicado de la sesión (pruebas y reinicio del hub:
+ *  tras un reset la recepción se repuebla desde cero, no como duplicada). */
+export function reiniciarIndicePaginas(): void {
+  HUELLAS_PAGINA.clear();
+}
 
 /** Suscripción a publicaciones (patrón del módulo: sin libs nuevas). */
 export function suscribirseActasRuntime(oyente: Oyente): () => void {
@@ -124,6 +183,8 @@ export function contarActasRuntime(): number {
 //     PUBLICADA — `publicarActaMasiva`)                     → ✅ SÍ
 //   · BLOQUEADA (cuarentena D25): jamás entra al RUNTIME y la mesa queda
 //     NO_INICIADO → sin entrada en el visor                 → ❌ NO
+//   · DUPLICADA (reenvío del mismo contenido): no hay página nueva; la
+//     original ya está en el visor por la fila PUBLICADA     → ❌ NO (nueva)
 //   · SIN_JOIN (solo `recepcion-log`, sin join confiable)   → ❌ NO
 //   · Rechazada en masiva: nunca llega a publicarse         → ❌ NO
 //   · Mesa NO_INICIADO (sin transmisión)                    → ❌ NO
@@ -250,6 +311,43 @@ export async function publicarActaMasiva(
     return { ok: false, clave, motivo };
   }
 
+  // Anti-reproceso: si esta MISMA página ya se publicó con la MISMA huella
+  // de contenido, es un reenvío del móvil (reintento de la cola, ack perdido
+  // o re-sondeo del hub). Se deja constancia en Recepción y se corta aquí:
+  // sin re-medir la foto, sin pisar el runtime y sin sumar una publicación.
+  const identidad = identidadDePagina(entrada);
+  const huella = huellaDeContenido(entrada);
+  const indexada = huella !== null ? HUELLAS_PAGINA.get(identidad) : undefined;
+  if (huella !== null && indexada !== undefined && indexada.huella === huella) {
+    registrarRecepcion({
+      fecha: Date.now(),
+      origen,
+      estado: "DUPLICADA",
+      idEnlace: entrada.idEnlace,
+      mesa: entrada.mesa,
+      formulario: entrada.formulario,
+      paginaIndex: entrada.paginaIndex,
+      paginaTotal: entrada.paginaTotal,
+      srcFoto: entrada.srcFoto,
+      pais: entrada.impresion.pais,
+      lugar: entrada.impresion.lugar,
+      motivo: "mismo contenido ya recibido — no se reprocesa",
+      score: entrada.score,
+      statusActa: entrada.statusActa,
+      nombreArchivo: entrada.nombreArchivo,
+      clave,
+      // Mismo puntero que la DUPLICADA de masiva: la original manda.
+      dupOf: indexada.idRecepcion,
+      ...(entrada.fechaRecepcionHub !== undefined
+        ? { fechaRecepcionHub: entrada.fechaRecepcionHub }
+        : {}),
+      ...(entrada.fechaOrigen !== undefined
+        ? { fechaOrigen: entrada.fechaOrigen }
+        : {}),
+    });
+    return { ok: true, clave, duplicada: true };
+  }
+
   // Foto real → FotoActa (null → la página cae al sintético D18).
   let foto: FotoActa | null = null;
   if (entrada.srcFoto) {
@@ -307,7 +405,7 @@ export async function publicarActaMasiva(
   }
   // D28 — recepción: la página PUBLICADA también deja su entrada (la
   // vista Recepción y el badge del sidebar se alimentan de aquí).
-  registrarRecepcion({
+  const registro = registrarRecepcion({
     fecha: Date.now(),
     origen,
     estado: "PUBLICADA",
@@ -332,5 +430,11 @@ export async function publicarActaMasiva(
       ? { fechaOrigen: entrada.fechaOrigen }
       : {}),
   });
+  // La página queda indexada con la huella de lo ÚLTIMO publicado y con el
+  // id de su registro (dupOf de una futura DUPLICADA). Una foto distinta es
+  // un reemplazo legítimo (reescaneo) y actualiza huella + registro.
+  if (huella !== null) {
+    HUELLAS_PAGINA.set(identidad, { huella, idRecepcion: registro.id });
+  }
   return { ok: true, clave };
 }

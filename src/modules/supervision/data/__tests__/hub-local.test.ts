@@ -24,8 +24,8 @@ import {
   reiniciarHubLocalParaPrueba,
   sincronizarHubLocal,
 } from "../hub-local";
-import { esLlegadaViva, consultarRecepciones } from "../recepcion-log";
-import { consultarActaRuntime } from "../actas-runtime";
+import { esLlegadaViva, consultarRecepciones, purgarRecepciones } from "../recepcion-log";
+import { consultarActaRuntime, reiniciarIndicePaginas } from "../actas-runtime";
 
 const ROMA = "88_495_010_02"; // 8 mesas en el catálogo
 const INEXISTENTE = "99_999_999_99";
@@ -90,6 +90,7 @@ function filaHub(
     fotoUrl: string | null;
     seq: number;
     tsEscaneo: number;
+    hashSha256: string;
   }> = {}
 ) {
   return {
@@ -139,6 +140,10 @@ function nuevasDesde(n: number) {
 
 beforeEach(() => {
   reiniciarHubLocalParaPrueba();
+  reiniciarIndicePaginas();
+  // El log de recepción es de módulo: sin purgarlo, las DUPLICADAS de una
+  // prueba anterior contaminarían a la siguiente.
+  purgarRecepciones();
   almacenFalso.clear();
 });
 
@@ -283,6 +288,67 @@ describe("hub-local — el puente del celular usa el embudo de siempre", () => {
     liberar();
     await primera;
     expect(estadoHubLocal().procesadas).toBe(1);
+  });
+});
+
+describe("anti-reproceso — reenvíos idénticos del móvil NO se reprocesan", () => {
+  const HUELLA_A = "a".repeat(64);
+  const HUELLA_B = "b".repeat(64);
+
+  const pagina = (hashSha256?: string) => ({
+    ok: true,
+    ahora: 500,
+    total: 1,
+    hay: false,
+    proximoSeq: 1,
+    actas: [
+      filaHub({
+        seq: 1,
+        ...(hashSha256 !== undefined ? { hashSha256 } : {}),
+      }),
+    ],
+  });
+
+  test("misma página + misma huella SHA-256 → DUPLICADA con dupOf, sin republicar", async () => {
+    await sincronizarHubLocal(fetchComo(pagina(HUELLA_A)));
+    const antesDup = consultarRecepciones();
+    const original = antesDup.find((e) => e.estado === "PUBLICADA");
+    expect(original).toBeDefined();
+
+    const r = await sincronizarHubLocal(fetchComo(pagina(HUELLA_A)));
+
+    // La segunda llegada no suma publicación: es el MISMO contenido.
+    expect(r).toEqual({ publicas: 0, bloqueadas: 0, error: null });
+    const dup = consultarRecepciones().find((e) => e.estado === "DUPLICADA");
+    expect(dup).toBeDefined();
+    expect(dup?.dupOf).toBe(original!.id);
+    expect(dup?.origen).toBe("puente-local");
+    // El contador del hub la registra pero NO la cuenta como procesada.
+    const estado = estadoHubLocal();
+    expect(estado.publicas).toBe(1);
+    expect(estado.duplicadas).toBe(1);
+    expect(estado.procesadas).toBe(1);
+    // El acta sigue alcanzable en el visor (la original manda).
+    expect(consultarActaRuntime(ROMA, "001")).not.toBeNull();
+  });
+
+  test("misma página + huella DISTINTA → reescaneo legítimo: se publica", async () => {
+    await sincronizarHubLocal(fetchComo(pagina(HUELLA_A)));
+    const r = await sincronizarHubLocal(fetchComo(pagina(HUELLA_B)));
+
+    expect(r).toEqual({ publicas: 1, bloqueadas: 0, error: null });
+    expect(consultarRecepciones().some((e) => e.estado === "DUPLICADA")).toBe(false);
+    expect(estadoHubLocal().duplicadas).toBe(0);
+    expect(estadoHubLocal().publicas).toBe(2);
+  });
+
+  test("sin huella en el sobre → conservador: NO se marca duplicada", async () => {
+    await sincronizarHubLocal(fetchComo(pagina()));
+    const r = await sincronizarHubLocal(fetchComo(pagina()));
+
+    expect(r).toEqual({ publicas: 1, bloqueadas: 0, error: null });
+    expect(consultarRecepciones().some((e) => e.estado === "DUPLICADA")).toBe(false);
+    expect(estadoHubLocal().duplicadas).toBe(0);
   });
 });
 

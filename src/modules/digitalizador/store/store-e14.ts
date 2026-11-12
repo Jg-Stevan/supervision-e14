@@ -51,7 +51,7 @@ import { logger } from "../lib/logger";
 
 /** Desenlace de la publicación de UN acta en el monitor (por acta.id). */
 export interface PublicacionActa {
-  estado: "publicando" | "publicada" | "bloqueada" | "sin-join";
+  estado: "publicando" | "publicada" | "bloqueada" | "sin-join" | "duplicada";
   /** Clave `${idEnlace}::${mesa}` cuando hay join. */
   clave?: string;
   /** Motivo de cuarentena D25 (solo bloqueada). */
@@ -154,7 +154,7 @@ export function codigoFormaDeActa(acta: Acta): string {
 async function publicarDesdeActa(
   acta: Acta,
   marcar: (p: PublicacionActa) => void,
-): Promise<void> {
+): Promise<PublicacionActa["estado"]> {
   const join = joinDeActa(acta);
   if (!join) {
     // Sin clasificación AUTO no hay join confiable — SOLO registro local
@@ -178,7 +178,7 @@ async function publicarDesdeActa(
       statusActa: acta.status,
     });
     marcar({ estado: "sin-join" });
-    return;
+    return "sin-join";
   }
   const { idEnlace, mesa } = join;
   const c = acta.clasificacion!;
@@ -208,16 +208,28 @@ async function publicarDesdeActa(
     nombreArchivo: `E14_${idEnlace}_${mesa}_${formulario}-${paginaIndex}.jpg`,
     score: acta.score,
     statusActa: acta.status,
+    // Anti-reproceso (contenido): la huella SHA-256 REAL del acta viaja al
+    // embudo — un reenvío idéntico se detecta como DUPLICADA y no se
+    // republica. «EN COLA» o ausente → sin huella (conservador).
+    ...(acta.hashSha256 && /^[0-9a-f]{64}$/.test(acta.hashSha256)
+      ? { hashSha256: acta.hashSha256 }
+      : {}),
   });
+  if (resultado.ok && resultado.duplicada) {
+    marcar({ estado: "duplicada", clave: resultado.clave });
+    logger.info(`[e14] masiva → supervision: duplicada ${resultado.clave} (pág ${paginaIndex}) — no se reprocesa`);
+    return "duplicada";
+  }
   if (resultado.ok) {
     marcar({ estado: "publicada", clave: resultado.clave });
     logger.info(`[e14] masiva → supervision: acta publicada ${resultado.clave} (pág ${paginaIndex})`);
-  } else {
-    // Cuarentena D25 — visible en consola (mismo gesto del loader estático)
-    // y en el modal de revisión de la fila.
-    console.warn(`BLOQUEADA: carga-masiva ${resultado.clave} — ${resultado.motivo}`);
-    marcar({ estado: "bloqueada", clave: resultado.clave, motivo: resultado.motivo });
+    return "publicada";
   }
+  // Cuarentena D25 — visible en consola (mismo gesto del loader estático)
+  // y en el modal de revisión de la fila.
+  console.warn(`BLOQUEADA: carga-masiva ${resultado.clave} — ${resultado.motivo}`);
+  marcar({ estado: "bloqueada", clave: resultado.clave, motivo: resultado.motivo });
+  return "bloqueada";
 }
 
 function onlineInicial(): boolean {
@@ -247,8 +259,8 @@ export const useE14Store = create<EstadoE14>()((set, get) => ({
     void publicarDesdeActa(acta, (p) =>
       set((prev) => ({ publicaciones: { ...prev.publicaciones, [id]: p } })),
     )
-      .then(() => {
-        onPublicacion?.({ ms: Date.now() - tPublicacion, estado: "publicada" });
+      .then((estado) => {
+        onPublicacion?.({ ms: Date.now() - tPublicacion, estado });
       })
       .catch((error) => {
         // La publicación JAMÁS tumba el envío — queda documentada y bloqueada.

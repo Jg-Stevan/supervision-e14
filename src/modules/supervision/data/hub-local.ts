@@ -38,7 +38,7 @@
  * sondeo se autodetiene (mismo criterio del puente del móvil).
  */
 
-import { publicarActaMasiva } from "./actas-runtime";
+import { publicarActaMasiva, reiniciarIndicePaginas } from "./actas-runtime";
 import type { EntradaActaMasiva } from "./actas-runtime";
 import type { FormularioTipo, ImpresionActa } from "../domain/acta";
 // 0.2/H-2 — token de lectura: el GET del hub dejó de ser anónimo. Con
@@ -85,14 +85,21 @@ interface ActaHub {
   /** C-07 — epoch ms del gate del móvil (viaja dentro del sobre y el hub lo
    * devuelve tal cual). Ausente en actas viejas → ORIGEN «—». */
   tsEscaneo?: number;
+  /** C-08 — SHA-256 (hex 64) de los BYTES de la foto: huella de contenido
+   *  del anti-reproceso (un reenvío del mismo sobre la conserva). */
+  hashSha256?: string;
 }
 
 export interface EstadoHubLocal {
   activo: boolean;
-  /** Actas traídas del hub y publicadas/bloqueadas en esta sesión. */
+  /** Actas traídas del hub y publicadas/bloqueadas en esta sesión (los
+   *  duplicados NO se reprocesan y no suman aquí). */
   procesadas: number;
   publicas: number;
   bloqueadas: number;
+  /** Reenvíos del mismo contenido (misma página + misma huella SHA-256):
+   *  detectados y NO republicados — el anti-reproceso de actas-runtime. */
+  duplicadas: number;
   /** Filas que el hub ya tiene (cursor del sondeo anterior). */
   enHub: number;
   ultimaSyncTs: number | null;
@@ -112,6 +119,7 @@ const estado: EstadoHubLocal = {
   procesadas: 0,
   publicas: 0,
   bloqueadas: 0,
+  duplicadas: 0,
   enHub: 0,
   ultimaSyncTs: null,
   ultimoError: null,
@@ -281,6 +289,12 @@ function entradaDesdeHub(a: ActaHub): EntradaActaMasiva {
     // sobre); si la fila no la trae (acta antigua), no se inventa: la vista
     // muestra «ORIGEN —».
     ...(typeof a.tsEscaneo === "number" ? { fechaOrigen: a.tsEscaneo } : {}),
+    // C-08 — huella de CONTENIDO del anti-reproceso (SHA-256 de la foto).
+    // Si la fila no la trae (sobre viejo), no se inventa: sin huella no se
+    // puede marcar un duplicado (conservador, igual que masiva).
+    ...(typeof a.hashSha256 === "string" && /^[0-9a-f]{64}$/.test(a.hashSha256)
+      ? { hashSha256: a.hashSha256 }
+      : {}),
   };
 }
 
@@ -319,6 +333,10 @@ export async function sincronizarHubLocal(
           cursor = 0;
           escribirNumero(CLAVE_CURSOR, 0);
           purgarRecepciones(); // vacía ENTRADAS y notifica (solo se llama aquí)
+          // El índice anti-duplicado es de ESTA generación: tras el reset la
+          // recepción se repuebla desde cero y no como duplicada.
+          reiniciarIndicePaginas();
+          estado.duplicadas = 0;
           estado.aviso = AVISO_REINICIO;
           // La página vino de la generación anterior (cursor viejo): se
           // DESCARTA — publicarla resucitaría filas del almacén borrado y el
@@ -332,16 +350,21 @@ export async function sincronizarHubLocal(
 
       let publicasPagina = 0;
       let bloqueadasPagina = 0;
+      let duplicadasPagina = 0;
       for (const a of r.actas) {
         const res = await publicarActaMasiva(entradaDesdeHub(a), "puente-local");
-        if (res.ok) publicasPagina++;
-        else bloqueadasPagina++;
+        if (!res.ok) bloqueadasPagina++;
+        else if (res.duplicada) duplicadasPagina++;
+        else publicasPagina++;
       }
       publicas += publicasPagina;
       bloqueadas += bloqueadasPagina;
+      // El duplicado no se reprocesó: no suma a `procesadas` (que mide
+      // páginas que pasaron por el embudo de publicación).
       estado.procesadas += publicasPagina + bloqueadasPagina;
       estado.publicas += publicasPagina;
       estado.bloqueadas += bloqueadasPagina;
+      estado.duplicadas += duplicadasPagina;
       estado.enHub = r.total;
 
       // El cursor avanza SOLO a proximoSeq (seq de la última fila de la
@@ -470,6 +493,7 @@ export function reiniciarHubLocalParaPrueba() {
     procesadas: 0,
     publicas: 0,
     bloqueadas: 0,
+    duplicadas: 0,
     enHub: 0,
     ultimaSyncTs: null,
     ultimoError: null,

@@ -130,6 +130,13 @@ export function HubLocalCard() {
             <Chip tono="border-(--warning) text-(--warning)">
               BLOQUEADAS {estado.bloqueadas}
             </Chip>
+            {/* Anti-reproceso: reenvíos idénticos (misma página + misma
+                huella SHA-256) — detectados y NO republicados. */}
+            {estado.duplicadas > 0 && (
+              <Chip tono="border-border text-muted-foreground">
+                DUPLICADAS {estado.duplicadas}
+              </Chip>
+            )}
             {estado.ultimaSyncTs && (
               <span className="font-data text-[11px] text-muted-foreground">
                 última sync {tiempoRelativo(estado.ultimaSyncTs).toLowerCase()}

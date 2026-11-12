@@ -35,7 +35,8 @@ import type { FormularioTipo } from "../domain/acta";
  * mismo patrón del store del shell. El sembrado del ancla estático
  * (ingesta-inicial) corre 1 vez al montar. Filtros por desenlace
  * (KPIs clickeables, gesto del monitor T3) y por formulario + búsqueda.
- * VER EN MONITOR: seam por props (D27) — solo filas PUBLICADAS.
+ * VER EN MONITOR: seam por props (D27) — filas PUBLICADAS y DUPLICADAS (la
+ * duplicada abre la página original que ya está publicada).
  */
 
 type FiltroEstado = "todas" | EstadoRecepcion;
@@ -46,12 +47,15 @@ const ESTADO_PILDORA: Record<EstadoRecepcion, string> = {
   PUBLICADA: "border-(--success) text-(--success)",
   BLOQUEADA: "border-(--warning) text-(--warning)",
   SIN_JOIN: "border-border text-muted-foreground",
+  // Reenvío del mismo contenido: no se reprocesa — tono neutro (no es alerta).
+  DUPLICADA: "border-(--outline-variant) text-muted-foreground",
 };
 
 const ETIQUETA_ESTADO: Record<EstadoRecepcion, string> = {
   PUBLICADA: "Publicada",
   BLOQUEADA: "Cuarentena",
   SIN_JOIN: "Sin join",
+  DUPLICADA: "Duplicada",
 };
 
 /** "17:44:29" — hora de RECEPCIÓN en Colombia (regla del dueño: LOCAL=COL,
@@ -152,7 +156,11 @@ function FilaRecepcion({
     pagina?: number
   ) => void;
 }) {
-  const conJoin = entrada.estado === "PUBLICADA" && entrada.idEnlace !== "—";
+  // Una DUPLICADA no crea página nueva, pero SÍ puede abrir la original que
+  // ya está en el monitor (trazabilidad sin reproceso).
+  const conJoin =
+    (entrada.estado === "PUBLICADA" || entrada.estado === "DUPLICADA") &&
+    entrada.idEnlace !== "—";
   return (
     <li
       className={cn(
@@ -249,7 +257,14 @@ function FilaRecepcion({
             </span>
           )}
           {entrada.motivo && (
-            <span className="body-md mt-0.5 block text-(--warning)">
+            <span
+              className={cn(
+                "body-md mt-0.5 block",
+                entrada.estado === "BLOQUEADA"
+                  ? "text-(--warning)"
+                  : "text-muted-foreground"
+              )}
+            >
               {entrada.estado === "BLOQUEADA" ? "CUARENTENA (D25) — " : ""}
               {entrada.motivo}
             </span>
@@ -282,9 +297,11 @@ function FilaRecepcion({
           className="label-caps h-11 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground disabled:opacity-40"
           disabled={!conJoin}
           title={
-            conJoin
-              ? "Ver el acta en el monitor"
-              : "Solo las publicadas aterrizan en el monitor"
+            !conJoin
+              ? "Solo las publicadas aterrizan en el monitor"
+              : entrada.estado === "DUPLICADA"
+                ? "Reenvío idéntico — abre la página que ya está publicada"
+                : "Ver el acta en el monitor"
           }
           aria-label={`Ver en monitor: ${entrada.idEnlace} mesa ${entrada.mesa}`}
           onClick={
@@ -458,12 +475,17 @@ export function VistaRecepcion({
     let publicadas = 0;
     let bloqueadas = 0;
     let sinJoin = 0;
+    let duplicadas = 0;
     for (const e of lista) {
       if (e.estado === "PUBLICADA") publicadas += 1;
       else if (e.estado === "BLOQUEADA") bloqueadas += 1;
+      else if (e.estado === "DUPLICADA") duplicadas += 1;
       else sinJoin += 1;
     }
-    return { total: lista.length, publicadas, bloqueadas, sinJoin };
+    // Páginas DISTINTAS recibidas: los reenvíos idénticos no cuentan como
+    // procesables (ese es justamente el punto del anti-reproceso).
+    const unicas = lista.length - duplicadas;
+    return { total: lista.length, publicadas, bloqueadas, sinJoin, duplicadas, unicas };
   }, [fuente]);
 
   // Ronda C (R2/R3/R5) — métricas del feed sobre la fuente del render.
@@ -532,6 +554,9 @@ export function VistaRecepcion({
               : `En vivo — ${conteos.total} página${
                   conteos.total === 1 ? "" : "s"
                 } recibida${conteos.total === 1 ? "" : "s"} en esta sesión`}
+            {conteos.duplicadas > 0
+              ? ` · ${conteos.duplicadas} duplicada${conteos.duplicadas === 1 ? "" : "s"} (no se reprocesan)`
+              : ""}
             {ultima && !pausado
               ? ` · última ${tiempoRelativo(ultima.fecha).toLowerCase()}`
               : ""}
@@ -596,8 +621,8 @@ export function VistaRecepcion({
             {conteos.total}
           </p>
           <p className="body-md mt-1 text-muted-foreground">
-            {conteos.total > 0
-              ? `${conteos.publicadas}/${conteos.total} transmitidas · ${Math.round((conteos.publicadas / conteos.total) * 100)}%`
+            {conteos.unicas > 0
+              ? `${conteos.publicadas}/${conteos.unicas} páginas distintas transmitidas · ${Math.round((conteos.publicadas / conteos.unicas) * 100)}%`
               : "Sin llegadas todavía en esta sesión"}
           </p>
         </div>
@@ -648,7 +673,7 @@ export function VistaRecepcion({
       </div>
 
       {/* KPIs = filtro de desenlace (mismo gesto del monitor, kit T3). */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard
           titulo="Recibidas"
           valor={conteos.total}
@@ -681,6 +706,17 @@ export function VistaRecepcion({
           activo={filtroEstado === "SIN_JOIN"}
           onClick={() =>
             setFiltroEstado(filtroEstado === "SIN_JOIN" ? "todas" : "SIN_JOIN")
+          }
+        />
+        {/* Anti-reproceso: reenvíos idénticos del móvil (misma página + misma
+            huella SHA-256) — registrados con dupOf, NO republicados. */}
+        <KpiCard
+          titulo="Duplicadas"
+          valor={conteos.duplicadas}
+          tono="neutral"
+          activo={filtroEstado === "DUPLICADA"}
+          onClick={() =>
+            setFiltroEstado(filtroEstado === "DUPLICADA" ? "todas" : "DUPLICADA")
           }
         />
       </div>

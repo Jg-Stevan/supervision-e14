@@ -28,6 +28,13 @@ export function PublicacionChip({ publicacion }: { publicacion?: PublicacionActa
       </p>
     );
   }
+  if (publicacion.estado === "duplicada") {
+    return (
+      <p className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-300">
+        DUPLICADA — MISMO CONTENIDO YA RECIBIDO · NO SE REPROCESA
+      </p>
+    );
+  }
   if (publicacion.estado === "bloqueada") {
     return (
       <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400">
