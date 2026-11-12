@@ -1,0 +1,37 @@
+{
+  "$schema": "https://unpkg.com/knip@5.44.1/schema.json",
+  "rules": { "exports": "warn", "types": "warn", "duplicates": "warn" },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/app/**/*.{ts,tsx}",
+        "src/**/*.test.{ts,tsx}",
+        "src/test-preload.ts",
+        "scripts/qa-*.ts",
+        "scripts/**/*.mjs",
+        "scripts/**/*.test.ts",
+        "functions/**/*.ts"
+      ],
+      "ignore": [
+        "public/**",
+        "docs/archivo/**",
+        "src/components/ui/**",
+        "src/hooks/use-mobile.ts",
+        "src/hooks/use-toast.ts",
+        "src/modules/digitalizador/lib/e14/obs/identidad.ts",
+        "src/modules/supervision/components/status-dot.tsx"
+      ],
+      "ignoreDependencies": [
+        "tailwindcss",
+        "tw-animate-css",
+        "onnxruntime-web",
+        "tesseract.js"
+      ]
+    },
+    "packages/scanner-core": {
+      "entry": ["src/**/*.ts", "tests/**/*.ts", "workers/**/*.ts", "scripts/**/*.mjs"],
+      "ignore": ["assets/**"],
+      "ignoreDependencies": ["fflate"]
+    }
+  }
+}

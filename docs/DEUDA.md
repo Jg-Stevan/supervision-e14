@@ -110,3 +110,36 @@ operación; **P2** mejora deseable.
   mencionaba como ausente; las reglas de fondo siguen también en
   `CONTRIBUTING.md` y `docs/adr/README.md`, así que hay tres entradas y conviene
   que `AGENTS.md` apunte a ellas en vez de duplicarlas.
+
+## 6. Knip (C-6.3 del plan de cierre 2026-11-12) — configurado y triado
+
+`knip@5.44.1` entró a devDependencies (espejo de la config de `digielect14`,
+réplica pedida por el plan). `knip.json` cubre: entries de app/tests/scripts/
+Pages Functions (`functions/**` — D80 wasm partes) y el workspace
+`packages/scanner-core` con su contrato real (el `exports` map expone cada
+`src/*.ts` como subpath público, más `tests/` y `workers/`). Resultado:
+0 archivos/dependencias/binarios sin declarar o sin usar a nivel bloqueante;
+exports/tipos/duplicados restantes **en `warn` (no bloqueante)** — superficie
+deliberada: catálogo shadcn/ui (`src/components/ui/**` + hooks stock), catálogo
+de iconos del digitalizador, helpers `__resetXParaTest`, alias semántico
+`TECHO_ESCUDO_FONDO`, y helpers de observabilidad.
+
+Deuda conocida documentada (PR propio, fuera del cierre):
+
+- **Dependencias fantasma de radix:** `src/components/ui/*` importa
+  `@radix-ui/react-*` (estilo viejo) sin declararlos — resuelven por hoisting
+  del paquete unificado `radix-ui` (que los declara como dependencias suyas).
+  Migrar los imports al paquete unificado.
+- **Huérfanos detectados por knip** (0 referencias): `obs/identidad.ts` y
+  `status-dot.tsx` — ignorados en la config con retiro pendiente (regla: nada
+  se borra directo).
+- **`fflate` en `packages/scanner-core/package.json`:** sin uso en sup, pero
+  usado por `workers/__tests__/capa0.test.ts` en dig — se conserva por la regla
+  de simetría byte-a-byte del paquete (`ignoreDependencies` documentado).
+- **T-16 (paridad):** `heic2any`/`onnxruntime-web`/`tesseract.js`/`zxing-wasm`
+  se declaran en la RAÍZ aunque los consume el paquete vendorizado (imports
+  dinámicos) — decisión explícita de `qa-paridad-motor.ts`; no quitarlos.
+- `tw-animate-css` se consume vía `@import` de CSS (knip no ve CSS).
+
+Verificación: `bunx knip` → **exit 0** · `bun run typecheck` → 0 errores ·
+tests del paquete → 154 pass.
