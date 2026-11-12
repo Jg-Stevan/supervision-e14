@@ -1,0 +1,31 @@
+# Escaneo de secretos — supervision-e14 (fallback manual A-10/C-4)
+
+- Fecha: 2026-11-12
+- Herramienta: fallback manual (python + `git rev-list --all` + `git grep -I -n -E`)
+  — `gitleaks`/`trufflehog` NO disponibles en el entorno del cierre; opción
+  documentada por el plan de cierre §C-4.4. Reporte REDACTADO por diseño:
+  nunca contiene el valor de un hallazgo.
+- Patrones (11): gh_token, github_pat, vcp_token, gitlab_pat, openai_sk, aws_akia, google_api_key, slack_token, cf_api_token, private_key, asignacion_generico
+- Cobertura: 65 commits de TODAS las refs accesibles
+  (`git rev-list --all`). NOTA de cobertura de este clon:
+  HISTORIA RECORTADA — el bundle de origen tiene un objeto ancestro ausente (a3a3d960…) y la traversa de main muere en 8583d300; el escaneo cubre los commits accesibles. El escaneo de la historia COMPLETA debe re-corarse desde el clon íntegro del mantenedor.
+- Deduplicación: un hallazgo = (ruta, línea, patrón); se lista el primer commit
+  en que aparece (orden rev-list, del más reciente al más antiguo).
+
+## Resumen por patrón
+
+| Patrón | Hallazgos únicos |
+|---|---|
+| (ninguno) | 0 |
+
+## Hallazgos (REDACTADOS)
+
+Sin hallazgos.
+
+## Cómo triar (regla del plan C-4.2)
+
+- Vivo → rotar/revocar YA y anotar la fecha de rotación en `docs/DEUDA.md`.
+- Muerto (fixture/demo/ejemplo documental) → anotar el triage con fecha en
+  `docs/DEUDA.md`.
+- Coordinar con A-05 (HUMANO): si hay secretos en historia, la reescritura de
+  historia debe purgarlos.
