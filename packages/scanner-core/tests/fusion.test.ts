@@ -2,9 +2,10 @@
  * Motor de fusión de evidencia acta ↔ DIVIPOL — escenarios de la tarea
  * «TAREA-AGENTE-fusion-divipol» §3.9 (D89).
  *
- * Corre contra la COPIA del catálogo que usa el resto del contrato
- * (`tests/fixtures/divipol.json`, misma base DIVIPOL servida por la app), así
- * los números no dependen de la red. Los pesos/umbrales son los calibrados
+ * Corre contra el catálogo servido `public/e14/divipol.json` (UNA sola copia
+ * versionada tras el dedup H-44/C-6 del plan de cierre 2026-11-12 — la misma
+ * que sirve la app, consumida por ruta relativa), así los números no dependen
+ * de la red. Los pesos/umbrales son los calibrados
  * (§3.4/§3.5) y NO se ajustan acá para «hacer pasar» un caso.
  */
 import { describe, expect, test } from "bun:test";
@@ -15,7 +16,7 @@ import type { CampoLeido, LecturaActa } from "../src/dominio/fusion-tipos";
 import { normalizarNombreFusion, permutacionesCodigo, similitudDice } from "../src/dominio/normalizar";
 
 const base = JSON.parse(
-  readFileSync(new URL("./fixtures/divipol.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../public/e14/divipol.json", import.meta.url), "utf8"),
 ) as DivipolBase;
 
 function campo(valor: string, calidad: CampoLeido["calidad"] = "legible"): CampoLeido {

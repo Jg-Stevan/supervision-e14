@@ -63,10 +63,11 @@ const GOLDEN = JSON.parse(
 ) as Golden;
 
 const DIVIPOL_CRUDO = readFileSync(
-  // 3.10b: el DIVIPOL viaja como fixture versionado del paquete (md5 idéntico
-  // al de public/e14/ de AMBAS apps — es dato por deploy, pero el golden lo
-  // necesita hermético para correr en el CI de cada app sin depender de rutas).
-  new URL("./fixtures/divipol.json", import.meta.url),
+  // H-44/C-6 (plan de cierre 2026-11-12): quedó UNA sola copia versionada del
+  // catálogo — la servida `public/e14/divipol.json` — consumida por ruta
+  // relativa; el guardián (tests/catalogo-guardian.test.ts) fija su md5 para
+  // que no derive entre los dos repos.
+  new URL("../../../public/e14/divipol.json", import.meta.url),
   "utf8",
 );
 const BASE = JSON.parse(DIVIPOL_CRUDO) as DivipolBase;

@@ -17,7 +17,7 @@ import { clasificarCabecera, type ClasificacionE14 } from "../src/dominio/clasif
 import type { DivipolBase } from "../src/dominio/divipol";
 
 const BASE = JSON.parse(
-  readFileSync(new URL("./fixtures/divipol.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../public/e14/divipol.json", import.meta.url), "utf8"),
 ) as DivipolBase;
 
 const DIR = new URL("./fixtures/regresiones-lectura/", import.meta.url);
