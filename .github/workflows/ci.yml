@@ -7,8 +7,8 @@ name: CI
 #                                   para src/modules/digitalizador/**)
 #   4. bun test                    (bun:test — la suite de datos R3 bloquea)
 #
-# NO reemplaza los workflows de deploy (pages.yml / cloudflare-pages.yml):
-# este workflow solo verifica, no construye ni publica.
+# NO reemplaza el workflow de deploy (cloudflare-pages.yml): este workflow
+# solo verifica, no construye ni publica. GitHub Pages quedó retirado.
 on:
   push:
     branches: [main]
