@@ -129,6 +129,8 @@ export function clasificar(
     });
 
     const heapOk = (s.sync.heapLimiteMB ?? 0) >= 2048;
+    // P-26 — sonda del panel: benchmark YA medido (renderer GPU real, escala 0-1000).
+    const benchOk = benchmark.ejecutado && benchmark.score !== null && benchmark.score >= 750;
     evidencia.push({
       clave: "heap",
       etiqueta: "Límite de heap JS",
@@ -203,7 +205,10 @@ export function clasificar(
       // saveData===true ya cortó a BAJO más arriba (§4.4) — TS lo estrecha aquí.
       if (s.sync.memoriaGB >= 4 && nucOk && redOk) tier = "ALTO";
       else tier = "MEDIO";
-    } else if (nucOk && heapOk) {
+    } else if (nucOk && (heapOk || benchOk)) {
+      // P-26 (plan 2026-11-12) — iOS atrapado en MEDIO: Safari no expone heap;
+      // el benchmark del panel (renderer GPU real, raster) rescata ALTO con
+      // score ≥ 750 (el MISMO umbral favorable del propio benchmark).
       tier = "ALTO";
       tierInferido = true;
     } else {

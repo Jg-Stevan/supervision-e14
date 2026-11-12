@@ -101,7 +101,9 @@
  */
 import { leerFlags } from "./flags";
 import { leerOverridesFlags } from "./obs/politica";
-import { calcularTier, obtenerDispositivo } from "./obs/dispositivo";
+import { sonderGpu, UMBRAL_SONDA_GPU } from "@/shared/dispositivo/sonda-gpu";
+import { calcularTier } from "@/shared/dispositivo/tier";
+import { obtenerDispositivo, heapLimitMB } from "./obs/dispositivo";
 import type { FlagsApp, Tier } from "./obs/tipos";
 import { logger } from "../logger";
 
@@ -376,6 +378,7 @@ function tierSyncDe(señales: SeñalesGama): { tier: Tier; tierInferido: boolean
     redTipo: señales.redTipo,
     redWifi: señales.redWifi,
     heapLimitMB: señales.heapLimitMB,
+    sondaGpu: null, // P-26 — el tier SYNC nace sin sonda; refrescarPlanGama la corre
   });
 }
 
@@ -437,12 +440,41 @@ export function planGamaActual(): PlanGama {
 
 /** Re-clasificación COMPLETA (batería + storage — §4.4 entero): puede BAJAR
  *  el tier (BAJO por batería<20 % sin cargar o storage<500 MB). Fire-and-
- *  forget desde MASIVA al montar; idempotente. Jamás lanza. */
+ *  forget desde MASIVA al montar; idempotente. Jamás lanza.
+ *  P-26 (plan 2026-11-12): en iOS/Safari (sin deviceMemory NI heap), un tier
+ *  inferido MEDIO con núcleos ≥ 6 corre la SONDA GPU (~120 ms, presupuesto
+ *  fijo) — score ≥ 750 rescata ALTO inferido (renderer real manda sobre la
+ *  señal ausente). NUNCA BAJA: la sonda solo puede escalar. */
 export async function refrescarPlanGama(): Promise<PlanGama> {
   try {
     if (typeof navigator === "undefined") return planGamaActual();
     const snap = await obtenerDispositivo();
-    cacheCompleta = { tier: snap.tier, tierInferido: snap.tierInferido };
+    let tier = snap.tier;
+    let tierInferido = snap.tierInferido;
+    if (tier === "MEDIO" && tierInferido && snap.memoriaGB === null && snap.nucleos >= 6) {
+      // iOS atrapado en MEDIO (heap no medible): corre la sonda y re-clasifica.
+      const score = await sonderGpu();
+      if (score !== null && score >= UMBRAL_SONDA_GPU) {
+        const { tier: t, tierInferido: inf } = calcularTier({ // canónica shared — con sonda (P-26)
+          memoriaGB: snap.memoriaGB,
+          nucleos: snap.nucleos,
+          saveData: snap.red.saveData,
+          bateriaNivel: snap.bateria.nivel,
+          bateriaCargando: snap.bateria.cargando,
+          storageLibreMB: snap.storageLibreMB,
+          redTipo: snap.red.tipo,
+          redWifi: null, // el snapshot del core no expone wifi; red congelada (P-23) no condena con null
+          heapLimitMB: heapLimitMB(),
+          sondaGpu: score,
+        });
+        if (t === "ALTO") {
+          tier = t;
+          tierInferido = inf;
+          logger.info(`[e14] gama P-26 — sonda GPU ${score}/1000 rescata ALTO inferido (sin heap en Safari)`);
+        }
+      }
+    }
+    cacheCompleta = { tier, tierInferido };
     const plan = planGamaActual();
     logger.info(
       `[e14] gama plan tier=${plan.tier}${plan.tierInferido ? " (inferido)" : ""} efectivo=${plan.tierEfectivo}${plan.reactivo ? " [REACTIVA]" : ""}${plan.amplificado ? " [AMPLIFICADO]" : ""} fuente=${plan.fuente} adaptativo=${plan.activo ? `ON (${plan.ajustes.join(", ")})` : "OFF"}`,

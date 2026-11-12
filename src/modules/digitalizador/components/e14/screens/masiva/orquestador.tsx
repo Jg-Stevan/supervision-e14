@@ -39,6 +39,12 @@ import { prescanYIniciar, usePrescanQrEstado, usePrescanStore } from "@/modules/
 // KIT e14-gama-adaptativa-v1 (D74): chip de gama adaptada — el tier detectado
 // consume presupuestos de recursos en BAJO/MEDIO (transparencia del dueño).
 import { planGamaActual, refrescarPlanGama, type PlanGama } from "@/modules/digitalizador/lib/e14/gama";
+// P-23 (plan 2026-11-12) — precarga de assets OCR (soloWifi respeta el plan
+// del perfil; fire-and-forget, jamás delante de una acta).
+import { programarPrecargaAssetsOcr } from "@/modules/digitalizador/lib/e14/precarga-assets";
+// P-23 — el consumidor de la recomendación `sincronizarSoloWifi` (dato del
+// perfil que hoy carecía de consumidor). MASIVA ya vive bajo PerfilProvider.
+import { usePerfilRecursos } from "@/modules/perfil-dispositivo/perfil-provider";
 // KIT visor-masiva-redesign-v1: lote DEMO (4 fixtures SINTÉTICAS) — entra
 // por agregarFiles (misma puerta de siempre, pipeline completo sin atajos).
 import { fetchActasDemo } from "@/modules/digitalizador/lib/e14/actas-demo";
@@ -303,6 +309,18 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   const [gama, setGama] = useState<PlanGama>(() => planGamaActual());
   useEffect(() => {
     void refrescarPlanGama().then(setGama);
+  }, []);
+  // P-23 (plan 2026-11-12) — precarga de los assets OCR del lockfile al
+  // montar MASIVA: con `sincronizarSoloWifi` (recomendación del perfil — el
+  // dato que no tenía consumidor) la descarga se difiere a wifi/red buena con
+  // reintentos acotados. Fire-and-forget: jamás bloquea el lote.
+  const { plan: planPerfil } = usePerfilRecursos();
+  useEffect(() => {
+    programarPrecargaAssetsOcr(planPerfil.sincronizarSoloWifi);
+    // El plan del perfil NO re-dispara la precarga en vivo (una descarga ya
+    // iniciada no se cancela) — el criterio es el del MONTAR. planPerfil es
+    // deliberadamente estable aquí: el plan del perfil en el momento del
+    // montar es el que manda.
   }, []);
 
   // Confirmación inline de 2 toques — se desarma sola (kit §6, sin window.confirm).

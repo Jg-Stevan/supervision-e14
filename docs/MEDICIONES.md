@@ -146,3 +146,31 @@ histórico. SIM no emite telemetría; una corrida simulada no cuenta.
 
 Detalle del protocolo (idéntico en los dos productos): `digielect14` →
 `docs/MEDICION-6.7.md`.
+
+
+## Matriz iOS/Android del tier (P-26, plan 2026-11-12)
+
+La regla INFERIDA (sin `deviceMemory` ni `performance.memory` — iOS/Safari)
+rescata ALTO con la SONDA GPU: `núcleos ≥ 6 ∧ (heap ≥ 2048 MB ∨ sonda ≥ 750)`.
+El umbral 750 es el MISMO del benchmark del panel (favorable); el factor de
+escala de `shared/dispositivo/sonda-gpu.ts` es PROVISIONAL hasta medir la
+matriz de abajo (Q-56). La medición se hace en el panel PERFIL (benchmark
+completo: CPU/memoria/raster) y con la sonda (raster puro, ~120 ms):
+
+| Dispositivo | UA | deviceMemory | heap | benchmark panel | sonda GPU | tier antes | tier después |
+|---|---|---|---|---|---|---|---|
+| iPhone Safari (RAM holgada) | iOS ≥ 16 | — (null) | — (null) | _pendiente_ | _pendiente_ | MEDIO inferido | ALTO inferido si sonda ≥ 750 |
+| iPhone Safari (RAM corta) | iOS ≤ 15 | — (null) | — (null) | _pendiente_ | _pendiente_ | MEDIO inferido | MEDIO (núcleos ≤ 4 en A-series viejas) |
+| iPad Safari | iPadOS ≥ 17 | — (null) | — (null) | _pendiente_ | _pendiente_ | MEDIO inferido | _pendiente_ (esperado ALTO) |
+| Android gama baja (A56) | Chrome | 2-4 | medible | _pendiente_ | — (regla exacta §4.4) | BAJO/MEDIO | SIN CAMBIO (memoriaGB real manda) |
+| Android gama media (A13) | Chrome | 4-8 | medible | _pendiente_ | — | MEDIO/ALTO | SIN CAMBIO |
+| Desktop Chrome | — | 8 | medible | _pendiente_ | — | ALTO | SIN CAMBIO |
+
+Reglas fijadas por esta tarea (no requieren medición):
+- La sonda SOLO participa en la rama INFERIDA (con deviceMemory real la regla
+  §4.4 exacta manda — la sonda jamás escala un MEDIO con memoria medida).
+- La sonda NUNCA baja el tier (solo rescata).
+- La red ya no condena a mitad de sesión: P-23 congela `effectiveType`/wifi a
+  la primera medición (el saveData del usuario sigue vivo).
+- La descarga de modelos respeta `sincronizarSoloWifi` (precarga P-23 en el
+  montar de MASIVA; difiere con techo 3 intentos · backoff 30 s).

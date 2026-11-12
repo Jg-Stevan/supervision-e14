@@ -42,6 +42,12 @@ export interface EntradaTier {
   redTipo: string | null; // effectiveType: slow-2g|2g|3g|4g
   redWifi: boolean | null;
   heapLimitMB: number | null;
+  /** P-26 (plan 2026-11-12) — score 0-1000 de la SONDA GPU
+   *  (shared/dispositivo/sonda-gpu.ts; ≥750 = renderer capaz). Solo entra
+   *  en juego en la rama INFERIDA (iOS/Safari sin deviceMemory NI heap):
+   *  núcleos ≥ 6 ∧ (heap ≥ 2048 ∨ sonda ≥ 750) → ALTO inferido. Con
+   *  deviceMemory real la regla ALTO NO cambia (regla §4.4 exacta). */
+  sondaGpu: number | null;
 }
 
 export interface ResultadoTier {
@@ -52,7 +58,8 @@ export interface ResultadoTier {
 /** Reglas §4.4 — CANÓNICA (variante perfil-dispositivo): BAJO por
  *  CUALQUIER señal débil SOLO con el dato presente (null NO condena);
  *  ALTO exige deviceMemory real ≥ 4 ∧ núcleos ≥ 6 ∧ red 4g/wifi; sin
- *  deviceMemory (iOS) se INFERE por núcleos ≥ 6 + heap ≥ 2048 MB y
+ *  deviceMemory (iOS) se INFERE por núcleos ≥ 6 + (heap ≥ 2048 MB ∨
+ *  sonda GPU ≥ 750 — P-26: renderer real cuando Safari no expone heap) y
  *  tierInferido=true. MEDIO el resto. Jamás lanza. */
 export function calcularTier(e: EntradaTier): ResultadoTier {
   // ── decisión §4.4 (PARIDAD EXACTA — mismo orden de cortocircuito) ──
@@ -69,7 +76,9 @@ export function calcularTier(e: EntradaTier): ResultadoTier {
     if (e.memoriaGB >= 4 && (e.nucleos ?? 0) >= 6 && (e.redTipo === "4g" || e.redWifi === true))
       tier = "ALTO";
     else tier = "MEDIO";
-  } else if ((e.nucleos ?? 0) >= 6 && (e.heapLimitMB ?? 0) >= 2048) {
+  } else if ((e.nucleos ?? 0) >= 6 && ((e.heapLimitMB ?? 0) >= 2048 || (e.sondaGpu ?? 0) >= 750)) {
+    // P-26 — iOS atrapado en MEDIO: Safari no expone heap; la sonda GPU
+    // (renderer real, umbral del benchmark del panel) rescata la rama.
     tier = "ALTO";
     tierInferido = true;
   } else {

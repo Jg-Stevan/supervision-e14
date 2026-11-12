@@ -44,7 +44,8 @@ function memoriaMBDe(): number | null {
 }
 
 /** heapSizeLimit en MB (solo Chromium) — para el tier INFERIDO de iOS. */
-function heapLimitMB(): number | null {
+/** P-26 — exportado para el re-clasificado con sonda del app (gama.ts). */
+export function heapLimitMB(): number | null {
   const p = performance as Performance & { memory?: { jsHeapSizeLimit?: number } };
   const limit = p.memory?.jsHeapSizeLimit;
   return typeof limit === "number" ? Math.round(limit / 1048576) : null;
@@ -160,13 +161,28 @@ export function calcularTier(e: EntradaTier): { tier: Tier; tierInferido: boolea
   return { tier: "MEDIO", tierInferido: true };
 }
 
+/** P-23 — red congelada de la sesión (null = todavía no se midió). Solo el
+ *  estado de red (effectiveType/wifi); saveData es intención del usuario y
+ *  vive. Ver comentario en obtenerDispositivo. */
+let RED_CONGELADA: { tipo: string | null; wifi: boolean } | null = null;
+
 /** Snapshot completo (contrato §4.3). */
 export async function obtenerDispositivo(): Promise<SaludSnapshot & { os: string; ua: string }> {
   const ua = navigator.userAgent;
   const nucleos = nucleosDel(navigator);
   const memoriaGB = memoriaGBDe(navigator);
   const bateria = await bateriaDe(navigator);
-  const red = redDe(navigator);
+  // P-23 (plan 2026-11-12) — red CONGELADA a la PRIMERA medición de la
+  // sesión: la regla ALTO exige red 4g/wifi del momento del ESCANEO, no del
+  // momento de cada re-clasificación (antes una red que caía a 3g bajaba el
+  // tier a MEDIO a mitad de lote y el pipeline perdía su plan). La batería,
+  // el storage y el saveData (intención del usuario) siguen VIVOS — solo el
+  // estado de red se congela. Reinicio de sesión (recarga) re-mide.
+  if (RED_CONGELADA === null) {
+    const red0 = redDe(navigator);
+    RED_CONGELADA = { tipo: red0.tipo, wifi: red0.wifi };
+  }
+  const red = { ...redDe(navigator), tipo: RED_CONGELADA.tipo, wifi: RED_CONGELADA.wifi };
   const storageLibre = await storageLibreMB();
   const { tier, tierInferido } = calcularTier({
     memoriaGB,

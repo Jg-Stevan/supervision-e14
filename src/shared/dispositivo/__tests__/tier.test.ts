@@ -141,6 +141,7 @@ function aEntradaShared(c: Caso): EntradaTier {
     redTipo: c.redTipo ?? null,
     redWifi: c.redWifi ?? null,
     heapLimitMB: c.heapLimitMB ?? null,
+    sondaGpu: null, // P-26 — la tabla §4.4 corre SIN sonda (regla exacta)
   };
 }
 
