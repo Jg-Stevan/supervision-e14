@@ -17,6 +17,11 @@
 #   · script-src 'unsafe-inline' → bootstrap/hidratación de Next.js (export
 #     estático: sin nonce por request en Pages).
 #   · 'wasm-unsafe-eval' → compilación WASM de ORT/zxing/zbar/tesseract.
+#   · script-src 'unsafe-eval' → OBLIGATORIO para el detector: el core
+#     self-hosted de OpenCV (emscripten) usa `new Function` en
+#     `makeDynCaller` (tabla dynCall) y `createNamedFunction`. Sin esto el
+#     DetectionWorker del digitalizador nunca emite 'ready' (regresión
+#     2026-11-11; misma causa en el móvil y en el hub local).
 #   · blob: en worker/script → workers del motor creados desde Bundles.
 #   · img-src/connect-src data: blob: → fotos y miniaturas del pipeline
 #     (dataURLs) y fetching WASM/modelos por ORT.
@@ -34,7 +39,7 @@
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://e14-puente.julistevan02.workers.dev; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://e14-puente.julistevan02.workers.dev; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

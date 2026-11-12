@@ -223,8 +223,17 @@ const MIME = {
 // ('wasm-unsafe-eval'). Se espeja la CSP de PRODUCCIÓN de las apps servidas
 // (misma superficie de confianza, mismo origen) con el endurecido que pide el
 // plan: object-src 'none', base-uri 'none' y frame-ancestors 'self'.
+//
+// Ola 0-3 (regresión detectada en la prueba en dispositivo 2026-11-11):
+// 'unsafe-eval' es OBLIGATORIO para el detector. El core self-hosted de
+// OpenCV (vendor/opencv-4.5.5-core.js, emscripten) usa `new Function` en
+// `makeDynCaller` (tabla dynCall de WASM) y en `createNamedFunction`
+// (errores con nombre). Sin 'unsafe-eval' el importScripts del core lanza
+// EvalError → el DetectionWorker nunca emite 'ready' → el frame loop se
+// detiene → la cámara queda en «BUSCANDO ACTA… / NO DETECTADA» sin captura
+// automática. React no usa eval en producción, pero este motor sí.
 const CSP_HUB =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; " +
+  "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; " +
   "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; " +
   "connect-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; " +
   "base-uri 'none'; form-action 'none'; frame-ancestors 'self'";

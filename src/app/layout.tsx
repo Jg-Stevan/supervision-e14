@@ -22,16 +22,14 @@ export const metadata: Metadata = {
 // especificación (lo cubre _headers en Cloudflare; en GH Pages el sitio no
 // se embebe por diseño del export estático).
 //
-// ÚNICA diferencia con _headers: 'unsafe-eval' en script-src SOLO en
-// desarrollo — React dev-mode lo necesita para sus funciones de depuración
-// («eval() is not supported… React requires eval() in development mode»,
-// issue permanente del DevTools) y el propio React confirma que NUNCA usa
-// eval() en producción, donde la CSP queda idéntica a la de _headers.
+// 'unsafe-eval' va SIEMPRE (antes solo en desarrollo): React no lo usa en
+// producción, pero el core self-hosted de OpenCV (emscripten) SÍ — usa
+// `new Function` en `makeDynCaller` (tabla dynCall) y `createNamedFunction`.
+// Sin esto el digitalizador del panel no arranca el DetectionWorker
+// (regresión 2026-11-11, misma causa que en el móvil). Ver public/_headers.
 const CSP_META = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${
-    process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""
-  } 'wasm-unsafe-eval' blob:`,
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
