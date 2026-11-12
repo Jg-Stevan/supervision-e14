@@ -143,3 +143,30 @@ Deuda conocida documentada (PR propio, fuera del cierre):
 
 Verificación: `bunx knip` → **exit 0** · `bun run typecheck` → 0 errores ·
 tests del paquete → 154 pass.
+
+## 7. H-41 residuales — excepciones documentadas (C-7 del plan de cierre)
+
+Criterio del cierre: `rg -i "dueñ"` en CÓDIGO ACTIVO (`*.ts`/`*.tsx`/`*.mjs`/
+`*.yml`/`*.sh`) → **0 matches** en ambos repos (verificado 2026-11-12). Los
+residuales restantes son excepciones documentadas:
+
+1. **Datos oficiales (NO se tocan — fidelidad DIVIPOLA):**
+   `public/e14/divipol.json` (ambos repos). Los matches son substrings de
+   topónimos oficiales de sedes de votación: «I.E FONTIDUEÑO JAIME ARANGO R»,
+   «SEC PRIMARIA IE FONTIDUEÑO JAIME ARANGO» (FONTIDUEÑO = nombre propio del
+   corregimiento/sede, dato de la Registraduría). Igual criterio para
+   `divipola-exterior.json` de sup si lo hubiera.
+2. **Documentos archivados (histórico — se conservan tal cual):**
+   `docs/archivo/auditoria/GUIA-AUDITORIA-supervision-e14.md:31,93,98` (sup) ·
+   `docs/archivo/sim-recursos/README.md:52` (dig). Excepción anotada en la
+   fila H-41 del CIERRE-REPORTE.
+3. **Artefacto generado upstream (pendiente de regeneración upstream):**
+   `public/scanner/detection-worker.js` +
+   `packages/scanner-core/assets/scanner/detection-worker.js` (ambos repos,
+   3 hits por archivo). Son comentarios muertos embebidos («aviso Canvas2D del
+   dueño») de una fuente YA saneada en la Ola 4 — el bundle no se regeneró
+   entonces. Este repo NO tiene pipeline para regenerarlo (el bundle proviene
+   de `src/scanner/core/*` del repo origen web-scanner, ver cabecera del
+   archivo; `preparar` regenera `capa0-qr.worker.js` — verificado idéntico —
+   pero no el detection-worker). Sin impacto funcional (comentarios); queda el
+   pendiente de regeneración en el pipeline upstream.
