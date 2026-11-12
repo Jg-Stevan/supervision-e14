@@ -174,3 +174,33 @@ Reglas fijadas por esta tarea (no requieren medición):
   la primera medición (el saveData del usuario sigue vivo).
 - La descarga de modelos respeta `sincronizarSoloWifi` (precarga P-23 en el
   montar de MASIVA; difiere con techo 3 intentos · backoff 30 s).
+
+
+## Monitor: ventana de filas (P-25, plan 2026-11-12) — medido
+
+La regla del plan era MEDIR primero y virtualizar SIN paginar. Medición con
+`next dev` + navegador headless (agent-browser/Chromium, catálogo del día
+JUEVES = 116 puestos visibles; el catálogo completo de la jornada ≈ 949
+puestos ≈ 14k componentes de fila):
+
+| Métrica | ANTES (content-visibility) | DESPUÉS (ventana P-25) |
+|---|---|---|
+| `<tbody>` montados | 117 (con catálogo completo: ~949) | **25** (ventana ± margen + espaciadores) |
+| `<tr>` montados | 119 (~949 con catálogo completo) | **25** |
+| Nodos DOM en la tabla | 4.170 (~34k estimado con 949) | **885** |
+| Scrollbar | altura real (CSS skip) | altura REAL (espaciadores con alturas reales de abiertos) |
+| Criterio del plan: DOM < ~50 filas | ✗ (117/949) | **✓ (25 montadas)** |
+
+Comportamiento verificado en navegador (headless):
+- scroll profundo → la ventana sigue al scrollport (14-32 filas montadas según
+  posición; 0 espaciador abajo al fondo, 1 arriba);
+- expansión de puesto → el subdetalle mide su altura REAL vía ResizeObserver
+  y los espaciadores la absorben (el scrollbar no salta);
+- reorden por urgencia del ticker NO resetea el scroll del usuario (solo
+  orden manual/filtro lo hace — posición inválida);
+- accesibilidad R4-C7 intacta: fila semántica `<tr>`, botón de expansión con
+  aria-expanded/aria-controls, espaciadores `aria-hidden` + `role="presentation"`.
+
+Pendiente de campo (Q-56): FPS y render-time en gama baja real (A13/A56) con
+el catálogo COMPLETO — la ventana ya cumple el criterio DOM, el número de FPS
+se añade aquí cuando se corra la matriz de dispositivos.

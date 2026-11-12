@@ -1,6 +1,13 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Eye } from "lucide-react";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import {
@@ -18,6 +25,14 @@ import {
 } from "../domain/tiempo-cierre";
 import { colorDeEstado, StatusBadge } from "./status-badge";
 import { MesasSubtable } from "./mesas-subtable";
+// P-25 (plan 2026-11-12) — VENTANA DE FILAS (virtualizar sin paginar): la
+// lógica pura vive en ventana-scroll.ts (testada); aquí el wiring de refs.
+import {
+  ALTURA_CERRADA,
+  alturasDeFilas,
+  alturaDeEspaciador,
+  rangoVisible,
+} from "./ventana-scroll";
 // T8 (KIT VISOR-MONITOR-GLOBAL-v1) — regla ÚNICA de visibilidad del visor.
 import { actaVisibleEnMonitor } from "../data/actas-runtime";
 
@@ -218,6 +233,14 @@ function MiniProgreso({ pct, color }: { pct: number; color: string }) {
  *  identidad nueva por fila por render y rompía el memo de PuestoRow. */
 const MESAS_VACIAS: Mesa[] = [];
 
+// ─── P-25 — parámetros de la ventana de filas ───────────────────────────
+/** Filas montadas al primer render (criterio de cierre del plan: el DOM de
+ *  la tabla queda < ~50 filas montadas; el scroll amplía con margen). */
+const VENTANA_INICIAL = 24;
+/** Filas de amortiguación arriba/abajo del scrollport (el scroll nunca ve el
+ *  borde de la ventana — no hay filas «vacías» visibles). */
+const MARGEN_VENTANA = 12;
+
 /**
  * R4-C6 — telemetría de renders de PuestoRow (solo para la MEDICIÓN de
  * aceptación del fix C6: abrir el visor debe dejarla en 0; se lee en
@@ -330,6 +353,104 @@ export function PuestosTable({
     []
   );
 
+  // ─── P-25 (plan 2026-11-12) — VENTANA DE FILAS (§5.4 / DEUDA P1) ─────────
+  // El catálogo real son ~949 puestos (≈14k componentes): el CSS
+  // content-visibility solo skipa el PINTADO. La ventana monta SOLO las filas
+  // del scrollport ± margen con DOS espaciadores <tbody aria-hidden> que
+  // mantienen el scrollbar honesto (alturas reales de los abiertos + 49 px
+  // estimados de los cerrados). JAMÁS paginación (regla heredada): el usuario
+  // no ve «páginas», ve el catálogo completo en un scrollbar continuo.
+  const contenedorRef = useRef<HTMLDivElement>(null);
+  const [ventana, setVentana] = useState({ desde: 0, hasta: VENTANA_INICIAL });
+  /** Alturas REALES medidas de las filas abiertas (índice → px). STATE y no
+   *  ref: la regla react-hooks/refs prohíbe leer refs en render, y las
+   *  mediciones (solo filas abiertas, por ResizeObserver) son pocas. */
+  const [alturasReales, setAlturasReales] = useState<Map<number, number>>(
+    () => new Map()
+  );
+  const rafScrollRef = useRef<number | null>(null);
+
+  const indicesAbiertos = useMemo(() => {
+    const s2 = new Set<number>();
+    ordenados.forEach((p, i) => {
+      if (expandidos.has(p.id)) s2.add(i);
+    });
+    return s2;
+  }, [ordenados, expandidos]);
+
+  const mapaIndice = useMemo(
+    () => new Map(ordenados.map((p, i) => [p.id, i] as const)),
+    [ordenados]
+  );
+
+  const alturas = useMemo(
+    () =>
+      alturasDeFilas(ordenados.length, indicesAbiertos, alturasReales, ALTURA_CERRADA),
+    [ordenados.length, indicesAbiertos, alturasReales]
+  );
+
+  const alMedirAbierto = useCallback(
+    (id: string, px: number) => {
+      const indice = mapaIndice.get(id);
+      if (indice === undefined) return;
+      setAlturasReales((prev) => {
+        if (prev.get(indice) === px) return prev; // identidad estable si no cambia
+        const siguiente = new Map(prev);
+        siguiente.set(indice, px);
+        return siguiente;
+      });
+    },
+    [mapaIndice]
+  );
+
+  /** Recalcular la ventana DESDE el scroll actual (montar, alturas nuevas o
+   *  reorden del ticker — JAMÁS resetea el scroll del usuario). */
+  const recalcularVentana = useCallback(() => {
+    const el = contenedorRef.current;
+    if (!el) return;
+    const r = rangoVisible(alturas, el.scrollTop, el.clientHeight, MARGEN_VENTANA);
+    setVentana((v) => (v.desde === r.desde && v.hasta === r.hasta ? v : r));
+  }, [alturas]);
+
+  useEffect(() => {
+    // Diferido a rAF (regla lint: nada de setState sincrónico en el cuerpo del
+    // effect — misma regla que el espejo hash del shell).
+    const raf = requestAnimationFrame(recalcularVentana);
+    return () => cancelAnimationFrame(raf);
+  }, [recalcularVentana]);
+
+  // Orden/filtro con identidad nueva → posición inválida: scroll a 0 UNA vez
+  // (NO en cada tick del reloj: el reorden por urgencia conserva el scroll).
+  useEffect(() => {
+    const el = contenedorRef.current;
+    if (el) el.scrollTo({ top: 0 });
+    // Diferido a rAF (misma regla lint que arriba).
+    const raf = requestAnimationFrame(() =>
+      setVentana({ desde: 0, hasta: VENTANA_INICIAL })
+    );
+    return () => cancelAnimationFrame(raf);
+    // puestos.length cubre filtros; orden cubre re-orden manual.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orden, puestos.length]);
+
+  // Scroll → ventana (rAF-throttled: O(log n) por frame, jamás por tecla).
+  const alScrollVentana = useCallback(() => {
+    if (rafScrollRef.current !== null) return;
+    rafScrollRef.current = requestAnimationFrame(() => {
+      rafScrollRef.current = null;
+      const el = contenedorRef.current;
+      if (!el) return;
+      const r = rangoVisible(alturas, el.scrollTop, el.clientHeight, MARGEN_VENTANA);
+      setVentana((v) => (v.desde === r.desde && v.hasta === r.hasta ? v : r));
+    });
+  }, [alturas]);
+
+  useEffect(() => {
+    return () => {
+      if (rafScrollRef.current !== null) cancelAnimationFrame(rafScrollRef.current);
+    };
+  }, []);
+
   // Filtro de columna «Cierre COL» retirado (feedback del dueño): era un
   // dropdown de valor exacto y «en realidad era un orden de mayor a menor»
   // — la opción vive ahora en BotonOrden (ver ENCABEZADOS/INDICE_CIERRE).
@@ -344,8 +465,14 @@ export function PuestosTable({
     );
   }
 
+  const { arriba, abajo } = alturaDeEspaciador(alturas, ventana.desde, ventana.hasta);
+  const visibles = ordenados.slice(ventana.desde, ventana.hasta);
+
   return (
-    <div className="max-h-[calc(100dvh-21rem)] min-h-[320px] overflow-auto rounded-[4px] border border-border">
+    <div
+      ref={contenedorRef}
+      onScroll={alScrollVentana}
+      className="max-h-[calc(100dvh-21rem)] min-h-[320px] overflow-auto rounded-[4px] border border-border">
       {/*
         <table> directo (sin el wrapper de shadcn): su contenedor con
         overflow-x-auto crearía un scrollport propio y rompería el sticky
@@ -399,7 +526,15 @@ export function PuestosTable({
           tabla (el raíz por defecto de Radix sería un <div> dentro de la
           tabla). Expansión controlada: Italia abierta por defecto (kit §2.4).
         */}
-        {ordenados.map((puesto) => (
+        {/* P-25 — espaciadores HONESTOS: mantienen el scrollbar a la altura
+            del catálogo completo (reales de abiertos + estimados de cerrados).
+            aria-hidden + role="presentation": el lector jamás los anuncia. */}
+        {arriba > 0 && (
+          <tbody aria-hidden role="presentation">
+            <tr style={{ height: arriba }} aria-hidden />
+          </tbody>
+        )}
+        {visibles.map((puesto) => (
           <PuestoRow
             key={puesto.id}
             puesto={puesto}
@@ -410,8 +545,14 @@ export function PuestosTable({
             onReinspeccionar={onReinspeccionar}
             onAbrirVisor={onAbrirVisor}
             onAbrirVisorDePuesto={onAbrirVisorDePuesto}
+            alMedirAbierto={alMedirAbierto}
           />
         ))}
+        {abajo > 0 && (
+          <tbody aria-hidden role="presentation">
+            <tr style={{ height: abajo }} aria-hidden />
+          </tbody>
+        )}
       </table>
     </div>
   );
@@ -438,6 +579,7 @@ const PuestoRow = memo(function PuestoRow({
   onReinspeccionar,
   onAbrirVisor,
   onAbrirVisorDePuesto,
+  alMedirAbierto,
 }: {
   puesto: Puesto;
   mesas: Mesa[];
@@ -447,6 +589,10 @@ const PuestoRow = memo(function PuestoRow({
   onReinspeccionar: (puestoId: string, mesaId: string) => Promise<void>;
   onAbrirVisor: (puestoId: string, mesaId: string) => void;
   onAbrirVisorDePuesto: (puestoId: string) => void;
+  /** P-25 — mide el tbody REAL de la fila abierta (ResizeObserver) para que
+   *  los espaciadores de la ventana mantengan el scrollbar honesto. Opcional:
+   *  sin ella la fila sigue funcionando (estimación de abierto). */
+  alMedirAbierto?: (id: string, px: number) => void;
 }) {
   const acento = colorDeEstado(puesto.estadoGlobal);
   // R4-C6 — telemetría de renders (ver RECUENTO_FILAS): el effect corre tras
@@ -464,8 +610,24 @@ const PuestoRow = memo(function PuestoRow({
   const tieneActa = mesas.some((m) => actaVisibleEnMonitor(puesto.id, m.id, m));
   // R4-C7 — id estable del detalle (aria-controls del botón de expansión).
   const idDetalle = `detalle-puesto-${puesto.id}`;
+  // P-25 — la altura REAL del tbody abierto alimenta los espaciadores de la
+  // ventana (el subdetalle de mesas es mucho más alto que 49 px). El
+  // ResizeObserver cubre el montaje async de las mesas y los cambios de tema.
+  const refTbody = useRef<HTMLTableSectionElement | null>(null);
+  useEffect(() => {
+    if (!abierto || !alMedirAbierto) return;
+    const el = refTbody.current;
+    if (!el) return;
+    const medir = () =>
+      alMedirAbierto(puesto.id, Math.round(el.getBoundingClientRect().height));
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [abierto, alMedirAbierto, puesto.id]);
   return (
     <Collapsible
+      ref={refTbody}
       open={abierto}
       onOpenChange={(v) => v !== abierto && onToggle(puesto.id)}
       asChild
