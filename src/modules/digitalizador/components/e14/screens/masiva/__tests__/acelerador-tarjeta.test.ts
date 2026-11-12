@@ -74,6 +74,51 @@ describe("acelerador — tarjeta del sidecar", () => {
     expect(fuente).toMatch(/sondear\(true\)/);
   });
 
+  test("P-21 — el re-sondeo vive SIEMPRE (activo/caído incluidos), no solo en ausente", () => {
+    // La deuda §5.3 (DEUDA P0): el timer solo corría en AUSENTE y un sidecar
+    // que moría a mitad de sesión quedaba ACTIVO para siempre, sin aviso ni
+    // re-sondeo. El efecto del intervalo no puede volver a filtrar por estado.
+    const fuente = leer(
+      "src/modules/digitalizador/components/e14/screens/masiva/acelerador.tsx",
+    );
+    expect(fuente).not.toMatch(/estado\s*!==\s*"ausente"\s*\)?\s*return/);
+    expect(fuente).toMatch(/window\.setInterval\(\(\) => void sondear\(true\), REINTENTO_MS\)/);
+  });
+
+  test("P-21 — 2 fallos seguidos desarmar el flag EN RUNTIME y estado CAÍDO con banner", () => {
+    const fuente = leer(
+      "src/modules/digitalizador/components/e14/screens/masiva/acelerador.tsx",
+    );
+    // Dos sondeos fallidos seguidos (no uno: un timeout suelto no condena).
+    expect(fuente).toMatch(/FALLOS_PARA_CAIDA\s*=\s*2/);
+    expect(fuente).toMatch(/fallosRef\.current >= FALLOS_PARA_CAIDA/);
+    // El desarme es EN RUNTIME: el override persistido (localStorage/flags.json)
+    // NO se toca — persistir `ocrNativoUrl: null` mataría la tarjeta para
+    // siempre (url null → return null) y el visitante tendría que limpiar el
+    // override a mano tras reiniciar el .exe.
+    expect(fuente).toMatch(/configurarNativo\(null\)/);
+    expect(fuente).not.toMatch(/guardarOverridesFlags|localStorage\.setItem/);
+    // El estado y su banner visible (role="alert") — «OCR continúa por WASM».
+    expect(fuente).toMatch(/"caido"/);
+    expect(fuente).toMatch(/role="alert"/);
+    expect(fuente).toMatch(/OCR contin[úu]a por WASM/);
+  });
+
+  test("P-21 — la recuperación re-arma el motor (sondeo DIRECTO, no a ciegas)", () => {
+    const fuente = leer(
+      "src/modules/digitalizador/components/e14/screens/masiva/acelerador.tsx",
+    );
+    // En CAÍDO se sondea la URL original DIRECTO (el flag runtime está null y
+    // la sonda del core contestaría false sin salir a la red).
+    expect(fuente).toMatch(/sondearUrlSidecarDirecta/);
+    // Y al responder, el runtime se re-arma con la URL original.
+    expect(fuente).toMatch(/configurarNativo\(url\)/);
+    const nativo = leer("src/modules/digitalizador/lib/e14/ocr/nativo.ts");
+    expect(nativo).toMatch(/sondearUrlSidecarDirecta/);
+    // Mismo contrato que la sonda del core: jamás lanza.
+    expect(nativo).toMatch(/catch\s*\{\s*return false/);
+  });
+
   test("la tarjeta es informativa: no importa el runner ni el gate", () => {
     const fuente = leer(
       "src/modules/digitalizador/components/e14/screens/masiva/acelerador.tsx",
