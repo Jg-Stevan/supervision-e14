@@ -82,6 +82,9 @@ interface ActaHub {
   statusActa: string;
   /** Ruta raíz del hub para la foto almacenada; null = llegó sin foto. */
   fotoUrl: string | null;
+  /** C-07 — epoch ms del gate del móvil (viaja dentro del sobre y el hub lo
+   * devuelve tal cual). Ausente en actas viejas → ORIGEN «—». */
+  tsEscaneo?: number;
 }
 
 export interface EstadoHubLocal {
@@ -274,6 +277,10 @@ function entradaDesdeHub(a: ActaHub): EntradaActaMasiva {
     // estampa en cada fila), no la del sondeo; si la fila no la trae (hub
     // viejo), el log cae a su `fecha` de siempre.
     ...(typeof a.ts === "number" ? { fechaRecepcionHub: a.ts } : {}),
+    // C-07 — la hora ORIGEN es la del gate del móvil (`tsEscaneo` del
+    // sobre); si la fila no la trae (acta antigua), no se inventa: la vista
+    // muestra «ORIGEN —».
+    ...(typeof a.tsEscaneo === "number" ? { fechaOrigen: a.tsEscaneo } : {}),
   };
 }
 

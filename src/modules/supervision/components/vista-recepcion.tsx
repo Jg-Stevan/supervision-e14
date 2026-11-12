@@ -142,12 +142,14 @@ function FilaRecepcion({
 }: {
   entrada: EntradaRecepcion;
   nueva: boolean;
-  // C-17 — el sobre trae el formulario (`entrada.formulario`): viaja al visor
-  // para abrir el acta en el TIPO correcto (no siempre TRANSMISION).
+  // C-17 — el sobre trae el formulario y la página (`entrada.formulario`,
+  // `entrada.paginaIndex`): viajan al visor para abrir el TIPO y la PÁGINA
+  // correctos (no siempre TRANSMISION ni la 1).
   onVerEnMonitor?: (
     puestoId: string,
     mesaId: string,
-    tipo?: FormularioTipo
+    tipo?: FormularioTipo,
+    pagina?: number
   ) => void;
 }) {
   const conJoin = entrada.estado === "PUBLICADA" && entrada.idEnlace !== "—";
@@ -294,7 +296,9 @@ function FilaRecepcion({
                     // C-17 — el formulario del sobre manda; null (SIN_JOIN)
                     // no llega aquí (botón deshabilitado), pero undefined
                     // deja que el shell aplique su fallback honesto.
-                    entrada.formulario ?? undefined
+                    entrada.formulario ?? undefined,
+                    // C-17 — la página observada, no la 1 por defecto.
+                    entrada.paginaIndex ?? undefined
                   )
               : undefined
           }
@@ -338,11 +342,13 @@ function Sparkline({ buckets }: { buckets: readonly number[] }) {
 export function VistaRecepcion({
   onVerEnMonitor,
 }: {
-  // C-17 — misma firma que la vista Carga Masiva: el TIPO viaja al visor.
+  // C-17 — misma firma que la vista Carga Masiva: el TIPO y la PÁGINA del
+  // sobre viajan al visor.
   onVerEnMonitor?: (
     puestoId: string,
     mesaId: string,
-    tipo?: FormularioTipo
+    tipo?: FormularioTipo,
+    pagina?: number
   ) => void;
 }) {
   // null = primera carga (skeleton — T2/T3). Cero lecturas en render SSR.

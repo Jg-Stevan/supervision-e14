@@ -83,7 +83,10 @@ export interface PropsMasivaView {
   onVerEnMonitor?: (
     puestoId: string,
     mesaId: string,
-    tipo?: "TRANSMISION" | "DELEGADOS"
+    tipo?: "TRANSMISION" | "DELEGADOS",
+    /** C-17 — página 1-based del sobre (RECEPCIÓN ya la trae): el visor
+     * abre la página EXACTA que se está observando. */
+    pagina?: number
   ) => void;
 }
 

@@ -594,18 +594,22 @@ function ShellInterno() {
           ) : (
             <VistaActual
               vista={vista}
-              onVerEnMonitor={(puestoId, mesaId, tipo) => {
+              onVerEnMonitor={(puestoId, mesaId, tipo, pagina) => {
                 // D27 — VER EN MONITOR: aterriza el acta publicada en el
                 // visor (cambia a MONITOR y abre el acta de esa mesa).
                 // T9 (KIT VISOR-MONITOR-GLOBAL-v1): el modo «limpio» quedó
                 // ABSORBIDO — el visor unificado ya es limpio y su única
                 // acción es REPORTAR ANOMALIA; aterrizaje idéntico al resto.
-                // C-17 — el TIPO del sobre viaja al visor (abrir la página
-                // del formulario correcto); fallback "TRANSMISION" SOLO para
-                // filas antiguas que no lo traigan (datos-provider respeta
-                // opciones.tipo y defaulta igual, aquí se hace explícito).
+                // C-17 — el TIPO y la PÁGINA del sobre viajan al visor
+                // (abrir el formulario/página correctos); fallback
+                // "TRANSMISION" SOLO para filas antiguas que no lo traigan
+                // (datos-provider respeta opciones.tipo y defaulta igual,
+                // aquí se hace explícito).
                 elegirVista("monitor");
-                abrirVisor(puestoId, mesaId, { tipo: tipo ?? "TRANSMISION" });
+                abrirVisor(puestoId, mesaId, {
+                  tipo: tipo ?? "TRANSMISION",
+                  ...(pagina !== undefined && pagina > 0 ? { pagina } : {}),
+                });
               }}
             />
           )}

@@ -84,7 +84,13 @@ afterAll(() => {
 
 /** La respuesta exacta del hub (`scripts/hub-local.mjs`) para una fila de celular. */
 function filaHub(
-  sobre: Partial<{ idEnlace: string; mesa: string; fotoUrl: string | null }> = {}
+  sobre: Partial<{
+    idEnlace: string;
+    mesa: string;
+    fotoUrl: string | null;
+    seq: number;
+    tsEscaneo: number;
+  }> = {}
 ) {
   return {
     seq: 1,
@@ -154,6 +160,27 @@ describe("hub-local — el puente del celular usa el embudo de siempre", () => {
     expect(entrada.srcFoto).toBe("https://192.168.1.8:8443/foto/1");
     // El embudo real: la página quedó alcanzable para el visor del monitor.
     expect(consultarActaRuntime(ROMA, "001")).not.toBeNull();
+  });
+
+  test("C-07 — ORIGEN usa el tsEscaneo del sobre; sin dato NO se inventa", async () => {
+    const antes = consultarRecepciones().length;
+    await sincronizarHubLocal(
+      fetchComo({
+        ok: true,
+        ahora: 900,
+        total: 2,
+        actas: [
+          filaHub({ seq: 1, tsEscaneo: 1_793_821_038_200 }),
+          filaHub({ seq: 2, mesa: "002" }),
+        ],
+      })
+    );
+
+    const nuevas = nuevasDesde(antes);
+    const conOrigen = nuevas.find((e) => e.mesa === "001");
+    const sinOrigen = nuevas.find((e) => e.mesa === "002");
+    expect(conOrigen?.fechaOrigen).toBe(1_793_821_038_200);
+    expect(sinOrigen?.fechaOrigen).toBeUndefined();
   });
 
   test("fila sin foto → entra igual (el sintético D18), srcFoto null", async () => {

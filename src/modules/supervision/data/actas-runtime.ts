@@ -61,6 +61,9 @@ export interface EntradaActaMasiva {
    * `hub-local.ts` desde la fila del sondeo). El embudo NO lo inventa:
    * los demás orígenes no lo mandan y el log cae a su `fecha`. */
   fechaRecepcionHub?: number;
+  /** C-07 — epoch ms del gate del MÓVIL (`tsEscaneo` del sobre). Solo lo
+   * trae la ruta del hub; ausente → «ORIGEN —» (jamás sintetizar). */
+  fechaOrigen?: number;
 }
 
 export type ResultadoPublicacion =
@@ -207,6 +210,10 @@ export async function publicarActaMasiva(
       ...(entrada.fechaRecepcionHub !== undefined
         ? { fechaRecepcionHub: entrada.fechaRecepcionHub }
         : {}),
+      // C-07 — ORIGEN real del móvil (solo filas del hub); sin dato → «—».
+      ...(entrada.fechaOrigen !== undefined
+        ? { fechaOrigen: entrada.fechaOrigen }
+        : {}),
     });
     return { ok: false, clave, motivo: motivoJoin };
   }
@@ -235,6 +242,10 @@ export async function publicarActaMasiva(
       statusActa: entrada.statusActa,
       nombreArchivo: entrada.nombreArchivo,
       clave,
+      // C-07 — ORIGEN real del móvil (solo filas del hub); sin dato → «—».
+      ...(entrada.fechaOrigen !== undefined
+        ? { fechaOrigen: entrada.fechaOrigen }
+        : {}),
     });
     return { ok: false, clave, motivo };
   }
@@ -315,6 +326,10 @@ export async function publicarActaMasiva(
     // C-15 — solo si el sobre lo trae (fila del hub); jamás inventado.
     ...(entrada.fechaRecepcionHub !== undefined
       ? { fechaRecepcionHub: entrada.fechaRecepcionHub }
+      : {}),
+    // C-07 — ORIGEN real del móvil (solo filas del hub); sin dato → «—».
+    ...(entrada.fechaOrigen !== undefined
+      ? { fechaOrigen: entrada.fechaOrigen }
       : {}),
   });
   return { ok: true, clave };
