@@ -39,6 +39,8 @@
  */
 
 import { publicarActaMasiva, reiniciarIndicePaginas } from "./actas-runtime";
+// P-22 (plan 2026-11-12) — validadores de las huellas del puente (shared).
+import { esDhash64Valido, normalizarQrPayload } from "@/shared/e14/huellas";
 import type { EntradaActaMasiva } from "./actas-runtime";
 import type { FormularioTipo, ImpresionActa } from "../domain/acta";
 // 0.2/H-2 — token de lectura: el GET del hub dejó de ser anónimo. Con
@@ -88,6 +90,12 @@ interface ActaHub {
   /** C-08 — SHA-256 (hex 64) de los BYTES de la foto: huella de contenido
    *  del anti-reproceso (un reenvío del mismo sobre la conserva). */
   hashSha256?: string;
+  /** P-22 (plan 2026-11-12) — payload EXACTO normalizado del código impreso
+   *  (capa 2 del anti-reproceso: acta re-fotografiada con mismo código). */
+  qrPayload?: string;
+  /** P-22 — dhash64 perceptual (hex 16) de la foto procesada (capa 3:
+   *  respaldo sin QR legible, Hamming ≤ 6). */
+  dhash64?: string;
 }
 
 export interface EstadoHubLocal {
@@ -295,6 +303,13 @@ function entradaDesdeHub(a: ActaHub): EntradaActaMasiva {
     ...(typeof a.hashSha256 === "string" && /^[0-9a-f]{64}$/.test(a.hashSha256)
       ? { hashSha256: a.hashSha256 }
       : {}),
+    // P-22 — huellas del puente (capas 2/3 del anti-reproceso). Validadas
+    // AQUÍ y en el embudo: mal formadas se omiten (conservador) — el hub no
+    // decide la duplicación, el embudo manda (DUPLICADA dupOf en Recepción).
+    ...(normalizarQrPayload(a.qrPayload) !== null
+      ? { qrPayload: normalizarQrPayload(a.qrPayload)! }
+      : {}),
+    ...(esDhash64Valido(a.dhash64) ? { dhash64: a.dhash64 } : {}),
   };
 }
 

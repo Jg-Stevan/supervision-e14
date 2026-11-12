@@ -352,6 +352,87 @@ describe("anti-reproceso — reenvíos idénticos del móvil NO se reprocesan", 
   });
 });
 
+// ─── P-22 (plan 2026-11-12) — capas 2/3: qrPayload EXACTO y dhash64 ────────
+describe("anti-reproceso P-22 — re-fotografiada con mismo QR / misma imagen", () => {
+  const QR = "710003993010102";
+  const DHASH_CERCA_A = "0123456789abcdef";
+  const DHASH_CERCA_B = "0123456789abcdee"; // 1 bit de diferencia (≤ 6)
+  const DHASH_LEJOS_B = "fedcba9876543210"; // lejano (> 6)
+
+  /** Sobre con foto DISTINTA (huella SHA diferente) y huellas del puente. */
+  const pagina = (
+    extras: { qrPayload?: string; dhash64?: string },
+    sha = "c".repeat(64)
+  ) => ({
+    ok: true,
+    ahora: 500,
+    total: 1,
+    hay: false,
+    proximoSeq: 1,
+    actas: [
+      filaHub({
+        seq: 1,
+        hashSha256: sha,
+        ...(extras.qrPayload !== undefined ? { qrPayload: extras.qrPayload } : {}),
+        ...(extras.dhash64 !== undefined ? { dhash64: extras.dhash64 } : {}),
+      }),
+    ],
+  });
+
+  test("misma página + foto distinta + mismo qrPayload → DUPLICADA dupOf (cierre P-22)", async () => {
+    await sincronizarHubLocal(fetchComo(pagina({ qrPayload: QR })));
+    const original = consultarRecepciones().find((e) => e.estado === "PUBLICADA");
+    expect(original).toBeDefined();
+
+    // Mismo QR, foto de OTROS bytes (SHA distinto — capa 1 NO la atrapa).
+    const r = await sincronizarHubLocal(
+      fetchComo(pagina({ qrPayload: QR }, "d".repeat(64)))
+    );
+
+    expect(r).toEqual({ publicas: 0, bloqueadas: 0, error: null });
+    const dup = consultarRecepciones().find((e) => e.estado === "DUPLICADA");
+    expect(dup).toBeDefined();
+    expect(dup?.dupOf).toBe(original!.id);
+    expect(dup?.motivo).toContain("código impreso");
+    expect(estadoHubLocal().duplicadas).toBe(1);
+  });
+
+  test("sin QR + dhash64 ≤ 6 bits de distancia → DUPLICADA (capa 3 decide)", async () => {
+    await sincronizarHubLocal(fetchComo(pagina({ dhash64: DHASH_CERCA_A })));
+    const original = consultarRecepciones().find((e) => e.estado === "PUBLICADA");
+    expect(original).toBeDefined();
+
+    const r = await sincronizarHubLocal(
+      fetchComo(pagina({ dhash64: DHASH_CERCA_B }, "e".repeat(64)))
+    );
+
+    expect(r).toEqual({ publicas: 0, bloqueadas: 0, error: null });
+    const dup = consultarRecepciones().find((e) => e.estado === "DUPLICADA");
+    expect(dup).toBeDefined();
+    expect(dup?.dupOf).toBe(original!.id);
+    expect(dup?.motivo).toContain("dhash64");
+  });
+
+  test("sin QR + dhash lejos (> 6) → reescaneo legítimo: se publica", async () => {
+    await sincronizarHubLocal(fetchComo(pagina({ dhash64: DHASH_CERCA_A })));
+    const r = await sincronizarHubLocal(
+      fetchComo(pagina({ dhash64: DHASH_LEJOS_B }, "f".repeat(64)))
+    );
+
+    expect(r).toEqual({ publicas: 1, bloqueadas: 0, error: null });
+    expect(consultarRecepciones().some((e) => e.estado === "DUPLICADA")).toBe(false);
+  });
+
+  test("dhash mal formado o payload vacío → capa omitida (conservador)", async () => {
+    await sincronizarHubLocal(fetchComo(pagina({ dhash64: "zzzz", qrPayload: "   " })));
+    const r = await sincronizarHubLocal(
+      fetchComo(pagina({ dhash64: "zzzz", qrPayload: "  " }, "9".repeat(64)))
+    );
+    expect(r).toEqual({ publicas: 1, bloqueadas: 0, error: null });
+    expect(consultarRecepciones().some((e) => e.estado === "DUPLICADA")).toBe(false);
+  });
+});
+
 describe("esLlegadaViva — el criterio del feed y del badge", () => {
   test("carga-masiva y puente-local son llegadas; la semilla no", () => {
     expect(esLlegadaViva("carga-masiva")).toBe(true);

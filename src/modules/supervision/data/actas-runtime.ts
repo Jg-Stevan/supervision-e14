@@ -47,6 +47,13 @@ import { validarJoinDivipola } from "./validacion-d25";
 // KIT recepcion-actas-v1 (D28): toda publicación deja su entrada en el
 // log de RECEPCIÓN (PUBLICADA/BLOQUEADA) — el embudo es este módulo.
 import { registrarRecepcion, type OrigenRecepcion } from "./recepcion-log";
+// P-22 (plan 2026-11-12) — huellas del puente (shared, puras, sin DOM).
+import {
+  UMBRAL_HAMMING_DHASH,
+  esDhash64Valido,
+  hamming64,
+  normalizarQrPayload,
+} from "@/shared/e14/huellas";
 
 /** Entrada de publicación que envía el adaptador del digitalizador
  * (store-e14.ts) tras un envío de la cola masiva. */
@@ -80,6 +87,17 @@ export interface EntradaActaMasiva {
    * → sin huella comparable NO se marca duplicado (conservador, igual que
    * la dedup de masiva). */
   hashSha256?: string;
+  /** P-22 (plan 2026-11-12) — payload EXACTO del código impreso leído por
+   * la capa 0 del móvil, ya normalizado (normalizarQrPayload de shared).
+   * IGUALDAD EXACTA contra el índice de la página: misma página + mismo
+   * payload → DUPLICADA aunque los bytes de la foto difieran (acta
+   * re-fotografiada). Ausente (sobre viejo o sin lectura) → capa omitida. */
+  qrPayload?: string;
+  /** P-22 — dhash64 perceptual (hex 16, dhash horizontal 9×8) de la foto
+   * PROCESADA, estampado por el móvil. Respaldo SIN QR: hamming64 ≤ 6
+   * contra el índice decide «misma imagen» (umbral D65). Ausente o mal
+   * formado → capa omitida (conservador). */
+  dhash64?: string;
 }
 
 export type ResultadoPublicacion =
@@ -108,19 +126,30 @@ type Oyente = (evento: EventoActaPublicada) => void;
 const RUNTIME = new Map<string, ActaRealLista>();
 const oyentes = new Set<Oyente>();
 
-// ─── Anti-reproceso (duplicados enviados desde el móvil) ────────────────────
-// Mismo criterio que la dedup de MASIVA (masiva/dedup.ts): SOLO contenido —
-// JAMÁS nombre de archivo ni fecha. La única capa que el sobre del hub
-// transporta hoy es el SHA-256 exacto de los bytes de la foto (`hashSha256`,
-// C-08). La identidad de la página (idEnlace + mesa + formulario + página)
-// acota la comparación para que dos fotos idénticas de actas distintas no se
-// confundan. Misma página + misma huella = duplicado → se registra con
-// `dupOf` (como el `dupOf` de las DUPLICADA de masiva) y NO se republica.
-// Sin huella comparable no se marca nada (conservador: jamás inventar).
-// NOTA DE PARIDAD: dhash64 (gemelas perceptuales) y payload QR exacto existen
-// en masiva, pero NO viajan en `EntradaPuente`; ver docs/DEUDA.md.
+// ─── Anti-reproceso (duplicados enviados desde el móvil) ────────────────
+// TRES capas de huella (P-22, plan 2026-11-12 — la deuda P2 del reporte):
+//  1. SHA-256 exacto de los bytes (C-08, la de siempre) — atrapa el REENVÍO
+//     del mismo sobre (reintento de cola, ack perdido, re-sondeo).
+//  2. qrPayload EXACTO (P-22) — misma página + mismo payload del código
+//     impreso → DUPLICADA aunque la foto tenga bytes distintos: una acta
+//     RE-FOTOGRAFIADA ya no entra como página nueva. Igualdad EXACTA del
+//     payload completo (RED LINE 10 de masiva: jamás prefijos, sin fuzzy).
+//  3. dhash64 perceptual (P-22) — respaldo SIN QR legible: hamming64 ≤ 6
+//     (umbral D65 del dedup de masiva) contra la huella indexada decide
+//     «misma imagen». Sin QR Y sin dhash comparable no se marca nada.
+// La identidad de la página (idEnlace + mesa + formulario + página) acota
+// TODAS las comparaciones para que dos fotos idénticas de actas distintas
+// no se confundan. Misma página + huella duplicada → se registra con `dupOf`
+// (como el `dupOf` de las DUPLICADA de masiva) y NO se republica. La huella
+// indexada es la de lo ÚLTIMO publicado: una foto DISTINTA (reescaneo
+// legítimo, dhash lejos) publica, actualiza las tres huellas y el registro.
+// NOTA DE PARIDAD: hamming64/normalizarQrPayload viven en shared/e14/huellas
+// (gemelo EXACTO del de masiva/dedup.ts — migración a shared anotada en H-44).
 interface PaginaIndexada {
   huella: string;
+  /** P-22 — huellas del puente indexadas (null = el sobre no las trajo). */
+  qrPayload: string | null;
+  dhash64: string | null;
   /** id del registro de Recepción de la página original. */
   idRecepcion: string;
 }
@@ -317,8 +346,34 @@ export async function publicarActaMasiva(
   // sin re-medir la foto, sin pisar el runtime y sin sumar una publicación.
   const identidad = identidadDePagina(entrada);
   const huella = huellaDeContenido(entrada);
-  const indexada = huella !== null ? HUELLAS_PAGINA.get(identidad) : undefined;
-  if (huella !== null && indexada !== undefined && indexada.huella === huella) {
+  // P-22 — huellas del puente (capas 2 y 3): normalizadas/validadas AQUÍ una
+  // vez; mal formadas → null (conservador, jamás inventar comparación).
+  const qr = normalizarQrPayload(entrada.qrPayload);
+  const dhash = esDhash64Valido(entrada.dhash64) ? entrada.dhash64 : null;
+  const indexada = HUELLAS_PAGINA.get(identidad);
+  // P-22 — MOTIVO de la duplicación (capa que atrapó el reenvío; honesto en
+  // el log de Recepción y comparable con el `dupOf` de masiva).
+  let motivoDup: string | null = null;
+  let originalDup: PaginaIndexada | undefined;
+  if (indexada !== undefined) {
+    if (huella !== null && indexada.huella === huella) {
+      motivoDup = "mismo contenido ya recibido — no se reprocesa";
+      originalDup = indexada;
+    } else if (qr !== null && indexada.qrPayload === qr) {
+      motivoDup =
+        "mismo código impreso (payload exacto) con foto de bytes distintos — acta re-fotografiada";
+      originalDup = indexada;
+    } else if (
+      dhash !== null &&
+      indexada.dhash64 !== null &&
+      hamming64(dhash, indexada.dhash64) <= UMBRAL_HAMMING_DHASH
+    ) {
+      motivoDup =
+        "misma imagen perceptual (dhash64 ≤ 6 bits) — acta re-fotografiada sin QR legible";
+      originalDup = indexada;
+    }
+  }
+  if (motivoDup !== null) {
     registrarRecepcion({
       fecha: Date.now(),
       origen,
@@ -331,13 +386,13 @@ export async function publicarActaMasiva(
       srcFoto: entrada.srcFoto,
       pais: entrada.impresion.pais,
       lugar: entrada.impresion.lugar,
-      motivo: "mismo contenido ya recibido — no se reprocesa",
+      motivo: motivoDup,
       score: entrada.score,
       statusActa: entrada.statusActa,
       nombreArchivo: entrada.nombreArchivo,
       clave,
       // Mismo puntero que la DUPLICADA de masiva: la original manda.
-      dupOf: indexada.idRecepcion,
+      dupOf: originalDup!.idRecepcion,
       ...(entrada.fechaRecepcionHub !== undefined
         ? { fechaRecepcionHub: entrada.fechaRecepcionHub }
         : {}),
@@ -433,8 +488,15 @@ export async function publicarActaMasiva(
   // La página queda indexada con la huella de lo ÚLTIMO publicado y con el
   // id de su registro (dupOf de una futura DUPLICADA). Una foto distinta es
   // un reemplazo legítimo (reescaneo) y actualiza huella + registro.
-  if (huella !== null) {
-    HUELLAS_PAGINA.set(identidad, { huella, idRecepcion: registro.id });
+  if (huella !== null || qr !== null || dhash !== null) {
+    // P-22 — el índice guarda las TRES huellas de lo ÚLTIMO publicado (las
+    // ausentes quedan null: un reenvío del mismo sobre las re-estampa).
+    HUELLAS_PAGINA.set(identidad, {
+      huella: huella ?? "",
+      qrPayload: qr,
+      dhash64: dhash,
+      idRecepcion: registro.id,
+    });
   }
   return { ok: true, clave };
 }
