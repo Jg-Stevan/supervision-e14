@@ -64,11 +64,11 @@ jobs:
 
       - name: Lint
         run: bun run lint
-        # ci(r4) — el continue-on-error temporal quedó RETIRADO: R4 arregló
-        # vista-recepcion.tsx:208 (lectura inicial diferida a microtask) y
-        # el lint vuelve a BLOQUEAR el merge. Queda 1 error de
-        # react-hooks/set-state-in-effect en perfil-dispositivo/components/
-        # panel-perfil.tsx:360 — zona de otro agente (ver pr.md de R4).
+        # Q-51 (plan 2026-11-12) — cierre del historial ci(r4): el error
+        # documentado (react-hooks/set-state-in-effect en panel-perfil.tsx:360)
+        # YA NO EXISTE — `bun run lint` está en 0 errores desde la remediación
+        # de R4 (la referencia de línea además quedó vencida por los cambios
+        # del panel). El lint BLOQUEA el merge, sin excepciones.
 
       # bun:test — la suite de datos de R3 (src/modules/supervision/data/
       # __tests__: invariantes del catálogo DIVIPOLA, determinismo D21/D43,
