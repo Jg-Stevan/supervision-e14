@@ -152,6 +152,9 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
   { clave: "loteDemoLocal", sanea: booleano },
   // Auditoría 2026-11-11 (#4) — ancla DEMO del panel de supervisión.
   { clave: "anclaDemoSupervision", sanea: booleano },
+  // KIT fusion-evidencia-divipol-v1 (D89-dig) — kill-switch del motor de
+  // fusión de evidencia; booleano, default OFF (T-11, espejo del PR #158).
+  { clave: "fusion_evidencia", sanea: booleano },
 ];
 
 /** Whitelist de claves que la puerta flags.json (sanearFlags) tenía

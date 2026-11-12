@@ -180,6 +180,53 @@ const ANCLA_FORM = /No\.?\s*Form\.?\s*:?\s*(\d{1,6})/i;
 // d14-15: total. Evidencia en vivo: «710003993010102» → d9=3 (T), d12-15=01/02.
 const ANCLA_CODIGO_1D = /\b(\d{15})\b/g;
 
+/**
+ * Lectura CRUDA de los campos del encabezado para el motor de fusión
+ * (KIT fusion-evidencia-divipol-v1, D89). Reutiliza las MISMAS anclas §3.2 y
+ * NO normaliza ni valida contra divipol: la fusión aplica sus propias vías
+ * (EXACTA/PERMUTACIÓN/FUZZY). Función pura ADICIONAL — no cambia ninguna
+ * decisión de `clasificarCabecera` ni el golden del contrato (D80).
+ */
+export interface CamposCrudosE14 {
+  departamento: string | null;
+  paisCodigo: string | null;
+  paisNombre: string | null;
+  zona: string | null;
+  puesto: string | null;
+  mesa: string | null;
+  lugar: string | null;
+  barcode: string | null;
+  verpag: string | null;
+  /** Literal de la banda (`TRANSMISIÓN` | `CÓNSUL/EMBAJADOR` | `DELEGADOS`). */
+  tipoBanner: string | null;
+}
+
+export function leerCamposCrudos(texto: string): CamposCrudosE14 {
+  const t = texto ?? "";
+  const mDep = t.match(ANCLA_DEPARTAMENTO);
+  const mPais = t.match(ANCLA_PAIS);
+  const mZona = t.match(ANCLA_ZONA);
+  const mPuesto = t.match(ANCLA_PUESTO);
+  const mMesa = t.match(ANCLA_MESA);
+  const mLugar = t.match(ANCLA_LUGAR);
+  const mVerPag = t.match(ANCLA_VERPAG);
+  const depCodigo = mDep?.[2]?.trim() ?? "";
+  const depNombre = mDep?.[3]?.trim() ?? "";
+  return {
+    departamento: depCodigo && depNombre ? `${depCodigo} - ${depNombre}` : depCodigo || depNombre || null,
+    paisCodigo: mPais?.[2]?.trim() || null,
+    paisNombre: mPais?.[3]?.trim() || null,
+    // ZONA URBANA/RURAL es la clase de la zona, no un código: no resuelve.
+    zona: mZona?.[1] && /^\d/.test(mZona[1]) ? mZona[1] : null,
+    puesto: mPuesto?.[1] ?? null,
+    mesa: mMesa?.[1] ?? null,
+    lugar: mLugar?.[1]?.trim() || null,
+    barcode: t.match(ANCLA_CODIGO_1D)?.[1] ?? null,
+    verpag: mVerPag?.[0] ?? null,
+    tipoBanner: t.match(/TRANSMISI[OÓ]N|EMBAJADOR|DELEGADOS/i)?.[0] ?? null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // KIT identificacion-codigo-v1 (FASE C, Task 120) — gramática COMPLETA del
 // código 1D impreso. // Fuente: ANALISIS §1 (docs/research/

@@ -217,6 +217,13 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // SOLO existen con este flag + el banner DEMO visible. Default false.
   // Override: {"anclaDemoSupervision":true} en localStorage/flags.json.
   anclaDemoSupervision: false,
+  // KIT fusion-evidencia-divipol-v1 (D89-dig): motor de FUSIÓN de evidencia
+  // acta ↔ DIVIPOL (país/consulado + zona + puesto + mesa + lugar, con
+  // corroboración de ≥2 grupos). Default OFF: apagado, el pipeline no invoca
+  // el motor y el comportamiento queda byte a byte el de hoy. La clave va en
+  // snake_case por ser el literal del kill-switch aprobado en la tarea.
+  // Espejo del PR #158 de dig (T-11, plan 2026-11-12).
+  fusion_evidencia: false,
 };
 
 /** Último flags.json bueno (null = nunca llegó). */

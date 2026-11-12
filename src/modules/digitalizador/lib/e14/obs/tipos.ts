@@ -92,6 +92,14 @@ export interface FlagsApp {
    *  jamás se presentan como datos reales. Override:
    *  {"anclaDemoSupervision":true} en localStorage/flags.json. */
   anclaDemoSupervision: boolean;
+  // ─── KIT fusion-evidencia-divipol-v1 (D89-dig) — campo ADITIVO AL FINAL
+  // (D57). El motor de FUSIÓN de evidencia acta ↔ DIVIPOL se invoca SOLO con
+  // este flag activo; apagado (default) el pipeline es byte a byte el de hoy.
+  // La clave va en snake_case porque es el nombre literal del kill-switch
+  // aprobado en la tarea — NO es un identificador del dominio. Espejo del PR
+  // #158 de digielect14 (T-11, plan 2026-11-12): tabla única de flags (R2)
+  // sirve la whitelist a las dos puertas.
+  fusion_evidencia: boolean; // default false
 }
 
 export interface ReporteSesion {

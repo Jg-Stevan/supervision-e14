@@ -27,8 +27,14 @@ import type { PageFilter, Quad } from "@jg-stevan/scanner-core/core/types";
 import { cargarDivipol } from "@jg-stevan/scanner-core/dominio/divipol";
 import {
   clasificarCabecera,
+  leerCamposCrudos,
   PATRON_CABECERA,
 } from "@jg-stevan/scanner-core/dominio/clasificador";
+// KIT fusion-evidencia-divipol-v1 (D89-dig) — motor de FUSIÓN de evidencia
+// acta ↔ DIVIPOL (T-11, espejo del PR #158 de dig). Invocado SOLO con el
+// kill-switch `fusion_evidencia` ON (default false ⇒ cero invocación).
+import { fusionar } from "@jg-stevan/scanner-core/dominio/fusion";
+import { lecturaParaFusion } from "./fusion-lectura";
 // KIT e14-optimizacion-v1 (T1): memo FIFO tope 2 de image-utils.
 import { procesadaVaciaDataUrl } from "./image-utils";
 // GUARD-BORDE Rev. 2 (D1/D3): helper ÚNICO de completitud.
@@ -848,7 +854,23 @@ export async function correrPipelineL2(
     //    §X (SPEC-score-legible): la clasificación se calcula PRIMERO (barata:
     //    regex + divipol cacheada) y alimenta el score — el OCR y la
     //    identificación manda sobre las métricas globales del crudo.
-    const clasificacion = clasificarCabecera(texto, await cargarDivipol());
+    const divipolBase = await cargarDivipol();
+    const clasificacion = clasificarCabecera(texto, divipolBase);
+    // KIT fusion-evidencia-divipol-v1 (D89-dig): motor de FUSIÓN de evidencia
+    // SOLO con el kill-switch ON (default false ⇒ cero invocación, pipeline
+    // byte a byte el de hoy). La traza lleva nivel, gap y ganador; el motor
+    // NO decide nada del envío en esta fase (solo loguea — espejo dig).
+    if (leerFlags().fusion_evidencia) {
+      const fusion = fusionar(lecturaParaFusion(leerCamposCrudos(texto)), divipolBase);
+      const ganador = fusion.mejor
+        ? `${fusion.mejor.stand.municipio.codigo}-${fusion.mejor.stand.zona.codigo}-${fusion.mejor.stand.puesto.codigo}:${fusion.mejor.puntos}`
+        : "—";
+      const avisos = fusion.avisos.map((a) => a.codigo).join(",") || "ninguno";
+      logger.info(
+        `[e14] fusion ${fusion.nivel} gap=${fusion.gap} mejor=${ganador} ` +
+          `grupos=${fusion.gruposActivos.join("+") || "ninguno"} avisos=${avisos}`,
+      );
+    }
     // (KIT consenso-frankfurt-v1 FASE 2: las esquinas se miden ANTES del
     // guard — arriba; aquí solo consume ladoEsquina/trazaEsq.)
     // KIT actas-vivas-paginas-v1 (FASE C): RECORTADA por OCR de secciones —
