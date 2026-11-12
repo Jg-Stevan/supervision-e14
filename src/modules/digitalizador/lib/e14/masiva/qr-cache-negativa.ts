@@ -18,7 +18,7 @@
  * · Lectura: la capa 0 del runner consulta ANTES del ladder — hit ⇒ 2-3 ms
  *   (misma economía de la herencia qrPrevio positiva, D30).
  * · Invalidación honesta: si una pasada posterior LEE un payload para la
- *   misma llave (p. ej. el dueño forzó reproceso), la entrada muere
+ *   misma llave (p. ej. el mantenedor forzó reproceso), la entrada muere
  *   (cacheNegativaQuitar — el hecho cambió).
  * · MEMORIA de SESIÓN (Map en RAM, tope 500 FIFO) + traza persistente en
  *   el registro (`qrSinPayload` — sobrevive la recarga vía filaDeRegistro).
@@ -26,9 +26,9 @@
  *   bytes, hashBytes estampado por cadenaDedup) cae en el Map.
  *
  * ESCAPES SAGRADOS:
- * · forzarDedupOff (PROCESAR IGUAL del dueño) JAMÁS consulta ni escribe —
+ * · forzarDedupOff (PROCESAR IGUAL del mantenedor) JAMÁS consulta ni escribe —
  *   el runner lo garantiza (RL-e65b-6).
- * · flag `qrCacheNegativa` (default true) — kill-switch del dueño; false =
+ * · flag `qrCacheNegativa` (default true) — kill-switch del mantenedor; false =
  *   byte-idéntico a hoy (el Map deja de consultarse y de escribirse).
  *
  * Pura (sin DOM, sin IDB propia), jamás lanza — la caché jamás tumba el

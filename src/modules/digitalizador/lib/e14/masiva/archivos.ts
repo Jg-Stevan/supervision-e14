@@ -52,7 +52,7 @@ const PDF_ESCALA_MAX = 4;
  *  4032×3024 ≈ 12.2 MP. Todo el pipeline (fotoOriginal capturada,
  *  fotoProcesada, REVISIÓN) vive a ESA escala hoy; el master nace a la MISMA
  *  escala para que los píxeles que llegan a detección/OCR sean los de siempre
- *  (mismo cap — solo cambia UNA re-encode intermedia q0.90, gate del dueño
+ *  (mismo cap — solo cambia UNA re-encode intermedia q0.90, gate del mantenedor
  *  ±0.3). Prohibido mover este número sin un kit propio (mueve scores).
  *  KIT e14-gama-adaptativa-v1 (D74) — ÚNICA excepción registrada: en gama
  *  BAJO adaptativa el master de MASIVA nace a 3072 (pico de bitmap −42 %
@@ -313,7 +313,7 @@ function archivoDePartes(nombre: string, partes: Uint8Array[]): File {
  *  cola jamás se tumba (los rechazos viajan como filas, patrón kit T2.2).
  *
  *  Los tres topes son tuneables por llamada (OpcionesGuardaR5 — el default
- *  es la constante de abajo) para que el dueño los ajuste sin tocar código
+ *  es la constante de abajo) para que el mantenedor los ajuste sin tocar código
  *  y para que los tests puedan ejercitarlos con fixtures chicas. */
 export interface OpcionesGuardaR5 {
   /** Techo ACUMULADO de bytes descomprimidos por comprimido (default 2 GB). */
@@ -337,7 +337,7 @@ const TOPE_BYTES_ENTRADA_DEFAULT = 128 * 1024 ** 2;
  *  >100 significa contenido fabricado para hincharse (zip bomb). Caso borde
  *  documentado: un BMP escaneado de página casi vacía puede pasar de 100 en
  *  condiciones legítimas — ante duda se rechaza con traza (doctrina) y el
- *  dueño puede subir el umbral vía OpcionesGuardaR5. */
+ *  mantenedor puede subir el umbral vía OpcionesGuardaR5. */
 const RATIO_SOSPECHOSO_DEFAULT = 100;
 /** R5 — Piso de bytes descomprimidos para que el ratio decida: debajo de
  *  1 MB el riesgo de RAM es trivial (el techo acumulado cubre el volumen)
@@ -495,7 +495,7 @@ export async function extraerPdf(archivo: File): Promise<ResultadoExtraccion> {
 
   // D35 (UX-1 — REPORTE línea digielect14): el catch único traga tres
   // motivos DISTINTOS y todos acababan en PROTEGIDO_O_CORRUPTO en falso —
-  // el dueño perseguía «corruptos» que eran archivos ilegibles del disco.
+  // el mantenedor perseguía «corruptos» que eran archivos ilegibles del disco.
   // Orden de diagnóstico honesto:
   //  · arrayBuffer() falla (NotReadableError) → ARCHIVO_ILEGIBLE (bloqueado
   //    por otro proceso, permisos, USB extraído — el contenido ni se vio).
@@ -780,7 +780,7 @@ async function extraerRar(
  *  los bundlers (webpack/turbopack emiten el archivo junto al chunk).
  *  FIX (auditoría 2-c #14): un fallo del fetch (404/red/caída del asset)
  *  se reporta con SU PROPIO motivo — antes viajaba como
- *  PROTEGIDO_O_CORRUPTO (falso e irreproducible para el dueño). */
+ *  PROTEGIDO_O_CORRUPTO (falso e irreproducible para el mantenedor). */
 async function fetchWasmUnrar(): Promise<ArrayBuffer> {
   const url = new URL("node-unrar-js/esm/js/unrar.wasm", import.meta.url);
   let respuesta: Response;

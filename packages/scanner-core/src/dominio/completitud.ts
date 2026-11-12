@@ -6,7 +6,7 @@
  *
  * Historia: el veto de completitud (§F-1/§F-2 de SPEC-camara-funcional,
  * PR #33) condenaba con la GEOMETRÍA del quad — esquina sobre el borde
- * (≤0.001/≥0.999) o área <30% → INCOMPLETA con cap 6.4. El dueño reportó el
+ * (≤0.001/≥0.999) o área <30% → INCOMPLETA con cap 6.4. El mantenedor reportó el
  * falso positivo exacto (§0 mandato 1): su acta completa llena el encuadre
  * (hábito apretado medido: esquinas 0.988/0.998) y el worker OpenCV entrega
  * esquinas EXACTAS al filo (clampRect del detection-worker L1206 →
@@ -24,10 +24,10 @@
  * IMPRESA llega cortada al filo del recorte; si el papel terminó antes del
  * filo, el filo es margen blanco del impreso.
  *
- * Calibración D5 con la foto REAL del dueño (§1c, acta-real-elcairo-pag1.png
+ * Calibración D5 con la foto REAL del mantenedor (§1c, acta-real-elcairo-pag1.png
  * 960×2893 b/n — densidad de tinta lum<128 en la franja EXTERIOR 0-2% por
  * lado): superior 7.0% · inferior 0.3% · izquierda 3.6% · derecha 0.7%. La
- * foto PERFECTA del dueño YA trae tinta al filo (marcas de registro cortadas)
+ * foto PERFECTA del mantenedor YA trae tinta al filo (marcas de registro cortadas)
  * — cualquier umbral «frágil» la condenaría. Umbral de condena: densidad
  * ≥ 20% (holgura ~3× sobre el peor filo real medido; un renglón/tabla cortado
  * es densidad continua muy por encima). El umbral es CALIBRABLE con evidencia
@@ -53,7 +53,7 @@ import { canvasCon, loadImageMemo } from "./image-utils";
 import type { EsquinasActa } from "./integridad";
 
 // ── Geometría (mismos umbrales del guard del PR #33 — §F-1, byte a byte) ──
-/** «Sobre el borde» literal — el acta BUENA del dueño enmarca apretado
+/** «Sobre el borde» literal — el acta BUENA del mantenedor enmarca apretado
  *  (0.988/0.998): un margen mayor condenaría su caso (evidencia CHANGES
  *  0-decimoquinto). */
 const MARGEN_BORDE = 0.001;
@@ -246,7 +246,7 @@ async function medirTintaAlFilo(
  * `densidades` y `fondo` se conservan para el log (el escudo D10/techo 7.9
  * sigue activo en el bridge: fondo en el warp sigue molesto, no es recorte).
  * // Fuente: §0-F2 — la acta perfecta de Frankfurt 746 encuadrada al filo
- * (hábito del dueño) condenaba INCOMPLETA 6.4 OBLIGATORIO REPETIR FOTO:
+ * (hábito del mantenedor) condenaba INCOMPLETA 6.4 OBLIGATORIO REPETIR FOTO:
  * la franja exterior 0-2% mezclaba grietas de MESA oscura con papel y la
  * densidad caía en la zona 20-85% del escudo. Conservador: un recorte REAL
  * con las 4 marcas visibles no existe (si vieras las 4 marcas, el papel

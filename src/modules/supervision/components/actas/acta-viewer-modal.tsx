@@ -586,7 +586,7 @@ function VisorAbierto() {
             </div>
 
             {/* T5 — VER ORIGINAL / MOSTRAR PROCESADA (pill centrada
-                inferior, diseño del dueño; en fullscreen sube a bottom-4
+                inferior, diseño del mantenedor; en fullscreen sube a bottom-4
                 porque la caption-bar no existe ahí). Solo con FOTO REAL —
                 el documento sintético D18 no tiene original que ver. */}
             {fotoActiva && (

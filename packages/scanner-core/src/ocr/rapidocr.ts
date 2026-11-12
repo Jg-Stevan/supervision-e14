@@ -25,7 +25,7 @@
  * se usa.
  */
 
-// KIT e14-observabilidad-v1 (A1-C7): tope de threads OCR = flag del dueño
+// KIT e14-observabilidad-v1 (A1-C7): tope de threads OCR = flag del mantenedor
 // (kill switch MANUAL — ocrThreadsTope, default 4 = el literal que vivía
 // aquí). La app NUNCA cambia reglas de negocio sola (D6).
 // NOTA (eliminación del módulo masiva): la lectura EFECTIVA vía gama.ts
@@ -152,7 +152,7 @@ async function initReal(): Promise<RapidRuntime> {
   // KIT e14-adaptacion-dispositivo-v1 — hilos RESUELTOS por el plan adaptativo
   // (adaptacion/plan.ts · numThreadsOcrEfectivos): SAB+COOP/COEP exigidos
   // (sin ellos 1 hilo — igual que siempre); dentro, prioridad D6:
-  //   override MANUAL del dueño (ocrThreadsTope) > plan por tier (BAJO 2 ·
+  //   override MANUAL del mantenedor (ocrThreadsTope) > plan por tier (BAJO 2 ·
   //   MEDIO 3 · ALTO 6 — exprimar en gama alta, proteger en baja) > default 4.
   // Cap SIEMPRE por hardwareConcurrency. `adaptacionDispositivo: false`
   // ⇒ byte-idéntico al comportamiento histórico (default 4).

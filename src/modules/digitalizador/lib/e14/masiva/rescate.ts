@@ -35,13 +35,13 @@ export interface ContextoRescate {
   intento: number;
   /** rescates ya lanzados en ESTA corrida (contador del runner). */
   rescatesCorrida: number;
-  /** escape del dueño — PROCESAR IGUAL manda SIEMPRE (RL-e65b-6). */
+  /** escape del mantenedor — PROCESAR IGUAL manda SIEMPRE (RL-e65b-6). */
   forzarDedupOff?: boolean;
 }
 
 /** Predicado PURO del rescate (kit §B.1 — formato literal): SOLO
  *  RECHAZADA-BAJO («no se reconoce información»), SOLO intento 1, SOLO con
- *  cupo de corrida disponible y SIN escape del dueño activo. */
+ *  cupo de corrida disponible y SIN escape del mantenedor activo. */
 export function procedeRescateRechazo(
   desenlace: Pick<Acta, "status" | "rechazo">,
   contexto: ContextoRescate,

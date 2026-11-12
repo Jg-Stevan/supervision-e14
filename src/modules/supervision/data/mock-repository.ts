@@ -118,7 +118,7 @@ function estadoPorSeed(random: number): EstadoGlobal {
 }
 
 /**
- * Regla del dueño (feedback de la matriz): un puesto con MÁS DE 3 HORAS
+ * Regla del mantenedor (feedback de la matriz): un puesto con MÁS DE 3 HORAS
  * transcurridas desde el cierre de sus mesas (4:00 p. m. hora local) que
  * AÚN no completa la digitalización pasa a estado CRÍTICO automático —
  * «para saber cuáles puestos están quedados en la digitalización de las
@@ -142,7 +142,7 @@ function derivarEstadoPorUmbral(
 const CIERRES_COL_MIN = [9 * 60, 10 * 60, 11 * 60, 12 * 60, 13 * 60];
 
 /**
- * TIEMPO transcurrido desde el cierre (pedido del dueño): la columna
+ * TIEMPO transcurrido desde el cierre (pedido del mantenedor): la columna
  * «Tiempo» es el tiempo desde el cierre de 4:00 p. m. HORA LOCAL del
  * país del puesto de digitalización (regla del kit monitor-jornada-v1:
  * «cierre 4:00 p. m. hora local»); > 3 hrs es crítico. Distribución del
@@ -171,7 +171,7 @@ function relojDeMinutos(minutos: number): string {
  * zonas horarias reales; la coherencia EXACTA solo la exige el kit para
  * el ancla Roma — §4.9).
  *
- * Pedido del dueño (semántica de las columnas de tiempo):
+ * Pedido del mantenedor (semántica de las columnas de tiempo):
  * - «Hora actual» = hora del PAÍS del puesto de digitalización — queda
  *   coherente por construcción: 16:00 local (cierre) + transcurrido.
  * - «Tiempo» = transcurrido desde el cierre de 4:00 p. m. LOCAL, con la
@@ -506,7 +506,7 @@ function refrescarMesa(mesa: Mesa): void {
 /**
  * pcts derivables de las mesas (≈ % de partes ok, kit T2).
  *
- * REGLA DEL DUEÑO (feedback matriz): «si ya se recibieron todas las actas
+ * REGLA DEL MANTENEDOR (feedback matriz): «si ya se recibieron todas las actas
  * de un puesto debería quedar al 100% y completado en verde». Para que
  * 100% ⟺ COMPLETO sea EXACTO, una parte de transmisión con alerta de
  * rescaneo PENDIENTE NO cuenta como recibida — el acta llegó pero fue
@@ -538,7 +538,7 @@ function pctsDeMesas(mesas: Mesa[]): { delegado: number; transmision: number } {
 
 /**
  * Estado global derivado: COMPLETO si TODAS las mesas lo están (todas las
- * actas recibidas y válidas — regla del dueño: 100% ⟺ verde); si no, se
+ * actas recibidas y válidas — regla del mantenedor: 100% ⟺ verde); si no, se
  * conserva el estado actual (el kit solo define transición → COMPLETO).
  * Consecuencia de la regla: un puesto COMPLETO jamás es degradado por el
  * umbral de 3 hrs — el CRÍTICO automático solo alcanza a los que NO han
@@ -629,7 +629,7 @@ export function initSupervisionDatos(): ResultadoInitSupervision {
     const pcts = pctsDeMesas(mesas);
     puesto.pctDelegado = pcts.delegado;
     puesto.pctTransmision = pcts.transmision;
-    // REGLA DEL DUEÑO (red de seguridad sobre la semilla/umbral): si todas
+    // REGLA DEL MANTENEDOR (red de seguridad sobre la semilla/umbral): si todas
     // las mesas del puesto ya están completas, el puesto QUEDA COMPLETO.
     // Hoy es no-op sobre la receta de siembra (solo la receta COMPLETO
     // genera mesas todas COMPLETO), pero garantiza la invariante

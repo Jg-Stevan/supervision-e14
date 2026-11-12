@@ -222,7 +222,7 @@ export interface DiagnosticoActa {
    *  NetworkInformation) · downlinkMbps = downlink estimado. null = sin
    *  dato (navegador sin navigator.connection — iOS/Safari — o SSR):
    *  jamás inventar. JAMÁS dentro de `tiempos` (es Record de números — el
-   *  tipo de red es string). Con §G.1/G.3 el dueño correlaciona envíos
+   *  tipo de red es string). Con §G.1/G.3 el mantenedor correlaciona envíos
    *  lentos con red mala (evidencia 1230: cel en 4G 1.5 Mbps). */
   envioRedTipo?: string | null;
   envioDownlinkMbps?: number | null;
@@ -278,7 +278,7 @@ export interface Acta {
   procesadaVacia?: boolean;
   /** KIT actas-vivas-paginas-v1 (FASE C): OCR de secciones detectó el
    *  RECORTE del papel (P1 sin «SUMA TOTAL» / P≥2 sin «FIRMA» — el caso
-   *  real del dueño: captura con la parte inferior pisada sin advertencia).
+   *  real del mantenedor: captura con la parte inferior pisada sin advertencia).
    *  Score con techo 7.9 (ADVERTENCIA, no rechazo) + píldora «ACTA
    *  RECORTADA». Página desconocida → jamás se marca. */
   recortada?: boolean;
@@ -290,7 +290,7 @@ export interface Acta {
   /** KIT e14-recorte-manual-v1 (T3): el recorte MANUAL se aplicó (warp del
    *  editor completado) pero la foto procesada salió SIN TINTA SUFICIENTE
    *  (procesadaVacia) — REVISIÓN muestra la ORIGINAL con el aviso honesto
-   *  «TU RECORTE SE APLICÓ…» (el dueño no debe creer que su recorte falló).
+   *  «TU RECORTE SE APLICÓ…» (el mantenedor no debe creer que su recorte falló).
    *  Solo lo marca el pipeline del RECORTE con manual=true; el umbral de
    *  tinta NO cambia (image-utils intacto). */
   recorteManualSinTinta?: boolean;

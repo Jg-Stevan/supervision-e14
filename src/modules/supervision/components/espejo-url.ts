@@ -7,7 +7,7 @@
  * filtros del monitor, visor de actas) con restauración 1 VEZ al montar.
  * Editar el hash a mano a mitad de sesión no navega (se re-escribe en el
  * siguiente cambio de estado); compartir/copiar la URL sí reproduce la
- * sesión al abrir (el caso de uso del dueño: pegar un enlace en el canal
+ * sesión al abrir (el caso de uso del mantenedor: pegar un enlace en el canal
  * de sala de mando).
  *
  * Serialización compacta (solo claves NO-default):
@@ -15,7 +15,7 @@
  *
  * · vista   — omitida si es "monitor" (default).
  * · dia     — día de jornada; "todas" = sin filtro de día; omitido = LUNES
- *             (el default del dueño al abrir el monitor).
+ *             (el default del mantenedor al abrir el monitor).
  * · pais/zona/puesto/estado/cierre/tiempo/q — filtros de FiltrosBar y de
  *             columna; presentes solo si están aplicados.
  * · visor   — `puestoId::mesaId` (mesa opcional); `tipo` solo si es
@@ -160,7 +160,7 @@ export interface ParcialHash {
 
 /**
  * Escribe UNA parte del espejo (leer-hash → mezclar → replaceState): cada
- * dueño (shell/monitor/provider) actualiza solo sus claves sin pisar las
+ * mantenedor (shell/monitor/provider) actualiza solo sus claves sin pisar las
  * de los otros. No ensucia el historial.
  */
 export function escribirHashParcial(parcial: ParcialHash): void {

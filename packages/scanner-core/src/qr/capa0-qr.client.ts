@@ -13,7 +13,7 @@
  *  · API 2 de D: decodificarQrCapa0Camara(dataUrl) — wrapper del flujo de
  *    cámara con presupuesto por tier y caída al camino de hoy (tiers "base").
  *  · Inyección (plan/flags NO viajan): { habilitado?, tier?, publicBase? } —
- *    el kill-switch del dueño y el tier adaptativo los inyecta CADA app
+ *    el kill-switch del mantenedor y el tier adaptativo los inyecta CADA app
  *    (D: flags.capa0QrWorker + planAdaptativo().tier · S: flags + gama).
  *  · JAMÁS throw: cualquier fallo → null (el caller decide el fallback).
  */
@@ -43,7 +43,7 @@ export type OpcionesCapa0Worker = {
 
 /** Inyección de la app (FASE 2 — el paquete no lee flags/plan/gama). */
 export interface OpcionesCapa0 {
-  /** Kill-switch del dueño (D/S: flags.capa0QrWorker). Default: ON. */
+  /** Kill-switch del mantenedor (D/S: flags.capa0QrWorker). Default: ON. */
   habilitado?: () => boolean;
   /** Tier adaptativo (D: planAdaptativo().tier · S: gama). null = default. */
   tier?: () => "ALTO" | "MEDIO" | "BAJO" | null;
@@ -189,7 +189,7 @@ export function decodificarQrCapa0Worker(
         resolve(null);
         return;
       }
-      // Kill-switch del dueño — INYECTADO por la app (leído EN EL LLAMADO:
+      // Kill-switch del mantenedor — INYECTADO por la app (leído EN EL LLAMADO:
       // el override localStorage aplica sin reload).
       if (opciones.habilitado && !opciones.habilitado()) {
         resolve(null);

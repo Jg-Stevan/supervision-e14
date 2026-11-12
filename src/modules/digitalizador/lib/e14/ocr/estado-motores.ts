@@ -1,6 +1,6 @@
 /**
  * estado-motores.ts (POST-F3 · mapa v2.3) — la información del motor sale de
- * la CONFIGURACIÓN (una cascada fija, decisión del dueño 2026-11-11) y de la
+ * la CONFIGURACIÓN (una cascada fija, decisión del mantenedor 2026-11-11) y de la
  * TELEMETRÍA de la cascada (EventoLectura — ítem 3.6). El router murió: no
  * hay elección de motor ni override que respetar. Lo que sobrevive es la
  * OBSERVACIÓN.

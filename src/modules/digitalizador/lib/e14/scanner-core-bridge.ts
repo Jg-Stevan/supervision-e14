@@ -58,7 +58,7 @@
  *                                del log de auditoría D51 y payload del
  *                                diagnóstico) — diferencias del sitio EXPLÍCITAS
  *                                como campos tipados (patrón EntradaDesenlace)
- * PENDIENTE (dueño): el import DINÁMICO de rescate
+ * PENDIENTE (mantenedor): el import DINÁMICO de rescate
  * scanner-core-bridge→masiva/identidad-qr (decodificarQrDeCapture, e64-qr
  * T-2.1 — moverlo exige arrastrar la cadena completa de tiers QR de masiva;
  * lazy intencional, no es inversión de símbolos estática). RESUELTO en R10
@@ -200,7 +200,7 @@ import { logger } from "../logger"; // SPRINT-A A6 — console→logger (mensaje
 // re-exporta para masiva/prefacta.ts.
 
 /** KIT e14-recorte-manual-v1 (T1): presupuesto del RECORTE manual — el warp
- *  del editor mide 14–17.4 s en el equipo del dueño (OCR solo: 9.8–14.3 s),
+ *  del editor mide 14–17.4 s en el equipo del mantenedor (OCR solo: 9.8–14.3 s),
  *  al borde del límite de 15 s del escaneo. El timeout SIGUE RECHAZANDO
  *  (gate/score intactos — §5); lo único que cambia es qué foto muestra el
  *  acta resultante: el recorte ya horneado (parcial), no la foto vieja. */
@@ -258,7 +258,7 @@ export class RealCoreBridge implements E14Bridge {
     //  · CAMARA + archivo (ZSL/captureSmart/iOS) → MISMO pipeline que ARCHIVO.
     //  · CAMARA sin archivo + frameActual (video vivo) → grab síncrono.
     //  · SIMULACIÓN sin archivo (D35) → el acta E-14 incluida, EXACTAMENTE
-    //    como un archivo de IMPORTAR (la foto real del dueño, EXIF incluido).
+    //    como un archivo de IMPORTAR (la foto real del mantenedor, EXIF incluido).
     //  · Sin entrada → error explícito (el guard del store ya avisó).
     let entrada: EntradaPipeline | null = null;
     if (opciones.archivo) {
@@ -386,7 +386,7 @@ export class RealCoreBridge implements E14Bridge {
     // KIT e14-recorte-manual-v1 (T1): acumulador del recorte YA HORNEADO —
     // pipelineRecorte lo llena apenas el warp completa (patrón `parcial` del
     // escaneo §5, A7); el timeout lo usa para que el acta RECHAZADA por
-    // tiempo muestre EL RECORTE NUEVO del dueño y no la foto anterior. Si el
+    // tiempo muestre EL RECORTE NUEVO del mantenedor y no la foto anterior. Si el
     // warp no alcanzó, parcial queda vacío → comportamiento actual.
     const parcial: ParcialRecorte = {};
     let vencido = false; // tras el timeout no se emite más progreso (§5)
@@ -400,7 +400,7 @@ export class RealCoreBridge implements E14Bridge {
         // §5: el timeout NO rechaza la Promise — resuelve el acta RECHAZADA
         // controlada (el toast sale del flujo normal del store).
         // KIT e14-recorte-manual-v1 (T1): `...parcial` trae el recorte ya
-        // horneado si el warp alcanzó a correr — el dueño ve SU recorte
+        // horneado si el warp alcanzó a correr — el mantenedor ve SU recorte
         // (puede re-aplicar/reintentar), no la foto anterior. Gate y score
         // INTACTOS: sigue RECHAZADA ILEGIBLE por tiempo.
         resolve({

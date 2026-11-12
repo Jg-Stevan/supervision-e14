@@ -1,5 +1,5 @@
 /**
- * Zona horaria del PAÍS EMISOR del E-14 — regla del dueño (ronda «reloj
+ * Zona horaria del PAÍS EMISOR del E-14 — regla del mantenedor (ronda «reloj
  * real»): «local es colombia, país es el q emite». La hora del supervisor
  * (LOCAL) es Colombia (America/Bogota); la «Hora actual» del puesto es la
  * hora REAL del país que emite el acta, y el cierre de la digitalización

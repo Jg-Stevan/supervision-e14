@@ -657,7 +657,7 @@ asegurarGeneracion();
 construirHostsConfiables();
 
 // C-13 — clave de expurgo: equivalente local de `CLAVE_ADMIN` de producción.
-// Se genera por sesión y se imprime: el dueño la copia al panel (vista
+// Se genera por sesión y se imprime: el mantenedor la copia al panel (vista
 // Ajustes → Expurgo) para borrar filas individuales.
 const CLAVE_ADMIN = randomUUID();
 

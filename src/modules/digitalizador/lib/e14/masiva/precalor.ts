@@ -9,7 +9,7 @@
  * `precalorColaEfectivo()` (3 base) filas a MASTER (maestroDeImagen — T1: un solo
  * decodificado a la escala de trabajo). DOCTRINA D45 INTACTA: precalentar NO
  * es procesar — sin OCR, sin veredicto, sin score; la fila sigue PENDIENTE
- * hasta que el dueño pulse PROCESAR (T3.1/T3 intro).
+ * hasta que el mantenedor pulse PROCESAR (T3.1/T3 intro).
  *
  * · El master reposa como BLOB JPEG (q≈0.90, T3.2) — NUNCA un bitmap vivo.
  * · Flag `precalentada` TRANSITORIO en la fila (mini-store en memoria; NO
@@ -66,7 +66,7 @@ interface EntradaPrecalor {
 const entradas = new Map<string, EntradaPrecalor>();
 
 /** Filas cuyo precalor FALLÓ en esta sesión (no reintentar en cada evento —
- *  una fila rota no puede bloquear la ventana; el reproceso del dueño o un
+ *  una fila rota no puede bloquear la ventana; el reproceso del mantenedor o un
  *  evento futuro la re-evalúan: la poda del ciclo limpia las muertas). */
 const fallidas = new Set<string>();
 

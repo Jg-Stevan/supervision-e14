@@ -109,7 +109,7 @@ export function joinDeActa(acta: Acta): { idEnlace: string; mesa: string; tipo: 
   return { idEnlace, mesa: String(c.mesa).padStart(3, "0"), tipo: c.tipo };
 }
 
-/** CÓDIGO DE BARRAS REAL del acta escaneada (feedback del dueño — ronda 3):
+/** CÓDIGO DE BARRAS REAL del acta escaneada (feedback del mantenedor — ronda 3):
  *  el 1D decodificado del papel por el pipeline (codigoUnico.crudo — los
  *  dígitos reales del escaneo, gramática codigoUnicoE14) o, como respaldo
  *  honesto, el barcodeImpreso del manifiesto de actas reales (verbatim del
@@ -200,7 +200,7 @@ async function publicarDesdeActa(
       puesto: c.puesto!.codigo,
       mesa,
       lugar: c.puesto!.nombre,
-      // Ronda 3 (feedback del dueño): el barcode REAL del acta escaneada
+      // Ronda 3 (feedback del mantenedor): el barcode REAL del acta escaneada
       // (1D del pipeline o manifiesto) — JAMÁS el tracking «*E14-SEN-…*».
       barcode: barcodeRealDeActa(acta) || undefined,
       etiquetaFormulario: formulario === "TRANSMISION" ? "TRANSMISIÓN" : "CÓNSUL/EMBAJADOR",
@@ -252,7 +252,7 @@ export const useE14Store = create<EstadoE14>()((set, get) => ({
     // D45 — KIT e14-medicion-faltante-v1: el roundtrip REAL de la publicación
     // (publicarDesdeActa — la red de verdad) queda medido. envioMs de D61 solo
     // cubría la sección síncrona del envío (≈1 ms); la publicación corría
-    // fire-and-forget SIN dueño. Observador pasivo: el cronómetro NO cambia
+    // fire-and-forget SIN mantenedor. Observador pasivo: el cronómetro NO cambia
     // el comportamiento; el callback es OPCIONAL (nadie está obligado a
     // escuchar) y el estado final viaja honesto ("publicada"|"bloqueada").
     const tPublicacion = Date.now();

@@ -2,7 +2,7 @@
 
 /**
  * KIT e14-metricas-corrida-v1 (D34) — INFORME DE CARGA MASIVA (pedido
- * literal del dueño: «un informe de cómo se está comportando la carga
+ * literal del mantenedor: «un informe de cómo se está comportando la carga
  * masiva, cuánto está tardando, en qué está tardando para tener datos
  * reales y poder diagnosticar bien los fallos»).
  *
@@ -196,7 +196,7 @@ export default memo(function InformeCorrida() {
     const procesoSubSum = new Map<ProcesoSubKey, number>();
     let gapN = 0; // actas con residual medido
     let gapPeor: number | null = null; // peor residual (valor absoluto)
-    let gapSobreUmbral = 0; // actas con gap > 50 ms (el "sin dueño" real)
+    let gapSobreUmbral = 0; // actas con gap > 50 ms (el "sin mantenedor" real)
     let envioRoundSum = 0; // roundtrip REAL de la publicación al monitor
     let envioRoundN = 0;
     let envioBloqueadas = 0;
@@ -259,7 +259,7 @@ export default memo(function InformeCorrida() {
         sumas.set(k as EtapaKey, (sumas.get(k as EtapaKey) ?? 0) + v);
         trabajoTotal += v;
       }
-      // D45 — gap sin dueño / publicación del envío / dedup sin-match:
+      // D45 — gap sin mantenedor / publicación del envío / dedup sin-match:
       if (typeof a.gapMs === "number") {
         gapN += 1;
         if (gapPeor === null || Math.abs(a.gapMs) > Math.abs(gapPeor)) gapPeor = a.gapMs;
@@ -413,7 +413,7 @@ export default memo(function InformeCorrida() {
         >
           {enCurso && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse mr-1.5 align-middle" />}
           {/* D45 — el motivo de cierre viaja: "drenada" | "pausa" |
-              "recarga-o-abandono" — el fin=null sin dueño ya no existe. */}
+              "recarga-o-abandono" — el fin=null sin mantenedor ya no existe. */}
           {enCurso
             ? `EN CURSO · ${fmtMs(wallCorrida)}`
             : `COMPLETADA${seleccionadaInfo?.motivoCierre ? ` · cierre: ${seleccionadaInfo.motivoCierre}` : ""} · ${fmtMs(wallCorrida)}`}
@@ -589,11 +589,11 @@ export default memo(function InformeCorrida() {
               </p>
             )}
             {/* KIT e14-medicion-faltante-v1 (D45) — los 3 faltantes del
-                informe real: GAP sin dueño · PUBLICACIÓN (roundtrip real) ·
+                informe real: GAP sin mantenedor · PUBLICACIÓN (roundtrip real) ·
                 DEDUP sin-match (por qué no matcheó). */}
             {agg.gapN > 0 && (
               <p className={`font-mono text-[10px] ${agg.gapSobreUmbral > 0 ? "text-amber-400" : "text-slate-500"}`}>
-                + GAP SIN DUEÑO (muro − totalMs − preOcr − thumb − persist − envío): {agg.gapSobreUmbral} de {agg.gapN} acta(s) &gt; 50 ms · peor {fmtMs(agg.gapPeor)}
+                + GAP SIN MANTENEDOR (muro − totalMs − preOcr − thumb − persist − envío): {agg.gapSobreUmbral} de {agg.gapN} acta(s) &gt; 50 ms · peor {fmtMs(agg.gapPeor)}
               </p>
             )}
             {agg.envioRoundN > 0 && (

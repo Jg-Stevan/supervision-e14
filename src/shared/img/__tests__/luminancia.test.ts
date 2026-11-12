@@ -1,7 +1,7 @@
 /**
  * Test de PARIDAD R2 — src/shared/img/luminancia.ts contra las 6
  * implementaciones del §B2 #7 (referencias incrustadas; los sitios
- * originales no se editan — adopción pendiente del dueño en los puntos
+ * originales no se editan — adopción pendiente del mantenedor en los puntos
  * BT.709 y en los hot loops enteros).
  */
 import { describe, expect, test } from "bun:test";
@@ -61,7 +61,7 @@ describe("paridad luma BT.601 (canónica)", () => {
     // puro da 996 — fuera del histograma de 256 bins (Uint32Array descarta
     // el write). Es el comportamiento VIGENTE del módulo (no se toca — zona
     // de otro agente / cambiarlo alteraría la ecualización); el test lo
-    // congela como evidencia para el dueño.
+    // congela como evidencia para el mantenedor.
     const blanco = new Uint8ClampedArray([255, 255, 255, 255]);
     expect((blanco[0] * 299 + blanco[1] * 587 + blanco[2] * 114) >> 8).toBeGreaterThan(255);
   });
@@ -74,7 +74,7 @@ describe("paridad luma BT.601 (canónica)", () => {
   });
 });
 
-describe("lumaBT709 — PENDIENTE DEL DUEÑO (integridad.ts:82 · qr-pixeles.ts:355)", () => {
+describe("lumaBT709 — PENDIENTE DEL MANTENEDOR (integridad.ts:82 · qr-pixeles.ts:355)", () => {
   test("≡ expresión float de qr-pixeles.ts:355 (redondeo aparte)", () => {
     const data = pixeles();
     for (let p = 0; p < data.length / 4; p += 1) {

@@ -6,7 +6,7 @@
  * módulo original (permitido SOLO en tests de paridad durante la migración).
  *
  * Diferencias actuales DOCUMENTADAS (no se corrigen aquí — la adopción en
- * los módulos es pendiente y la elegiría el dueño junto con §B5 (7)):
+ * los módulos es pendiente y la elegiría el mantenedor junto con §B5 (7)):
  * · osDeUA(CrOS): senales/shared → "ChromeOS" · dispositivo.ts → "Linux".
  *   Canónica = la MÁS COMPLETA (senales) — decisión de la misión R2.
  * · nucleos: senales → null honesto · dispositivo.ts/gama → 1 por defecto

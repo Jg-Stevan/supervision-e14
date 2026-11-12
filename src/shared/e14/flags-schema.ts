@@ -94,7 +94,7 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
   { clave: "prescanWarpLado", sanea: numeroClampeado(256, 4032) },
   { clave: "masivaAdaptativoGama", sanea: booleano },
   { clave: "capa0QrWorker", sanea: booleano },
-  // Decisión del dueño 2026-11-11 — cascada OCR por defecto (Tesseract fast
+  // Decisión del mantenedor 2026-11-11 — cascada OCR por defecto (Tesseract fast
   // → gate → RapidOCR v4 escalonado). false = escalonado de siempre.
   { clave: "ocrCascada", sanea: booleano },
   // KIT ocr-ep-webgpu-v1 — DÓNDE se multiplica el OCR (mismos modelos ONNX, no
@@ -105,18 +105,18 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
     sanea: (v) => (v === "auto" || v === "wasm" || v === "webgpu" ? v : undefined),
   },
   // KIT e75-qr-zoom-zbar-v1 (merge origin/main post-Ola 0) — kill-switch del
-  // dueño: false = cadena de capa 0 byte-idéntica a hoy. Booleano, misma
+  // mantenedor: false = cadena de capa 0 byte-idéntica a hoy. Booleano, misma
   // semántica que tenía en las 2 whitelists manuales (flags.ts + politica.ts).
   { clave: "qrZoomTl", sanea: booleano },
-  // KIT e14-qr-previo-rapido-v1 — kill-switch del dueño: false = la capa 0
+  // KIT e14-qr-previo-rapido-v1 — kill-switch del mantenedor: false = la capa 0
   // paga el worker + el rescate zxing sin intento previo (byte-idéntico a
   // gpu5b). Booleano.
   { clave: "qrPrevioRapido", sanea: booleano },
   // KIT e14-probe-mini768-v1 — lado mayor de la miniatura del sondeo de
   // orientación. 320 = hoy (byte-idéntico). Saneo: número entero dentro de
-  // [320, 1280] — fuera de rango o no-numérico ⇒ undefined (default del dueño).
+  // [320, 1280] — fuera de rango o no-numérico ⇒ undefined (default del mantenedor).
   { clave: "probeMiniLado", sanea: numeroClampeado(320, 1280) },
-  // KIT qr-postprevio-corta-v1 — kill-switch del dueño: false = tras un previo
+  // KIT qr-postprevio-corta-v1 — kill-switch del mantenedor: false = tras un previo
   // que no leyó nada, la capa 0 corre la cadena LARGA de hoy (byte-idéntico).
   // Booleano.
   { clave: "qrCapa0PostPrevioCorta", sanea: booleano },
@@ -129,19 +129,19 @@ export const ESQUEMA_FLAGS: readonly DescriptorFlag[] = [
   { clave: "ocrColaGlobal", sanea: booleano },
   // KIT e14-proceso-lado-v1 — lado mayor de salida del warp+enhance del lote.
   // Default 1920; 4032 = el default anterior. Saneo: número entero dentro de
-  // [1024, 4032] — fuera de rango o no-numérico ⇒ undefined (default del dueño).
+  // [1024, 4032] — fuera de rango o no-numérico ⇒ undefined (default del mantenedor).
   { clave: "procesoLadoMayor", sanea: numeroClampeado(1024, 4032) },
-  // R1.2 — KIT qr-cache-negativa-v1 — kill-switch del dueño: false = la capa
+  // R1.2 — KIT qr-cache-negativa-v1 — kill-switch del mantenedor: false = la capa
   // 0 paga el ladder SIEMPRE (byte-idéntico a hoy). Booleano.
   { clave: "qrCacheNegativa", sanea: booleano },
-  // KIT auto-envio-umbral-v1 — palanca del dueño: "optima" (default, solo
+  // KIT auto-envio-umbral-v1 — palanca del mantenedor: "optima" (default, solo
   // OPTIMA se autoenvía) | "advertencia" (extiende el auto-envío a ADVERTENCIA
   // con clasificación AUTO — el join del monitor sigue exigiendo AUTO).
   {
     clave: "autoEnvioUmbral",
     sanea: (v) => (v === "optima" || v === "advertencia" ? v : undefined),
   },
-  // KIT e14-ocr-nativo-v1 — kill-switch del dueño: null (default) = WASM de
+  // KIT e14-ocr-nativo-v1 — kill-switch del mantenedor: null (default) = WASM de
   // siempre. Solo localhost (validator), por la misma razón SEC-10 que
   // `endpointReportes`.
   { clave: "ocrNativoUrl", sanea: urlSidecarLocalValida },

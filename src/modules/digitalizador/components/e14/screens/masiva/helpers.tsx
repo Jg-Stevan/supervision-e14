@@ -96,7 +96,7 @@ export const FILTROS: { valor: FiltroMasiva; label: string }[] = [
 ];
 
 /** Etiqueta de vida de la fila activa: FASE + el % ÚNICO del proceso
- *  COMPLETO del acta (cambio pedido por el dueño: UN solo % por acta que
+ *  COMPLETO del acta (cambio pedido por el mantenedor: UN solo % por acta que
  *  NO se reinicia entre fases — antes cada fase tenía su número y el OCR
  *  escalonado con 2 pasadas lo hacía retroceder 95→50→95). El % viene del
  *  runner (`fracGlobal`, monotónico); la fase es solo contexto. */
@@ -117,7 +117,7 @@ export function etiquetaVida(p: { etapa: EtapaVidaKit; fracGlobal?: number }): s
   }
 }
 
-/** % ÚNICO del PROCESO COMPLETO del acta (0% a 100%) — pedido del dueño:
+/** % ÚNICO del PROCESO COMPLETO del acta (0% a 100%) — pedido del mantenedor:
  *  un solo número por acta, sin reinicios por fase. `fracGlobal` lo computa
  *  el runner (monotónico, todas las fases sumadas). LISTA = 100 · ERROR = 0 ·
  *  fila PROCESANDO sin señal viva (zombi de recarga) = 20 como hoy. */

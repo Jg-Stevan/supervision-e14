@@ -21,23 +21,28 @@ pipeline (D34/D43–D45). Las mediciones nativas usan el sidecar Windows x64.
 El OCR consume ~98 % del trabajo del pipeline; la miniatura cuesta ~3 ms y el
 decode ~50 ms. El cuello es el reconocimiento, no la UI.
 
-## 2. Modelos versionados
+## 2. Modelos (descargados por `preparar` — no versionados desde D88)
+
+Los modelos ya no van commiteados: `bun run preparar` los baja según
+`scripts/assets.lock.json` (tessdata_fast 4.0.0 desde 2026-11-10 y RapidOCR
+PP-OCRv4/v5 de modelscope). Cifras en disco tras `preparar`
+(verificado 2026-11-12):
 
 | Asset | Bytes | Uso |
 |---|---:|---|
-| `ch_PP-OCRv4_det_infer.onnx` | 4.745.517 | Detección v4 (ruta base). |
+| `ch_PP-OCRv4_det_infer.onnx` | 4.745.517 | Detección v4 (paso 2 de la cascada). |
 | `ch_PP-OCRv4_rec_infer.onnx` | 10.857.958 | Reconocimiento v4. |
 | `ch_ppocr_mobile_v2.0_cls_infer.onnx` | 585.532 | Clasificador de orientación. |
-| `det_v5_mobile.onnx` | 4.819.576 | Detección v5. |
-| `rec_v5_latin.onnx` | 7.904.513 | Reconocimiento v5 latino. |
-| `spa.traineddata.gz` | 11.980.623 | Tesseract español (tessdata_best). |
+| `det_v5_mobile.onnx` | 4.819.576 | Detección v5 (disponible; ya no es default de ALTO). |
+| `rec_v5_latin.onnx` | 7.904.513 | Reconocimiento v5 latino (disponible; ya no es default de ALTO). |
+| `spa.traineddata.gz` | 1.137.561 | Tesseract español 4.0.0_fast (2,29 MB descomprimido; intento 1 de la cascada). |
 | `opencv-4.5.5-core.js` | 8.595.825 | Warp, deskew y rescate QR 4096. |
 | `zxing_reader.wasm` | 946.860 | Decodificador QR principal en main. |
 | `zbar.wasm` | 238.653 | Tier zoom complementario. |
-| Núcleos Tesseract (SIMD + fallback) | ~13,4 MB | `public/vendor/tesseract/`. |
+| Núcleos Tesseract (SIMD + fallback) | ~8,0 MB | `public/vendor/tesseract/` (verificado 2026-11-12). |
 
-El wasm de `onnxruntime-web` (~68 MB) **no se versiona**: se materializa en
-`predev`/`prebuild` desde `node_modules`.
+Total `public/models/`: 28,7 MB. El wasm de `onnxruntime-web` (~69 MB) tampoco
+se versiona: se materializa en `predev`/`prebuild` desde `node_modules`.
 
 ## 3. Cadena QR
 
@@ -93,9 +98,9 @@ el lote de 82 s a 53 s.
 | Catálogo exterior | 949 puestos · 67 países · 3.670 mesas |
 | Catálogo maestro | 14.438 puestos (nunca importado) |
 | Golden de KPIs | 949 = 233 COMPLETO + 218 CRÍTICO + 138 PENDIENTE + 360 NO_INICIADO |
-| Actas reales versionadas | 8 WebP · 1.223.766 B (tope del guardrail: 2.097.152 B) |
-| Fotos demo + simulación | 11 JPEG · 2.145.212 B |
-| Repo versionado (sin `.git`) | ~74 MB, dominado por modelos OCR |
+| Actas reales versionadas | 0 — retiradas del árbol (D87); manifest metadata-only, purga de historial preparada (D90) |
+| Fotos demo + simulación | 4 JPEG · 446.801 B (`acta-sim-*.jpg` — verificado 2026-11-12) |
+| Repo versionado (sin `.git`) | 6,7 MB · 390 archivos (verificado 2026-11-12); los modelos ya no se versionan (D88): 28,7 MB de modelos + ~69 MB de wasm ort se bajan/materializan con `preparar` |
 
 Las fotos se recomprimieron: demo a 2000 px q70, simulación a 1400 px q72 y
 actas reales a WebP q75. La reducción fue de ~23,2 MB a ~3,3 MB (−86 %) sin

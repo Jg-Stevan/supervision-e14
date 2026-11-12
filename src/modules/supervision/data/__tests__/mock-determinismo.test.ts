@@ -9,7 +9,7 @@
  *   jitter quemado — para no desplazar el draw de estado, mock-repository.ts:149-170);
  * · los umbrales de distribución de estados (L99-104) y de tramos de
  *   tiempo (L116-121);
- * · la REGLA DEL DUEÑO (feedback matriz): transcurrido ≥ 3 hrs sin
+ * · la REGLA DEL MANTENEDOR (feedback matriz): transcurrido ≥ 3 hrs sin
  *   completar → CRÍTICO automático (derivarEstadoPorUmbral; los COMPLETO
  *   se respetan y un CRÍTICO sembrado no se degrada);
  * · la invariante D21: `total = completo + crítico + pendiente + no_iniciado`
@@ -17,14 +17,14 @@
  * · las 3 ANCLAS forzadas (L189-198): Roma→CRÍTICO (8 mesas, acta #A92-F),
  *   El Cairo→COMPLETO (D26), Barcelona-Girona→COMPLETO (D44);
  * · GOLDEN del resumen agregado medido en el seed vigente (con la regla
- *   del dueño >3 hrs → CRÍTICO aplicada desde 2026-02, feedback matriz):
+ *   del mantenedor >3 hrs → CRÍTICO aplicada desde 2026-02, feedback matriz):
  *   949 = 233 COMPLETO + 218 CRÍTICO + 138 PENDIENTE + 360 NO_INICIADO.
  *   (Golden anterior sin la regla: 233/44/198/474; los literales de
  *   DECISIONS D21 — 231/44/199/475 — corresponden a un seed previo a las
  *   anclas D26/D44; el golden vive aquí desde entonces.)
  *
  * REGLA DEL GOLDEN: si un cambio LEGÍTIMO de seeds altera estos números,
- * el dueño debe actualizarlos aquí a conciencia — nunca en silencio.
+ * el mantenedor debe actualizarlos aquí a conciencia — nunca en silencio.
  */
 import { describe, expect, test } from "bun:test";
 
@@ -57,7 +57,7 @@ function estadoPorSeedRef(random: number): Puesto["estadoGlobal"] {
 }
 
 /** Contraparte de `derivarEstadoPorUmbral` (mock-repository.ts): la regla
- * del dueño — >3 hrs transcurridas sin completar → CRÍTICO. */
+ * del mantenedor — >3 hrs transcurridas sin completar → CRÍTICO. */
 function derivarEstadoPorUmbralRef(
   sembrado: Puesto["estadoGlobal"],
   minutosDesdeCierre: number

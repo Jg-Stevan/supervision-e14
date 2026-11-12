@@ -12,7 +12,7 @@
  * que un visitante elector vaya a escribir.
  *
  * Por qué `--onedir` (carpeta en ZIP) y no `--onefile` (un solo .exe) — medido
- * back-to-back en el equipo del dueño (4 núcleos):
+ * back-to-back en el equipo del mantenedor (4 núcleos):
  *   · onefile: 108,1 MiB de descarga, 16,7-18,1 s hasta que `/salud` contesta.
  *     Descomprime los 108 MiB a `%TEMP%` EN CADA arranque: 3 de cada 4 segundos
  *     de espera son eso, no OCR (se probó con argparse inválido: 16,0 s en
@@ -84,7 +84,7 @@ const EXE = join(
 const PUERTO_PRUEBA = Number(argv.puerto ?? 8799);
 const DRY = Boolean(argv["dry-run"]);
 
-// El venv vive FUERA del repo salvo en CI: en la máquina del dueño no queremos
+// El venv vive FUERA del repo salvo en CI: en la máquina del mantenedor no queremos
 // 300 MB de site-packages colándose en `git status`, y en el runner sí conviene
 // que esté en el workspace para cachearlo.
 const EN_CI = Boolean(process.env.CI);

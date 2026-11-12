@@ -18,7 +18,7 @@
  * MEDIO INFERIDO) queda fijado como EXPECTED-DIFF en el test de paridad
  * (test explícito del delta con comentario — NO se corrige aquí: adoptar la
  * canónica en obs/dispositivo.ts cambia un veredicto de borde y es decisión
- * del dueño; §B5 (4) la lista como el fix planeado).
+ * del mantenedor; §B5 (4) la lista como el fix planeado).
  *
  * COPIA «mover sin cambiar» del cuerpo de clasificador.ts:194-212 (mismo
  * orden de cortocircuito); las condiciones ya no anidan en `s.sync.*`.

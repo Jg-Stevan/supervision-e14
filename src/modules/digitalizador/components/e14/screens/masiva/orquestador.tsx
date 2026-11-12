@@ -33,11 +33,11 @@ import { rapidOcrPrecalentar } from "@/modules/digitalizador/lib/e14/ocr/rapidoc
 // KIT qr-previo-precalentado-v1 — pre-warm del wasm de zxing junto al del OCR.
 import { precalentarZxingQr } from "@/modules/digitalizador/lib/e14/qr-zxing";
 // KIT e107-prescan-qr-cola-v1 (§D.3): el botón PROCESAR COLA delega en el
-// pre-scan QR (fases 1-2 del dueño) y el orquestador llama iniciar() con la
+// pre-scan QR (fases 1-2 del mantenedor) y el orquestador llama iniciar() con la
 // lista ya filtrada (flag OFF ⇒ iniciar() byte-idéntico — kill-switch).
 import { prescanYIniciar, usePrescanQrEstado, usePrescanStore } from "@/modules/digitalizador/lib/e14/masiva/prescan-qr";
 // KIT e14-gama-adaptativa-v1 (D74): chip de gama adaptada — el tier detectado
-// consume presupuestos de recursos en BAJO/MEDIO (transparencia del dueño).
+// consume presupuestos de recursos en BAJO/MEDIO (transparencia del mantenedor).
 import { planGamaActual, refrescarPlanGama, type PlanGama } from "@/modules/digitalizador/lib/e14/gama";
 // P-23 (plan 2026-11-12) — precarga de assets OCR (soloWifi respeta el plan
 // del perfil; fire-and-forget, jamás delante de una acta).
@@ -231,7 +231,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
   }, []);
 
   // ── KIT visor-masiva-redesign-v1 — SEMBRADO DEL LOTE DEMO (preview) ──
-  // reiniciarEnvios (cola + ledger — mismo corte del dueño) → las 4 fixtures
+  // reiniciarEnvios (cola + ledger — mismo corte del mantenedor) → las 4 fixtures
   // SINTÉTICAS entran como Files → pre-scan QR + runner de siempre.
   const [demoSembrando, setDemoSembrando] = useState(false);
   const [loteDemoActivo, setLoteDemoActivo] = useState(false);
@@ -264,7 +264,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
     void cargarFilas().then(() => sincronizarAlVolver());
   }, [cargarFilas, sincronizarAlVolver]);
 
-  // KIT e14-prowarm-ocr-v1 (T2): pre-warm del OCR al montar MASIVA — el dueño
+  // KIT e14-prowarm-ocr-v1 (T2): pre-warm del OCR al montar MASIVA — el mantenedor
   // prepara la cola y el wasm queda caliente ANTES de pulsar PROCESAR.
   // Fire-and-forget: sin UI, sin toasts (D2), sin estados (§0.7).
   //
@@ -286,7 +286,7 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
 
   // P1-9b (informe-arquitectura-fluidez-2026-11-02 §6.9) — blindar la cola
   // IDB contra eviction del navegador (disk lleno): se pide persistencia UNA
-  // vez al montar MASIVA (contexto de uso explícito del dueño).
+  // vez al montar MASIVA (contexto de uso explícito del mantenedor).
   // Fire-and-forget honesto: false/no-soporte → el comportamiento de siempre.
   useEffect(() => {
     try {

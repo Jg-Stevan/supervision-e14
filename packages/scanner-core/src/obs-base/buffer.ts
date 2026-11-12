@@ -193,7 +193,7 @@ export async function contarEventos(): Promise<number> {
   }
 }
 
-/** Vaciar el buffer COMPLETO (kill switch del dueño — export con
+/** Vaciar el buffer COMPLETO (kill switch del mantenedor — export con
  *  vaciarDespues, C6). Fallo IDB → silencioso. */
 export async function purgarBuffer(): Promise<void> {
   try {

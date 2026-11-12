@@ -64,7 +64,7 @@ const ETIQUETA_ESTADO: Record<EstadoRecepcion, string> = {
   DUPLICADA: "Duplicada",
 };
 
-/** "17:44:29" — hora de RECEPCIÓN en Colombia (regla del dueño: LOCAL=COL,
+/** "17:44:29" — hora de RECEPCIÓN en Colombia (regla del mantenedor: LOCAL=COL,
  * ronda «reloj real»). TZ explícito: el supervisor puede estar en cualquier
  * huso; esta columna siempre muestra la hora colombiana. */
 function horaColombia(fecha: number): string {

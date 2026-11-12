@@ -19,7 +19,7 @@
  *    core: `pending` por `ts`).
  *  · Hard-kill anti-zombi POR PETICIÓN: PRESUPUESTO_FILA_MS +
  *    HARD_KILL_EXTRA_MS → terminate() + respawn perezoso + resolve null
- *    (un worker colgado JAMÁS frena el clic — regla de oro 3 del dueño).
+ *    (un worker colgado JAMÁS frena el clic — regla de oro 3 del mantenedor).
  *  · Bitmaps SIEMPRE transferidos (`postMessage(msg, [bitmap])`) — pico de
  *    RAM móvil; el bitmap queda detached y el worker lo cierra (A-04).
  *  · Feature-detect: sin Worker/createImageBitmap/OffscreenCanvas →
@@ -35,7 +35,7 @@ import { logger } from "../../logger";
 // KIT flujo-dueno-v1 (K2): forma canónica del quad del core (solo tipo —
 // se borra en compile: cero dependencia runtime).
 import type { Quad } from "@jg-stevan/scanner-core/core/types";
-// KIT e14-prescan-warp-lado-v1: válvulas del dueño (presupuesto de fila
+// KIT e14-prescan-warp-lado-v1: válvulas del mantenedor (presupuesto de fila
 // configurable + maxWarpLongSide del warp) — mismo patrón e73 (sondeo).
 // KIT e14-gama-adaptativa-v1 (D74): la lectura del presupuesto es EFECTIVA
 // (gama BAJO/MEDIO adaptativa lo sube — menos hard-kills por lentitud).
@@ -245,7 +245,7 @@ export function crearClientePrescan(): ClientePrescan {
           // Hard-kill anti-zombi POR PETICIÓN (§D.1): presupuesto + extra →
           // terminate + respawn perezoso + resolve null.
           // KIT e14-prescan-warp-lado-v1: presupuesto del flag (default 4000
-          // — byte-idéntico; el dueño lo sube en equipos lentos).
+          // — byte-idéntico; el mantenedor lo sube en equipos lentos).
           const presupuestoFila = presupuestoFilaDeFlags();
           relodHardKill = setTimeout(() => {
             logger.warn(

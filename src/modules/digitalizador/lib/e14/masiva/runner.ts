@@ -138,7 +138,7 @@ import {
 } from "./qr-cache-negativa";
 // KIT e14-gama-adaptativa-v1 (D74) — capa adaptativa de gama: el tier BAJO/
 // MEDIO detectado aplica SOLO presupuestos de recursos (pool/watchdog/QR);
-// el override manual del dueño manda y el flag masivaAdaptativoGama=false
+// el override manual del mantenedor manda y el flag masivaAdaptativoGama=false
 // vuelve todo byte-idéntico a hoy.
 import { flagsMasivaEfectivos, planGamaActual } from "../gama";
 import { leerFlags } from "../flags";
@@ -160,7 +160,7 @@ const WATCHDOG_GRACIA_MS = 5_000;
 //   intento que lo vence ya no es lentitud, es un colgaje. El flujo
 //   individual sigue en 15 s (default de escanearActa — intacto).
 // · WATCHDOG_INTENTOS (2) — intento original + 1 REINTENTO automático del
-//   MISMO procesado ya iniciado por el dueño (NO re-encola nada nuevo — D45
+//   MISMO procesado ya iniciado por el mantenedor (NO re-encola nada nuevo — D45
 //   intacto; criterios/score intactos). Al vencer: etapa capturada, workers
 //   del intento muertos y re-creados (detección OpenCV + OCR RapidOCR), y
 //   UN relanzamiento. Si el reintento también vence → MISMO veredicto de
@@ -181,7 +181,7 @@ const WATCHDOG_GRACIA_MS = 5_000;
 const RELECTURA_TOPE_MS = 45_000;
 
 /** KIT e14-gama-adaptativa-v1 (D74) — presupuesto del intento EFECTIVO:
- *  WATCHDOG_MS (75 s) se calibró con el peor caso del dueño (PC — el p95
+ *  WATCHDOG_MS (75 s) se calibró con el peor caso del mantenedor (PC — el p95
  *  real de RECHAZADA-BAJO medía 30-46 s); en gama BAJO/MEDIA el p95 puede
  *  rozarlo y un kill FALSO paga workers muertos + re-OCR completo (coste
  *  doble) por «lentitud» que no era colgaje. Con el flag adaptativo ON el
@@ -203,26 +203,26 @@ let stopFlag = false;
 let rescatesCorrida = 0;
 // e71 (Opt-3): el throttle del progreso pasa a POR-FILA (campo ultimoEn de
 // VidaFila) — con 2 actas en vuelo cada una lleva SU cadencia de 250 ms.
-// e63g FASE 1: ¿el dueño arrancó la cola ALGUNA VEZ en esta sesión? El
+// e63g FASE 1: ¿el mantenedor arrancó la cola ALGUNA VEZ en esta sesión? El
 // re-arranque tras el swap temp→id solo procede en sesión viva (D45
 // intacto: encolar en sesión fría JAMÁS procesa por sí solo).
 let colaSesionIniciada = false;
 
 // ─── e71 (Opt-3) — PARALELISMO + EXCLUSIÓN MUTUA (kit e71-consolidación) ───
 /** Actas EN VUELO simultáneas. HISTORIA: e71 nació con 2 (benchmark del
- *  dueño); D31 — KIT e14-carril-qr-paralelo-v1 — baja el DEFAULT a 1: el
+ *  mantenedor); D31 — KIT e14-carril-qr-paralelo-v1 — baja el DEFAULT a 1: el
  *  OCR es wasm mono-hilo (GH Pages sin SAB — AUDITORIA §2), dos OCR en
  *  paralelo se reparten el mismo CPU → NO hay ganancia y la UI sí sufre
  *  (cabecera de este archivo). El slot liberado lo ocupa el CARRIL QR del
  *  prescan (prescanYIniciar — Fase 3 ANTES que Fase 1+2): mientras UNA acta
  *  paga su OCR completa, el prescan lee el QR del RESTO de la cola y marca
  *  DUPLICADA/YA-ENVIADA temprano — esas filas jamás llegan a pagar OCR.
- *  El override manual del dueño (e14-flags-overrides / flags.json
+ *  El override manual del mantenedor (e14-flags-overrides / flags.json
  *  `poolWorkers: 2`) restaura el pool doble de e71 byte-idéntico.
  *  KIT e14-gama-adaptativa-v1 (D74): el valor es EFECTIVO y se lee POR
  *  CORRIDA en bucle() (antes const de módulo — el plan puede refrescarse
  *  al montar MASIVA): en gama BAJO adaptativa baja a 1 — ídem arriba. El
- *  override manual del dueño MANDA (flagsMasivaEfectivos no pisa claves de
+ *  override manual del mantenedor MANDA (flagsMasivaEfectivos no pisa claves de
  *  e14-flags-overrides). */
 function procesamientoConcurrenteEfectivo(): 1 | 2 {
   return flagsMasivaEfectivos().poolWorkers;
@@ -337,7 +337,7 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
   if (!fila.dupOf) return false;
   // e72 — reloj de la COPIA en sí (lecturas+writes+thumb): alimenta el
   // totalMs PROPIO de la copia (abajo) — el duplicado muestra SU consumo en
-  // el informe, no el del original (criterio del dueño e72).
+  // el informe, no el del original (criterio del mantenedor e72).
   const tCopia = Date.now();
   try {
     // D41 — lecturas RAW: la copia no consume dataURLs del acta (las fotos
@@ -379,7 +379,7 @@ async function reutilizarResultadoCritica(fila: FilaMasiva, t0: number): Promise
       // cuenta la espera de la original DOS veces. ≥ 0 defensivo (D57 T1).
       if (actaCopia.diagnostico.tiempos) {
         actaCopia.diagnostico.tiempos.esperaMs = Math.max(0, t0 - fila.agregadaEn);
-        // e72 — TIEMPOS PROPIOS de la copia (criterio del dueño: el segundo
+        // e72 — TIEMPOS PROPIOS de la copia (criterio del mantenedor: el segundo
         // del mismo archivo NO debe mostrar OCR): totalMs = la copia en sí
         // («casi 0» — la espera vive en esperaMs de arriba; totalMs jamás
         // incluye espera, contrato del informe) y ocrMs = 0 EXPLÍCITO (la
@@ -733,7 +733,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
     // 27 s). Como `prefacta.ts` encadena de a UNA ida, la de N+1 arranca en
     // cuanto aterriza la de N = el minuto exacto en que el navegador se queda
     // solo con sus ~4 s (decode/calidad/gate/envío) y el sidecar ya no compite
-    // por los 4 núcleos de la máquina del dueño. Nunca dos idas a la vez,
+    // por los 4 núcleos de la máquina del mantenedor. Nunca dos idas a la vez,
     // nunca el sidecar parado.
     // El master de N+1 se ESPERA (es el mismo trabajo que el pipeline haría en
     // stage 2 — aquí solo se hace antes y compartido: `asegurarMaestro` une las
@@ -799,7 +799,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
       // módulo (re-encolado del MISMO archivo — llave = SHA-256 de los
       // bytes, fila.hashBytes estampado por cadenaDedup). Escapes sagrados:
       // flag qrCacheNegativa OFF y forzarDedupOff (PROCESAR IGUAL) JAMÁS
-      // consultan — el dueño manda.
+      // consultan — el mantenedor manda.
       leerFlags().qrCacheNegativa &&
       !fila.forzarDedupOff &&
       (registro?.qrSinPayload === true ||
@@ -857,7 +857,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
         // el previo ya pagó ese pato en main. Con previo corrido se OMITE el
         // worker y se va DIRECTO a la cadena de main (rotaciones + rescate 4096
         // + presupuesto de gama intactos — cobertura por adición, jamás por
-        // sustracción). Kill-switch del dueño: {"qrPrevioRapido":false} = el
+        // sustracción). Kill-switch del mantenedor: {"qrPrevioRapido":false} = el
         // worker de hoy byte-idéntico.
         if (!qrPayload && leerFlags().capa0QrWorker && captureQr === null) {
           const rWorker = await decodificarQrCapa0Worker(archivo, {
@@ -891,7 +891,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
               const qrQr = await decodificarQrDeCapture(capture, {
                 soloZxing: true,
                 ladoLargo: planQr.qrLadoLargo,
-                // KIT e75-qr-zoom-zbar-v1 — kill-switch del dueño (flag
+                // KIT e75-qr-zoom-zbar-v1 — kill-switch del mantenedor (flag
                 // qrZoomTl): el tier ZOOM TL + zbar es main-only, justo aquí
                 // donde ya corre el otro tier wasm (cobertura aditiva).
                 zoomTl: leerFlags().qrZoomTl,
@@ -923,7 +923,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
             ladoLargo: planQr.qrLadoLargo,
             rescate4096: planQr.qrRescate4096,
             presupuestoMs: planQr.qrPresupuestoMs,
-            // KIT e75-qr-zoom-zbar-v1 — kill-switch del dueño (flag qrZoomTl,
+            // KIT e75-qr-zoom-zbar-v1 — kill-switch del mantenedor (flag qrZoomTl,
             // default true = MEJORA): ZOOM TL re-escalado + zbar antes del
             // rescate 4096 (lab: 3 páginas del escáner rescatadas).
             zoomTl: leerFlags().qrZoomTl,
@@ -952,7 +952,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
     // R1.2 — REGISTRO de la caché negativa: SOLO cuando (a) la cadena corrió
     // COMPLETA sin throw, (b) terminó null REAL (sin corte por reló — R1.1
     // presupuestoVencido=false), (c) no fue un skip de la propia caché, (d)
-    // el flag ON y (e) el dedup del dueño respetado. Llave = SHA-256 de los
+    // el flag ON y (e) el dedup del mantenedor respetado. Llave = SHA-256 de los
     // bytes (registro.hashBytes — cadenaDedup; sin hash ⇒ sin caché,
     // conservador). El sondeo/prescan (parciales) JAMÁS escriben aquí.
     if (
@@ -1033,7 +1033,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
       if (!originalQr) {
         // e65b (T-4): payload ya ENVIADO según el HISTÓRICO (ledger —
         // sobrevive vaciar/recargas, D-e65b-1) → YA-ENVIADA sin OCR.
-        // forzarDedupOff manda SIEMPRE (RL-e65b-6 — el escape del dueño es
+        // forzarDedupOff manda SIEMPRE (RL-e65b-6 — el escape del mantenedor es
         // sagrado). La marca viaja con aceptarProcesando: esta fila ya fue
         // marcada PROCESANDO al entrar al pipeline (M-e65b-3). Jamás se
         // apunta a sí misma (defensivo — el re-encolado nace con id nuevo).
@@ -1092,7 +1092,7 @@ async function faseCapa0Qr(ctx: CtxPipeline): Promise<DesenlaceStage> {
         });
         logger.info(`[e14] capa0-qr original ${payloadQrCorto} fila=${fila.id}`);
       } else if (fila.forzarDedupOff) {
-        // El dueño pulsó PROCESAR IGUAL — las capas 0/1/2 lo respetan SIEMPRE
+        // El mantenedor pulsó PROCESAR IGUAL — las capas 0/1/2 lo respetan SIEMPRE
         // (misma doctrina e63k): reproceso completo, nada se reutiliza.
         logger.info(
           `[e14] capa0-qr reprocesa-completo ${payloadQrCorto} fila=${fila.id} forzarDedupOff`,
@@ -1341,7 +1341,7 @@ async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipe
         // (D63-B) cuando aplicó; el original en los demás casos. El bloque
         // D63-B calcula preProceso.archivo PERO la fusión D65/D66 lo dejó
         // desconectado (solo sus métricas llegaban — hallazgo del worklog
-        // D65, orden del dueño: despertarlo AQUÍ y NADA más). El master
+        // D65, orden del mantenedor: despertarlo AQUÍ y NADA más). El master
         // único D66 queda VERDADERO: el pipeline sigue consumiendo UN master
         // (`maestro?.archivo ?? archivoIntento` del bridge, sin tocar).
         const fuenteMaestro: File = preProceso?.aplicado
@@ -1382,7 +1382,7 @@ async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipe
           origenActa: veredictoOrigen.origen,
           // e66 (P4): la señal auditable viaja al bridge — "exif-camara"
           // omite el probe de rotaciones (orientación ya horneada por el
-          // EXIF del core; aplicado=0 SIEMPRE — evidencia del dueño).
+          // EXIF del core; aplicado=0 SIEMPRE — evidencia del mantenedor).
           origenSenales: veredictoOrigen.senales,
           // P2 (plan masiva — brief Agente A): el caller es el runner MASIVA
           // — el bridge OMITE la brújula QR (su payload no se consume aquí;
@@ -1443,7 +1443,7 @@ async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipe
             // 1 por fila (el predicado exige intento===1) +
             // MAX_RESCATES_CORRIDA por corrida. Si el reintento también
             // RECHAZA → se acepta el rechazo (honesto, sin inventar).
-            // forzarDedupOff manda SIEMPRE (RL-e65b-6 — escape del dueño).
+            // forzarDedupOff manda SIEMPRE (RL-e65b-6 — escape del mantenedor).
             if (
               procedeRescateRechazo(resultado.acta, {
                 intento,
@@ -1508,7 +1508,7 @@ async function fasePipelineIntentos(ctxEntrada: CtxPipeline): Promise<SalidaPipe
       if (intento >= WATCHDOG_INTENTOS) break; // kit T1.3: veredicto de siempre
       // D65 (T1.2): matar y re-crear los workers del intento (detección + OCR)
       // y relanzar UNA vez. El reintento es del MISMO procesado ya iniciado por
-      // el dueño (no re-encola nada nuevo — D45 intacto; criterios/score intactos).
+      // el mantenedor (no re-encola nada nuevo — D45 intacto; criterios/score intactos).
       await prepararReintento();
     }
     if (errorIntento) throw errorIntento.error;
@@ -1590,7 +1590,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
           }
         : actaBruta;
 
-    // FIX M8 (auditoría 2-c): la decisión del dueño manda TAMBIÉN para el
+    // FIX M8 (auditoría 2-c): la decisión del mantenedor manda TAMBIÉN para el
     // ENVÍO — si quitó la fila mientras el OCR corría, el desenlace NO se
     // transmite (antes registrarEnvioMasiva corría ANTES del guard: fila de
     // historial + completadas + hueco archivado de un acta descartado).
@@ -1665,7 +1665,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
     // identidadActa (13 dígitos = formulario+PAG — P1 y P2 del mismo
     // formulario son actas DISTINTAS, nunca se deduplican entre sí) en
     // estado LISTA|DUPLICADA; la de agregadaEn MÍNIMA es la original.
-    // forzarDedupOff (el dueño pulsó PROCESAR IGUAL) manda sobre la capa 2.
+    // forzarDedupOff (el mantenedor pulsó PROCESAR IGUAL) manda sobre la capa 2.
     // e71 (Opt-3) — SECCIÓN CRÍTICA (kit: «encolar la verificación de dedup
     // en un solo hilo»): DOS filas con la MISMA serie aterrizando juntas
     // veían AMBAS «sin original» y se enviaban DOBLE. Dentro del mutex la
@@ -1742,7 +1742,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
       }
     }
     // Falso-positivo visual EVITADO (el caso 3992/3993 de la consola del
-    // dueño — QA §3.2): la banda visual 3..6 la había dejado sospechosa y
+    // mantenedor — QA §3.2): la banda visual 3..6 la había dejado sospechosa y
     // la serie impresa demuestra que es OTRA acta → resolución final
     // "sin-match" en el registroListo de abajo (conservando dedupDistancia
     // y dedupVisualDe del write aplazado — post-mortem). La fila sigue al
@@ -1752,7 +1752,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
     const dedupVisualDeAplazada = registro?.dedupVisualDe ?? null;
     // Solo se RESUELVE una banda que SIGUE aplazada (registro.dedup ===
     // "visual-aplazada"): jamás revertir un veredicto "identidad" previo
-    // (el dueño pudo PROCESAR IGUAL una dup real — su traza queda intacta).
+    // (el mantenedor pudo PROCESAR IGUAL una dup real — su traza queda intacta).
     const falsoPositivoEvitado =
       identidad != null &&
       originalIdentidad == null &&
@@ -1765,7 +1765,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
     }
 
     // ─── e72 — P2.1-v2: el veredicto de dedup por CONTENIDO manda sobre el
-    // envío ─── Segundo plano de la MISMA race del smoke del dueño
+    // envío ─── Segundo plano de la MISMA race del smoke del mantenedor
     // (imagen9/imagen10): la fila llegó AL DESENLACE con el veredicto puesto
     // (traza «v2» de cadenaDedup — cinta cierta, estampada aunque el guard
     // anti-zombi bloqueara la marca pre-OCR) o con una gemela EXACTA
@@ -1779,7 +1779,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
     // el guard. La gemela en vuelo cuenta SOLO si es ANTERIOR (agregadaEn
     // menor): esperar a una POSTERIOR sería esperarla a ELLA que espera por
     // ESTA — deadlock imposible por construcción. forzarDedupOff (PROCESAR
-    // IGUAL) manda SIEMPRE (RL-e65b-6 — el escape del dueño es sagrado).
+    // IGUAL) manda SIEMPRE (RL-e65b-6 — el escape del mantenedor es sagrado).
     if (!fila.forzarDedupOff && registro != null && registro.hashBytes != null) {
       const hashNeto: string = registro.hashBytes;
       // Whitelist de estados (T-5 e65: la literal YA-ENVIADA jamás se escribe
@@ -1836,7 +1836,7 @@ async function faseDesenlace(ctx: CtxPostPipeline): Promise<SalidaDesenlace> {
         // por dHash de bytes distintos / gemela desaparecida) → DUPLICADA
         // con SU PROPIO desenlace (revisión disponible — cero envío, cero
         // contador; el OCR pagado fue el precio de la race y el informe lo
-        // muestra honesto con sus tiempos reales). La voluntad del dueño
+        // muestra honesto con sus tiempos reales). La voluntad del mantenedor
         // manda: una fila QUITADA en la espera no resucita registro.
         if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) {
           return { resuelto: true, ctx: { ...ctx, actaParcheada: acta, actaDesenlace, relecturaDesenlace, identidad, falsoPositivoEvitado } };
@@ -1939,7 +1939,7 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
     // el MISMO parche D61 (viaja solo en envíos online — mismos nulls
     // honestos: sin check → omitido, jamás inventar).
     let remotoMs: number | null = null;
-    // KIT auto-envio-umbral-v1 — palanca del dueño (flag autoEnvioUmbral):
+    // KIT auto-envio-umbral-v1 — palanca del mantenedor (flag autoEnvioUmbral):
     // · "optima" (default) = SOLO OPTIMA se autoenvía — byte-idéntico a hoy.
     // · "advertencia" = el auto-envío se EXTIENDE a ADVERTENCIA (6.5-7.9) con
     //   clasificación AUTO (ruta divipol completa ≥ 0.82 + mesa + tipo): el
@@ -1947,7 +1947,7 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
     //   aterrizar en el monitor — una ADVERTENCIA sin AUTO cae al contador de
     //   motivos como siempre. TODA la maquinaria de vetos de abajo (H1
     //   ledger, remoto WAVE3, dedup) corre IDÉNTICA para ambos umbrales.
-    // G5 (dueño, 2026-11-11): sin join DIVIPOL completo no hay envío — la
+    // G5 (mantenedor, 2026-11-11): sin join DIVIPOL completo no hay envío — la
     // misma regla que publicarDesdeActa ya aplica al monitor. Evita marcar
     // ENVIADA un acta real sin clasificación.
     const enviableAuto =
@@ -1973,7 +1973,7 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
       // maquinaria de capa0-qr (marcarYaEnviada via "payload") — RED LINES:
       // sin fuzzy. Índice caído → null conservador (RL-e65b-3): la fila sigue
       // su curso como hoy. forzarDedupOff manda SIEMPRE (RL-e65b-6 — el
-      // escape del dueño es sagrado, mismas capas L543/L580).
+      // escape del mantenedor es sagrado, mismas capas L543/L580).
       const diagQr =
         qrPayload ?? actaDesenlace.qrPayload ?? registro.qrPayload ?? null;
       if (diagQr && !fila.forzarDedupOff) {
@@ -2003,7 +2003,7 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
       // garantía definitiva vive FUERA del navegador): el gap real del lote
       // 9 fue doble envío tras borrar IndexedDB + cambiar de origen. El
       // check SOLO usa el SHA-256 del payload (privacidad dura — jamás el
-      // payload). MISMO escape del dueño: forzarDedupOff salta TAMBIÉN el
+      // payload). MISMO escape del mantenedor: forzarDedupOff salta TAMBIÉN el
       // remoto (RL-e65b-6). Timeout 3 s / fallo → continuar como hoy
       // (doctrina del conservador: el remoto es una red EXTRA, jamás una
       // dependencia). El marcado fallido (IDB caído) también continúa.
@@ -2092,7 +2092,7 @@ async function faseEnvio(ctx: CtxPostDesenlace): Promise<SalidaFaseEnvio> {
       // riesgo asumida y documentada (kit §1): registrar DESPUÉS del envío —
       // un duplicado es detectable; un acta perdida no. SOLO online (offline
       // → el registro nace en refrescarEnviosTrasDrenaje). forzarDedupOff
-      // salta TAMBIÉN el remoto (RL-e65b-6 — el escape del dueño manda).
+      // salta TAMBIÉN el remoto (RL-e65b-6 — el escape del mantenedor manda).
       if (diagQr && onlineAlEnviar && !fila.forzarDedupOff) {
         const payloadRegistro = diagQr;
         const serieRegistro = identidad?.serie ?? registro.serie ?? undefined;
@@ -2372,7 +2372,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
   });
   // KIT e14-masiva-tiempos-v1 (PR-1): rama DEDUP — copia del resultado de la
   // original (<1 s). Si la original no sirve, la fila cae al pipeline
-  // completo AQUÍ MISMO (fallback honesto — el dueño nunca pierde la foto).
+  // completo AQUÍ MISMO (fallback honesto — el mantenedor nunca pierde la foto).
   let fila = filaEntrante;
   // WAVE2 B1 — re-chequeo post-reserva: la referencia del snapshot puede estar
   // vieja — cadenaDedup (ingesta background FIFO) pudo marcar DUPLICADA la fila
@@ -2397,14 +2397,14 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     const t0 = Date.now();
     if (await reutilizarResultado(fila, t0)) return;
     // e72 — GUARD de ingesta × pool: reutilizar falló con la original VIVA
-    // pero SIN desenlace — la race del smoke del dueño (imagen9/imagen10
+    // pero SIN desenlace — la race del smoke del mantenedor (imagen9/imagen10
     // idénticas en un lote EN VUELO): la ingesta marcó «instantanea sha256»
     // al instante, pero el pool reservó la copia ANTES de que la original
     // aterrizara y el fallback de abajo la mandaba al REPROCESO COMPLETO
     // (32 s de OCR pagados + desenlace ENVIADA propio). Si la original está
     // EN COLA o EN VUELO → ESPERAR su desenlace (sondeo ligero, techo
     // generoso) y copiar: el duplicado JAMÁS paga OCR (kit e71 literal —
-    // totalMs de la copia ≈ 0, criterio del dueño). QUITAR/ERROR/techo → el
+    // totalMs de la copia ≈ 0, criterio del mantenedor). QUITAR/ERROR/techo → el
     // fallback honesto de abajo queda intacto.
     //
     // C5 — GUARD agregadaEn de la espera (MISMO patrón del guard P2.1-v2 de
@@ -2572,7 +2572,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
     // ─── KIT e14-etapas-preocr-v1 (D43) — preOcrMs: el MURO entre el fin de
     // la espera de cola y el arranque del pipeline del bridge ─── Hoy es
     // INVISIBLE en el informe (esperaMs cierra AQUÍ; totalMs nace DENTRO del
-    // bridge) — evidencia del informe 2026-10-30: 6-10 s/acta sin dueño.
+    // bridge) — evidencia del informe 2026-10-30: 6-10 s/acta sin mantenedor.
     // Cronómetro OBSERVADOR PASIVO (solo medir — jamás cambia decisiones):
     // intento 1 arranca YA (incluye la capa-0 QR completa); los reintentos
     // (watchdog/rescate) re-pagan origen/deskew/master → se ACUMULAN (T1).
@@ -2730,7 +2730,7 @@ export async function procesarUno(filaEntrante: FilaMasiva): Promise<void> {
  *  PENDIENTE — la MISMA ola la reprocesa completa por la puerta de siempre).
  *  JAMÁS espera ni reaparca: una aparcada se resuelve exactamente UNA vez
  *  (terminación garantizada del bucle). QUITADA en el aparcado → nada (la
- *  voluntad del dueño manda — misma regla de esperarDesenlaceOriginal). */
+ *  voluntad del mantenedor manda — misma regla de esperarDesenlaceOriginal). */
 async function revisitarDuplicadaAparcada(fila: FilaMasiva): Promise<void> {
   if (!storeMasiva().getState().filas.some((f) => f.id === fila.id)) return;
   marcarFila(fila.id, { estado: "PROCESANDO", error: null });
@@ -2840,7 +2840,7 @@ export function iniciarRunner(): void {
     corriendoFlag = false;
     // D34/D45 — cierra la corrida con su MOTIVO (drenada o pausa — stopFlag
     // manda: manual o auto-pausa de REVISIÓN; el informe ya no tiene fin=null
-    // sin dueño).
+    // sin mantenedor).
     cerrarCorridaMetrica(stopFlag ? "pausa" : "drenada");
     storeMasiva().setState({ corriendo: false, progreso: null });
   });
@@ -2861,7 +2861,7 @@ export function pausarRunner(): void {
  *  aterriza DESPUÉS de que el bucle rompió (cola que se vació mientras el
  *  lote copiaba), las filas nuevas quedaban PENDIENTE para siempre.
  *  Guard IDEMPOTENTE (triple):
- *  · sesión fría (el dueño JAMÁS pulsó PROCESAR) → NO arranca (D45
+ *  · sesión fría (el mantenedor JAMÁS pulsó PROCESAR) → NO arranca (D45
  *    intacto: encolar no procesa por sí solo);
  *  · pausa activa (stopFlag — manual o auto-pausa de REVISIÓN) → NO
  *    arranca (reanudar es MANUAL — contrato del botón);
@@ -2874,7 +2874,7 @@ export function pausarRunner(): void {
 export function rearrancarTrasEncolar(): void {
   if (!colaSesionIniciada || stopFlag) return;
   setTimeout(() => {
-    if (stopFlag) return; // pausa llegando tarde — el dueño manda
+    if (stopFlag) return; // pausa llegando tarde — el mantenedor manda
     // C5: las APARCADAS también exigen ola (siguientePendiente las salta) —
     // el swap temp→id real de su original es exactamente la señal que las
     // resuelve (la re-visita del fin de ola copia o cae al fallback).

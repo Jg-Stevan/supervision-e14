@@ -720,7 +720,7 @@ def procesar_img(img: np.ndarray, ocr: OCR, cap=DET_CAP_PROD, con_qr=True,
     orientación y OCR (los tres pasos más caros del pipeline WASM).
 
     Devuelve (Resultado, warp, bw): `warp` es la entrada del OCR (recorte SIN
-    filtro — la misma regla del dueño que `fotoOcr` en el bridge) y `bw` la
+    filtro — la misma regla del mantenedor que `fotoOcr` en el bridge) y `bw` la
     imagen de presentación/guardado."""
     r = Resultado(nombre=nombre)
     t0 = time.perf_counter()

@@ -38,7 +38,7 @@ import { logger } from "../../logger";
 // (el registro nace TAMBIÉN al drenar las filas «EN COLA» — único hook de
 // store.ts declarado por el kit §A.3/F).
 import { origenActual, registrarEnvioRemoto, sha256HexDeTexto } from "./ledger-remoto";
-// KIT e14-observabilidad-v1 (A1-C7): kill switch de thumbs (flags del dueño).
+// KIT e14-observabilidad-v1 (A1-C7): kill switch de thumbs (flags del mantenedor).
 import { leerFlags } from "../flags";
 // KIT e73-sondeo-qr-precoz-v1 (§B.2) — cliente del SONDEO QR en ingesta
 // (worker e73: lee la identidad QR ANTES del pool — gemelas jamás pagan
@@ -137,7 +137,7 @@ function filaDeRegistro(r: RegistroMasiva): FilaMasiva {
     // runner sigue funcionando a mitad de corrida). Ausente = no-PDF.
     ...(r.viaPdf ? { viaPdf: true } : {}),
     // e63k (F1): la serie impresa (mapa de identidad de la capa 2) y el
-    // override del dueño sobreviven la recarga. Aditivos al final del
+    // override del mantenedor sobreviven la recarga. Aditivos al final del
     // objeto retornado (contrato D57). Ausentes = registros previos.
     serie: r.serie ?? null,
     ...(r.forzarDedupOff ? { forzarDedupOff: true } : {}),
@@ -410,7 +410,7 @@ export async function marcarDuplicada(
  *  original ya fue ENVIADA (D-e65-5).
  *  NUNCA bloquea la UI ni lanza: fallo de decode/hash → hash null → la fila
  *  procesa normal (conservador). Los guards de existencia hacen el vaciar/
- *  quitar del dueño MANDAR (0 zombis — mismo patrón del runner).
+ *  quitar del mantenedor MANDAR (0 zombis — mismo patrón del runner).
  *  D65 (T2): dedup v2 POR CONTENIDO con EXIF normalizada (dedup.ts) — misma
  *  cadena, y la traza aditiva dedup/dedupDistancia (kit T2.3) persiste en el
  *  MISMO write del hashDedup (campos nuevos al final del contrato D57). */
@@ -419,7 +419,7 @@ async function cadenaDedup(
     id: string;
     archivo: File;
     hashBytes?: string | null;
-    // KIT e73 (§B.2) — cinturón: el override del dueño viaja con la entrada
+    // KIT e73 (§B.2) — cinturón: el override del mantenedor viaja con la entrada
     // (hoy ninguna fila nace con él en la ingesta — PROCESAR IGUAL lo pone
     // en la fila viva; el guard queda POR CONSTRUCCIÓN para futuros callers).
     forzarDedupOff?: boolean;
@@ -504,12 +504,12 @@ async function cadenaDedup(
       let sondeo: Awaited<ReturnType<typeof sondearQrPrecoz>> = null;
       if (!entrada.forzarDedupOff) {
         // KIT e14-sondeo-burst-v1 (P1a): el skip por bytes vive DENTRO del
-        // guard del override (RL-e65b-6 intacto — el dueño manda SIEMPRE;
+        // guard del override (RL-e65b-6 intacto — el mantenedor manda SIEMPRE;
         // test 7 ancla ambos literales byte a byte).
         // KIT flujo-dueno-v1 (K2 — masivaSondeoCrudo, default TRUE = camino
         // de hoy): en OFF se OMITE el sondeo crudo (el guard fuerza
         // sondeo=null) y la fila sigue a dhash COMO HOY — corrida de
-        // control del dueño (el sondeo crudo alimenta el dedup temprano,
+        // control del mantenedor (el sondeo crudo alimenta el dedup temprano,
         // por eso default ON).
         if (!saltaSondeoPorBytes && leerFlags().masivaSondeoCrudo === true) {
           sondeo = await sondearQrPrecoz(entrada.archivo);
@@ -792,7 +792,7 @@ async function cadenaDedup(
         // guard falló (ya no es PENDIENTE / registro ilegible) → cae al
         // comportamiento de siempre (el conservador manda — RL-e65-3).
       }
-      // Solo marca filas aún PENDIENTES (el dueño pudo procesar/quitar mientras
+      // Solo marca filas aún PENDIENTES (el mantenedor pudo procesar/quitar mientras
       // el hash corría — guard anti-zombi del helper ÚNICO R8b). false = la
       // fila sigue su curso (conservador); el cuerpo de la entrada termina
       // AQUÍ en todo caso, como hoy.
@@ -975,7 +975,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     try {
       // e64p (C-1 — MODO PRUEBAS): la decisión vive en el LEDGER (dedup-
       // indice — desconexión completa R8b). prepararSesionModoPruebas
-      // devuelve true SOLO con el kill switch del dueño en false: la cola
+      // devuelve true SOLO con el kill switch del mantenedor en false: la cola
       // arranca VACÍA — cero restauración (sin filas fantasma ni Maps
       // reconstruidos) y la persistencia vieja muere AQUÍ (cola IDB + ledger
       // del histórico — higiene) para que la pasada siguiente sea de cero
@@ -1126,7 +1126,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     try {
       if (imagenes.length) {
         const ids = await agregarLote(imagenes, paginasPdf, hashesBytes); // D63-A2 (T1): viaPdf nace en el PRIMER write · e71 (Opt-1): hashBytes ídem
-        // FIX M13 (auditoría 2-c): el swap respeta la decisión del dueño TOMADA
+        // FIX M13 (auditoría 2-c): el swap respeta la decisión del mantenedor TOMADA
         // DURANTE la copia (QUITAR de una fila temp, VACIAR, o recarga de la
         // vista que re-monta cargarFilas): las temps que YA NO están en filas
         // NO reviven con id real — sus registros recién creados se BORRAN de
@@ -1237,16 +1237,16 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
 
   // KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — la fila vuelve a
   // PENDIENTE (dupOf fuera, persistente) y el runner la reprocesa COMPLETA
-  // como cualquier otra (kit §2 — el dueño fuerza el reproceso de una
+  // como cualquier otra (kit §2 — el mantenedor fuerza el reproceso de una
   // gemela sospechosa). Si el runner está corriendo la toma en su siguiente
   // pasada (siguientePendiente ya incluye PENDIENTE).
   procesarIgual: async (id) => {
-    // e63k (F1.3): el dueño mandó — se estampa forzarDedupOff (persistente)
+    // e63k (F1.3): el mantenedor mandó — se estampa forzarDedupOff (persistente)
     // para que las capas 1 (visual) y 2 (identidad) lo respeten SIEMPRE:
     // el runner ya no pasa por reutilizarResultado (dupOf null) y la capa 2
     // tampoco la marcará (kit §1.3 — el reproceso completo es irrevertible
-    // hasta que el dueño decida otra cosa). e65 (T-6): extendido a
-    // YA-ENVIADA — el MISMO escape del dueño: la fila nace PENDIENTE con
+    // hasta que el mantenedor decida otra cosa). e65 (T-6): extendido a
+    // YA-ENVIADA — el MISMO escape del mantenedor: la fila nace PENDIENTE con
     // forzarDedupOff y enviadaDe FUERA (reproceso completo, RL-e65-7).
     patchFila(id, {
       estado: "PENDIENTE",
@@ -1271,7 +1271,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
 
   // D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» — la fila ERROR
   // vuelve a PENDIENTE (error fuera, persistente) y el runner la toma en su
-  // siguiente pasada (o cuando el dueño pulse PROCESAR). Guard honesto: sin
+  // siguiente pasada (o cuando el mantenedor pulse PROCESAR). Guard honesto: sin
   // archivo original en IDB (registros viejos o filas de formato) la fila
   // SIGUE en ERROR con SIN_ARCHIVO_ORIGINAL — jamás encolar humo.
   reintentar: async (id) => {
@@ -1331,7 +1331,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
       const actaNueva = acta;
       // Thumb FRESCO si la foto cambió (recorte/filtro/rotación hornean
       // fotoProcesada) — la bandeja no debe mentir.
-      // KIT e14-observabilidad-v1 (A1-C7): kill switch MANUAL del dueño
+      // KIT e14-observabilidad-v1 (A1-C7): kill switch MANUAL del mantenedor
       // (flags.thumbsOn, default true → idéntico sin overrides; D6: la app
       // nunca se auto-configura). OFF → conserva el thumb del registro.
       const thumb = leerFlags().thumbsOn
@@ -1339,7 +1339,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
           registro.thumb)
         : registro.thumb;
       await guardarRegistro({ ...registro, acta: actaNueva, thumb });
-      // e65b (T-3c): envío MANUAL desde REVISIÓN — si el dueño envió a mano
+      // e65b (T-3c): envío MANUAL desde REVISIÓN — si el mantenedor envió a mano
       // el acta de esta fila masiva, el desenlace ENVIADO también alimenta
       // el ledger (RL-e65b-2 — micro-decisión: la vía existe y vive aquí,
       // con la identidad registro.acta?.id === acta.id ya verificada arriba;
@@ -1403,7 +1403,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     // CACHE de sesión — NO el histórico. El ledger persistente (historico.ts,
     // DB separada) sobrevive: la próxima consulta reconstruye el índice
     // fusionando cola + ledger (T-2b) → tras VACIAR, re-subir lo ya enviado
-    // nace YA-ENVIADA igualmente (la prueba exacta del dueño: vaciar +
+    // nace YA-ENVIADA igualmente (la prueba exacta del mantenedor: vaciar +
     // re-subir los 46). `borrarHistorico()` existe pero JAMÁS se cablea aquí
     // (RL-e65b-5). La cola es el taller; el envío es el hecho.
     // e64p (C-2 — MODO PRUEBAS): con COLA_PERSISTENTE=false el ciclo de vida
@@ -1418,7 +1418,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
   },
 
   // D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO del ciclo de vida de
-  // envíos, a pedido literal del dueño (2026-10-28): «un botón para reiniciar
+  // envíos, a pedido literal del mantenedor (2026-10-28): «un botón para reiniciar
   // los envíos… para poder probar las mismas imágenes y hacer las medidas».
   // La MISMA higiene del C-2 (modo pruebas) pero como ACCIÓN EXPLÍCITA de UI
   // en producción: cola + ledger del histórico + TODA la memoria de dedup
@@ -1465,7 +1465,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
         const registro = await leerRegistro(fila.id);
         const acta = registro.acta;
         if (!acta || acta.status !== "ADVERTENCIA") continue;
-        // G5 (dueño, 2026-11-11): sin join DIVIPOL completo no se envía —
+        // G5 (mantenedor, 2026-11-11): sin join DIVIPOL completo no se envía —
         // misma regla que publicarDesdeActa ya exige para el monitor.
         if (!joinDeActa(acta)) continue;
         // La MISMA vía que el envío manual del flujo normal (T3.3) —
@@ -1517,7 +1517,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
   // maquinaria del lote (registrarEnvioMasiva → monitor D27 + registro
   // ENVIADA + ledger e65b + patchFila). El primer paso SINCRONIZA: los
   // datos editados en el panel (y el status ENVIADA que la vista ya no
-  // necesita estampar — este action es el dueño del desenlace) pasan al
+  // necesita estampar — este action es el mantenedor del desenlace) pasan al
   // registro ANTES de leerlo. Nada del runner ni del lote se toca.
   enviarActaAbierta: async () => {
     const { origenAbierto } = get();
@@ -1541,7 +1541,7 @@ export const useMasivaStore = create<MasivaStore>((set, get) => ({
     // (el sync no escribió si no coincidió — aquí se re-verifica honesto).
     if (!acta || !actaViva || acta.id !== actaViva.id) return false;
     if (acta.status === "ENVIADA") return true; // ya enviada — idempotente
-    // G5 (dueño, 2026-11-11): sin join DIVIPOL completo no se envía.
+    // G5 (mantenedor, 2026-11-11): sin join DIVIPOL completo no se envía.
     if (!joinDeActa(acta)) return false;
     set({ enviandoLote: true });
     try {
@@ -1621,7 +1621,7 @@ cablearStoreMasiva(useMasivaStore);
 
 // D66 — KIT e14-decode-unico-precalor-v1 (T3): el precalor queda cableado
 // al mini-store DESDE AHORA (store ya creado) — respira con la cola aunque
-// el dueño nunca pulse PROCESAR (ese es su propósito: trabajar en la
+// el mantenedor nunca pulse PROCESAR (ese es su propósito: trabajar en la
 // espera). En SSR el store no emite eventos y las señales de ociosidad lo
 // mantienen apagado.
 cablearPrecalor();

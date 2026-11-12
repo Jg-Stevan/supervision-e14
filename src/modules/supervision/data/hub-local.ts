@@ -31,7 +31,7 @@
  * origen `puente-local`, para que el feed distinga «del celular por la red» de
  * «de la bandeja de este computador»).
  *
- * INTERRUPTOR: el dueño lo prende desde la tarjeta HUB LOCAL de la vista
+ * INTERRUPTOR: el mantenedor lo prende desde la tarjeta HUB LOCAL de la vista
  * Recepción (persistido en `localStorage["e14-hub-local"]`). Arrancar el panel
  * con el hub apagado es el default: en GitHub Pages no hay hub, y un sondeo
  * fallando cada 4 s contra una 404 sería ruido. Tras 5 fallos seguidos el
@@ -483,7 +483,7 @@ export function alternarHubLocal(): boolean {
   return estado.activo;
 }
 
-/** Estado inicial al montar: respeta lo que dejó el dueño, y si venía prendido
+/** Estado inicial al montar: respeta lo que dejó el mantenedor, y si venía prendido
  *  pero el hub no responde, la tarjeta lo muestra (no se calla). */
 export function iniciarHubLocal(): void {
   let guardado = "off";

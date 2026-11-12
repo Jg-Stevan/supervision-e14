@@ -59,10 +59,10 @@ Dónde vive el código:
 ## Paso 1 — Construir los dos estáticos (2-4 min)
 
 ```bash
-cd "C:/Users/JG/Documents/REPOSITORIOS/digielect14"
+cd <ruta-local-del-mantenedor>/digielect14
 BUILD_STATIC=1 NEXT_PUBLIC_BASE_PATH= bun run build
 
-cd "C:/Users/JG/Documents/REPOSITORIOS/supervision-e14"
+cd <ruta-local-del-mantenedor>/supervision-e14
 MSYS_NO_PATHCONV=1 NEXT_PUBLIC_BASE_PATH=/supervision bun run build
 ```
 
@@ -87,7 +87,7 @@ MSYS_NO_PATHCONV=1 NEXT_PUBLIC_BASE_PATH=/supervision bun run build
 ## Paso 2 — Arrancar el hub (10 s)
 
 ```bash
-cd "C:/Users/JG/Documents/REPOSITORIOS/supervision-e14"
+cd <ruta-local-del-mantenedor>/supervision-e14
 bun scripts/hub-local.mjs              # 8443 HTTPS + 8081 HTTP de respaldo
 # opciones: --puerto 9443 --puerto-http 8082 --no-http --movil ../digielect14/out
 ```

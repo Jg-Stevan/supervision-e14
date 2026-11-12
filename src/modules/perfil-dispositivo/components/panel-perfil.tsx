@@ -41,7 +41,7 @@ import type { PerfilRecursos, PlanRecursos } from "../domain/tipos";
 // D38 (KIT e14-recursos-autonomos-v1) — la tarjeta AUTONOMÍA lee el plan que
 // la capa adaptativa (gama.ts, D74/D38) está APLICANDO de verdad: planGamaActual
 // (presupuestos vivos) + flagsMasivaEfectivos (flags que consumen los workers,
-// ya filtrados por el override manual del dueño). Paridad visual: lo que la
+// ya filtrados por el override manual del mantenedor). Paridad visual: lo que la
 // app usa, visible en pantalla.
 import {
   flagsMasivaEfectivos,
@@ -260,7 +260,7 @@ export function VistaPerfil() {
   >(null);
   // D38 — resolución EN MONTAJE (no en render) para hydration-safe con el
   // export estático; se re-resuelve cuando el perfil se re-detecta y cuando
-  // el dueño cambia el override (fase 4 — resolverAuto vía los botones).
+  // el mantenedor cambia el override (fase 4 — resolverAuto vía los botones).
   const resolverAuto = useCallback(() => {
     try {
       const f = leerFlags();
@@ -497,7 +497,7 @@ export function VistaPerfil() {
               title={
                 auto.flagAuto
                   ? "La app ajusta sola los presupuestos de recursos (KIT e14-recursos-autonomos-v1 · D38)"
-                  : "Kill-switch del dueño activo (masivaAdaptativoGama=false) — la app no se auto-configura"
+                  : "Kill-switch del mantenedor activo (masivaAdaptativoGama=false) — la app no se auto-configura"
               }
             >
               {auto.flagAuto ? "AUTO" : "MANUAL"}
@@ -567,7 +567,7 @@ export function VistaPerfil() {
           <ListChecks className="size-4 shrink-0 text-(--primary)" aria-hidden />
           <h3 className="label-caps text-foreground">Plan de recursos recomendado</h3>
           <span className="body-md text-muted-foreground">
-            — catálogo para este dispositivo (la app muestra; el dueño decide · D6)
+            — catálogo para este dispositivo (la app muestra; el mantenedor decide · D6)
           </span>
         </header>
         <div className="max-h-96 overflow-auto scroll-panel">

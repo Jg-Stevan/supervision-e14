@@ -10,7 +10,7 @@
  *    devtools del operador de mesa, p. ej. divipol → MANUAL).
  *
  * El formato de los mensajes NO cambia (prefijo `[e14] …` incluido en el
- * propio mensaje del caller) — las trazas que los QA y la consola del dueño
+ * propio mensaje del caller) — las trazas que los QA y la consola del mantenedor
  * conocen quedan byte-idénticas en desarrollo.
  *
  * KIT e14-observabilidad-v1 (A1-C3): warn/error TRANSPORTAN al buffer obs

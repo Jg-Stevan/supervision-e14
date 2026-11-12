@@ -28,7 +28,7 @@ import { leerFlags } from "../flags";
 // ─── e64p — KIT e64p-modo-pruebas-memoria-v1 (C-1/C-3): MODO PRUEBAS ───────
 // MODO PRUEBAS (pre-elección): la cola NO sobrevive recargas — revertir a
 // true para producción.
-// Pedido literal del dueño: «que las actas no se guarden en memoria por el
+// Pedido literal del mantenedor: «que las actas no se guarden en memoria por el
 // momento, porque estamos haciendo pruebas y la gracia es que en cada lote
 // pueda identificar el acta antes de procesarla».
 // Con FALSE (modo pruebas):
@@ -45,9 +45,9 @@ import { leerFlags } from "../flags";
 // restauración tras recarga/crash + dedup inter-lote + ledger e65b que
 // sobrevive vaciar() (D-e65b-1). Cero código borrado — solo ciclo de vida.
 /** e64p (C-1/C-2 — MODO PRUEBAS). Desde cola-persistente-v1: kill switch del
- *  dueño — el override `colaPersistente: false` (e14-flags-overrides) activa
+ *  mantenedor — el override `colaPersistente: false` (e14-flags-overrides) activa
  *  el modo pruebas (auto-borrado al cargar). Default TRUE: la masiva SOLO se
- *  elimina con vaciar() del dueño — petición literal 2026-10-24.
+ *  elimina con vaciar() del mantenedor — petición literal 2026-10-24.
  *  R8b — DESCONEXIÓN COMPLETA: constante PRIVADA del ledger — los gestos de
  *  ciclo de vida de abajo son la ÚNICA puerta (el store JAMÁS brancha sobre
  *  el flag; cero imports de este kill switch fuera de este módulo). */

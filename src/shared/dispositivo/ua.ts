@@ -75,7 +75,7 @@ export function nucleosDe(n: Navigator): number | null {
 /** Núcleos de CPU — variante CON DEFECTO 1 (COPIA verbatim de
  *  dispositivo.ts:29-33 `nucleosDel`; gama.ts la replica inline). El
  *  default 1 condena BAJO por nucleos ≤ 2 — semántica que obs/dispositivo
- *  necesita hasta que el dueño resuelva el borde (§B3 #1). */
+ *  necesita hasta que el mantenedor resuelva el borde (§B3 #1). */
 export function nucleosDeConDefecto(n: Navigator): number {
   return typeof n.hardwareConcurrency === "number" && n.hardwareConcurrency > 0
     ? n.hardwareConcurrency

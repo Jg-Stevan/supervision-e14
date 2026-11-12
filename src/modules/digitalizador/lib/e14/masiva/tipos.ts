@@ -41,7 +41,7 @@ export interface FilaMasiva {
    *  está DUPLICADA (Hamming ≤ 6) — el runner copia SU resultado. */
   dupOf?: string | null;
   /** D59 — KIT e14-info-acta-filas-v1 (T1): título compuesto con la info
-   *  reconocida del acta (idea del dueño, mockup Stitch corregido).
+   *  reconocida del acta (idea del mantenedor, mockup Stitch corregido).
    *  string|null: null = sin datos → la fila solo pinta el nombre de archivo
    *  (honestidad, jamás inventar). */
   infoTitulo?: string | null;
@@ -69,7 +69,7 @@ export interface FilaMasiva {
    *  consensuada (jamás inventar — RED LINE 2). Sirve al mapa de identidad
    *  de la cola y al informe. */
   serie?: string | null;
-  /** El dueño pulsó PROCESAR IGUAL: capas 1 (visual) y 2 (identidad) lo
+  /** El mantenedor pulsó PROCESAR IGUAL: capas 1 (visual) y 2 (identidad) lo
    *  respetan — jamás marcar esta fila de nuevo. Persistente (IDB).
    *  Ausente = sin override (comportamiento de siempre). */
   forzarDedupOff?: boolean;
@@ -119,7 +119,7 @@ export interface FilaMasiva {
   quad?: Quad;
   // ---------- W1 — KIT k1-obs-prioridad (brief Agente A) — campo ADITIVO AL FINAL (contrato D57) ----------
   /** W1 (KIT k1-obs-prioridad — brief Agente A): PRIORIDAD de la fila para el
-   *  sort del runner (paso 4 del dueño — flag masivaPrioridad ON): 1 = la
+   *  sort del runner (paso 4 del mantenedor — flag masivaPrioridad ON): 1 = la
    *  fila quedó decidida CON QR leído + quad OK (las mejores — pagan OCR
    *  primero); 2 = quedó sin QR (lectura imposible) o sin estampado (warp
    *  falló / fila sin decisión). Default EFECTIVO 2 (ausente = 2 en el sort).
@@ -143,7 +143,7 @@ export interface FilaMasiva {
    *  inventar). RAM del lote (NUNCA viaja a IDB — sobrevivir recarga no
    *  es requisito; el asegurador (e107) re-decide tras recargar). */
   rotacionSugerida?: 0 | 90 | 180 | 270 | null;
-  // ---------- KIT e14-solo-warp-qr-v1 (DRY RUN del dueño) — campo ADITIVO AL FINAL (contrato D57) ----------
+  // ---------- KIT e14-solo-warp-qr-v1 (DRY RUN del mantenedor) — campo ADITIVO AL FINAL (contrato D57) ----------
   /** Veredicto QR del PRE-SCAN en modo DRY RUN (flag masivaSoloWarpQr ON):
    *  true = el warp produjo un payload legible (BarcodeDetector → jsQR);
    *  false = el pre-scan llegó a la lectura y el QR no salió (o el warp no
@@ -278,7 +278,7 @@ export interface RegistroMasiva {
    *  regla general de persistencia del runner). null/ausente = sin lectura
    *  consensuada (jamás inventar). Sirve al mapa de identidad de la cola. */
   serie?: string | null;
-  /** El dueño pulsó PROCESAR IGUAL — persistente: sobrevive la recarga y
+  /** El mantenedor pulsó PROCESAR IGUAL — persistente: sobrevive la recarga y
    *  manda sobre capas 1 y 2 (el runner ya no pasa por reutilizarResultado
    *  porque dupOf es null, y la capa 2 tampoco la marcará). */
   forzarDedupOff?: boolean;
@@ -394,9 +394,9 @@ export interface RegistroMasiva {
   qrPresupuestoMs?: number | null;
 }
 
-/** KIT paginas-acta-e14-v1 (feedback del dueño): el E-14 es un formulario
+/** KIT paginas-acta-e14-v1 (feedback del mantenedor): el E-14 es un formulario
  *  de 2 HOJAS — el TOTAL de «PÁGINA» es siempre el del ACTA (2), jamás el
- *  del lote de ingesta ni un total dudoso del OCR (dueño: «es el número de
+ *  del lote de ingesta ni un total dudoso del OCR (mantenedor: «es el número de
  *  páginas de las actas, en este caso serían 2 páginas»). El ÍNDICE sigue
  *  siendo el reconocido (barcode/VerPag) o el corregido a mano. */
 export const PAGINAS_POR_ACTA_E14 = 2;
@@ -492,7 +492,7 @@ export type EtapaVidaKit = "preparando" | "deteccion" | "ocr" | "verificacion";
  *  IDB sería caro); al recargar la página las filas vuelven a PENDIENTE como
  *  hoy y no queda % fantasma.
  *
- *  CAMBIO (pedido del dueño): UN % para TODO el proceso del acta — antes el
+ *  CAMBIO (pedido del mantenedor): UN % para TODO el proceso del acta — antes el
  *  chip de la fila saltaba por tramos fijos por fase y el OCR escalonado
  *  (2 pasadas) hacía que el número RETROCEDIERA (95→50→95). Ahora el runner
  *  computa `fracGlobal` (0..1): cada fase del pipeline mapea a un tramo del
@@ -548,7 +548,7 @@ export interface MasivaStore {
   vaciar: () => Promise<void>;
   /** D33 — KIT e14-reiniciar-envios-v1: reset COMPLETO de envíos (cola +
    *  ledger del histórico + índices de sesión). El corte explícito que pide
-   *  el dueño para re-probar el MISMO lote — botón de 2 toques (MasivaView);
+   *  el mantenedor para re-probar el MISMO lote — botón de 2 toques (MasivaView);
    *  vaciar() queda byte a byte (RL-e65b-5 intacto). */
   reiniciarEnvios: () => Promise<void>;
   /** KIT e14-masiva-tiempos-v1 (PR-1): «PROCESAR IGUAL» — des-marca la fila
@@ -556,7 +556,7 @@ export interface MasivaStore {
    *  COMPLETA (fotos distintas pueden parecer iguales en thumb — kit §2). */
   procesarIgual: (id: string) => Promise<void>;
   /** D59 — KIT e14-info-acta-filas-v1 (T3): «REINTENTAR» de una fila ERROR —
-   *  la re-encola (PENDIENTE, error fuera, persistente) para que el dueño
+   *  la re-encola (PENDIENTE, error fuera, persistente) para que el mantenedor
    *  pulse PROCESAR. NO auto-procesa (misma doctrina D45: extraer/re-encolar
    *  NO procesa). Sin archivo original en IDB → la fila SIGUE en ERROR con
    *  SIN_ARCHIVO_ORIGINAL (honesto — registros viejos o filas de formato). */

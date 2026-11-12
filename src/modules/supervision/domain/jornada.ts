@@ -44,7 +44,7 @@ export interface DiaCalendario {
 /**
  * Semana electoral de la segunda vuelta 2026: lunes 15 → domingo 21 de
  * junio de 2026 (elecciones en Colombia el domingo 21 — ancla del
- * escenario «ubicados una semana antes», pedido del dueño).
+ * escenario «ubicados una semana antes», pedido del mantenedor).
  */
 export const DIAS_JORNADA: readonly DiaCalendario[] = [
   { id: "LUNES", etiqueta: "Lunes 15 de junio", etiquetaCorta: "Lun 15 jun", iso: "2026-06-15", esCierre: false },

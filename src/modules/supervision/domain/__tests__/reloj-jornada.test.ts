@@ -1,7 +1,7 @@
 /**
  * RELOJ REAL de la jornada (ronda «reloj real») — pruebas del dominio.
  *
- * Regla del dueño: «local es colombia, país es el q emite» — el cierre
+ * Regla del mantenedor: «local es colombia, país es el q emite» — el cierre
  * de cada puesto son las 4:00 p. m. HORA LOCAL del país emisor, en la
  * fecha de SU día de jornada de la semana actual (la de Colombia). El
  * instante de cierre se ancla con Intl; estas pruebas fijan:

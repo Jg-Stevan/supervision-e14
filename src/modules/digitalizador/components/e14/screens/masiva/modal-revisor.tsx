@@ -23,7 +23,7 @@
 //   pasa al siguiente acta del lote. Nada del runner/store se toca.
 // · Honestidad de datos (kit §1): score real, página real (o «- DE -») —
 //   jamás inventar campos.
-// · Feedback del dueño (ronda 1): VER EN MONITOR vive en la CABECERA del
+// · Feedback del mantenedor (ronda 1): VER EN MONITOR vive en la CABECERA del
 //   panel (outline verde + monitor, solo con publicación aterrizada D27);
 //   al fondo del panel queda SOLO CERRAR; campos del panel = exactamente
 //   los del diseño (fuera Intento/Hash/IdEnlace); «Verificación de
@@ -31,7 +31,7 @@
 //   (7-23-10-19 — plancha del formulario E-14 exterior), NO el barcode;
 //   móvil: el modal COMPLETO hace scroll (navegable) y AJUSTAR = canvas a
 //   pantalla completa real (h-dvh).
-// · Feedback del dueño (ronda 2): VER EN MONITOR es FIJO — no desaparece
+// · Feedback del mantenedor (ronda 2): VER EN MONITOR es FIJO — no desaparece
 //   tras darle click (la condición sale del JOIN del acta misma, no del
 //   registro en memoria de la publicación; solo se oculta con cuarentena
 //   D25, donde el acta NO está en el monitor). Código de barras se muestra
@@ -120,7 +120,7 @@ import {
 } from "@/modules/supervision/components/actas/visor-zoom";
 import { pildoraEstadoActa } from "./helpers";
 import { PublicacionChip } from "./publicacion-chip";
-// KIT paginas-acta-e14-v1 (feedback del dueño): el total de PÁGINA es el
+// KIT paginas-acta-e14-v1 (feedback del mantenedor): el total de PÁGINA es el
 // del ACTA (formulario de 2 hojas) — jamás del lote ni del OCR dudoso.
 import { PAGINAS_POR_ACTA_E14 } from "@/modules/digitalizador/lib/e14/masiva/tipos";
 import type { PropsMasivaView } from "./orquestador";
@@ -130,7 +130,7 @@ import type { PropsMasivaView } from "./orquestador";
 const RECT_MIN_PCT = 3;
 
 /** Modos de contraste del visor de masiva — KIT VISOR-MASIVA-v1 (N1,
- * dueño): BICICLO NORMAL↔NEGATIVO (el nivel «ALTO» sale de la UI de
+ * mantenedor): BICICLO NORMAL↔NEGATIVO (el nivel «ALTO» sale de la UI de
  * masiva; el trío del visor del monitor es OTRO componente y no se toca). */
 type ContrasteModo = "NORMAL" | "NEGATIVO";
 
@@ -144,7 +144,7 @@ function scoreTexto(score: number): string {
   return Number.isInteger(score) ? String(score) : score.toFixed(1);
 }
 
-/** «Verificación de Identificador / Código» (feedback del dueño): el código
+/** «Verificación de Identificador / Código» (feedback del mantenedor): el código
  * IMPRESO del formulario E-14 exterior — el que aparece ENTRE LAS X en el
  * acta física («X 7-23-10-19 X», justo bajo el encabezado CONSULADO/PAÍS/
  * ZONA/PUESTO/MESA/LUGAR). Es el código de plancha del formulario — NO es
@@ -155,13 +155,13 @@ function scoreTexto(score: number): string {
  * ahora se lee del manifiesto de actas reales vía `codigoFormaDeActa()`
  * (patrón barcodeRealDeActa); sin dato → «—» (honestidad de datos). */
 
-/** Etiqueta del formulario en la franja de metadata (feedback del dueño):
+/** Etiqueta del formulario en la franja de metadata (feedback del mantenedor):
  * SOLO el tipo de copia RECONOCIDO por la OCR — TRANSMISION → «TRANSMISIÓN»,
- * DELEGADOS → «CÓNSUL/EMBAJADOR». Sin reconocimiento → «—» (dueño: «debería
+ * DELEGADOS → «CÓNSUL/EMBAJADOR». Sin reconocimiento → «—» (mantenedor: «debería
  * aparecer Cónsul/embajador o transmisión; si no se llega a reconocer se
  * pone —»). El acta.tipo crudo es el TÍTULO del formulario mock («SENADO
  * DE LA REPÚBLICA»): NO es un tipo de copia — NUNCA se muestra (fuga del
- * mock reportada por el dueño). */
+ * mock reportada por el mantenedor). */
 function etiquetaFormularioDe(acta: Acta): string {
   const t = acta.clasificacion?.tipo;
   if (t === "TRANSMISION") return "TRANSMISIÓN";
@@ -170,7 +170,7 @@ function etiquetaFormularioDe(acta: Acta): string {
 }
 
 /** Etiqueta ORIGEN del panel (tipo de copia del acta) — misma regla del
- *  dueño: solo lo reconocido, sin reconocimiento → «—» (jamás el título
+ *  mantenedor: solo lo reconocido, sin reconocimiento → «—» (jamás el título
  *  crudo del mock). */
 function origenDe(acta: Acta): string {
   const t = acta.clasificacion?.tipo;
@@ -286,7 +286,7 @@ function ModalRevisorBase({
   const [editandoRecorte, setEditandoRecorte] = useState(false);
   // KIT VISOR-MASIVA-v1 (T4): el rectángulo por arrastre evoluciona a
   // CUADRILÁTERO de 4 esquinas libres — los 4 handles de borde se derivan
-  // de las esquinas (8 puntos visibles, decisión N2/D8 del dueño).
+  // de las esquinas (8 puntos visibles, decisión N2/D8 del mantenedor).
   const [puntos, setPuntos] = useState<QuadPct | null>(null);
   const [hintEditor, setHintEditor] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<
@@ -493,7 +493,7 @@ function ModalRevisorBase({
   };
 
   /** DESHACER (T4.4 — vive DENTRO del editor: absorbió al ↩ de la toolbar,
-   *  decisión 1 del dueño): devuelve la foto del momento ANTES de la
+   *  decisión 1 del mantenedor): devuelve la foto del momento ANTES de la
    *  primera edición (lógica intacta) y deja el editor abierto con el quad
    *  por defecto. Deshabilitado si no hay ediciones. */
   const deshacerEdicion = () => {
@@ -815,7 +815,7 @@ function ModalRevisorBase({
   const aceptarActa = async () => {
     if (!acta || !onAceptar || aceptando || aceptacionHecha) return;
     if (acta.status === "ENVIADA") return; // ya enviada — nada que aceptar
-    // KIT VISOR-MASIVA-v1 (T5 — decisión 6 del dueño): motivo OBLIGATORIO
+    // KIT VISOR-MASIVA-v1 (T5 — decisión 6 del mantenedor): motivo OBLIGATORIO
     // también al ACEPTAR — MISMA mecánica visual del rechazo (borde error +
     // mensaje inline; sin toast). Única excepción ordenada a «cero lógica»:
     // es validación de formulario sobre el motivo que YA viaja en el flujo
@@ -869,7 +869,7 @@ function ModalRevisorBase({
         const mesa = datosManual.mesa ?? c.mesa;
         const tipo = datosManual.tipo !== c.tipo ? datosManual.tipo : c.tipo;
         // Kit paginas-acta-e14-v1: el total que se HORNEA es el del acta
-        // (2 hojas — dueño), no el total dudoso que viajara del OCR.
+        // (2 hojas — mantenedor), no el total dudoso que viajara del OCR.
         const totalPaginas = PAGINAS_POR_ACTA_E14;
         const paginaEditada =
           datosManual.paginaIndex !== (c.pagina?.index ?? acta.pagina?.index ?? 1)
@@ -1012,7 +1012,7 @@ function ModalRevisorBase({
     totalMesas != null && totalMesas > 0
       ? Array.from({ length: totalMesas }, (_, i) => i + 1)
       : [];
-  // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del dueño — rondas 2
+  // ── CÓDIGO DE BARRAS DEL ACTA ESCANEADA (feedback del mantenedor — rondas 2
   //    y 3): el 1D REAL leído al papel por el pipeline o el manifiesto de
   //  actas reales como respaldo — UNA sola fuente (barcodeRealDeActa del
   //  adaptador, la misma que publica el monitor). NUNCA un código de
@@ -1028,14 +1028,14 @@ function ModalRevisorBase({
       role="dialog"
       aria-modal="true"
       aria-label={`Revisión de acta ${acta.titulo}`}
-      // Móvil navegable (feedback del dueño): el modal COMPLETO hace scroll
+      // Móvil navegable (feedback del mantenedor): el modal COMPLETO hace scroll
       // (el panel del auditor queda alcanzable); en lg vuelve el layout de
       // 2 columnas con scroll interno del panel.
       className="fixed inset-0 z-50 flex h-dvh flex-col overflow-y-auto overscroll-contain bg-[var(--mz-bg)] lg:flex-row lg:overflow-hidden"
     >
       {/* ════════════════ CANVAS — VISOR DEL DOCUMENTO ════════════════ */}
       {/* Canvas: 52vh en móvil — AJUSTAR (expandido) lo lleva a PANTALLA
-          COMPLETA REAL (h-dvh, feedback del dueño) con el panel oculto. */}
+          COMPLETA REAL (h-dvh, feedback del mantenedor) con el panel oculto. */}
       <main
         className={`grid-paper-bg relative flex shrink-0 flex-col overflow-hidden bg-[var(--mz-canvas)] ${
           expandido ? "h-dvh" : "h-[52vh]"
@@ -1090,7 +1090,7 @@ function ModalRevisorBase({
               <RotateCw className="h-4 w-4" />
             )}
           </button>
-          {/* CONTRASTE — biciclo NORMAL↔NEGATIVO (N1 del dueño: el nivel
+          {/* CONTRASTE — biciclo NORMAL↔NEGATIVO (N1 del mantenedor: el nivel
               «ALTO» sale de la UI de masiva). */}
           <button
             type="button"
@@ -1106,7 +1106,7 @@ function ModalRevisorBase({
           >
             <Contrast className="h-4 w-4" />
           </button>
-          {/* AJUSTAR = PANTALLA COMPLETA del acta (pedido del dueño). */}
+          {/* AJUSTAR = PANTALLA COMPLETA del acta (pedido del mantenedor). */}
           <button
             type="button"
             onClick={() => setExpandido((v) => !v)}
@@ -1360,7 +1360,7 @@ function ModalRevisorBase({
             `visor_de_actas_sin_envio_automatico` / V3-01: el botón ✎ EDITAR
             verde del pie ABRE el editor de recorte/perspectiva (T4 — las
             herramientas ✂/↩ salieron de la toolbar por decisión 1 del
-            dueño; toda la edición entra por aquí). Solo actas SIN envío
+            mantenedor; toda la edición entra por aquí). Solo actas SIN envío
             automático (editables). ── */}
         <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 lg:bottom-16">
           {editable && !editandoRecorte && (
@@ -1451,7 +1451,7 @@ function ModalRevisorBase({
 
       {/* ════════════════ PANEL DEL AUDITOR (SIDEBAR) ════════════════ */}
       {/* gap-4 (ronda 2): los demás espacios se compactan para darle sitio
-          a la tarjeta de datos — feedback del dueño. */}
+          a la tarjeta de datos — feedback del mantenedor. */}
       <aside
         className={`w-full shrink-0 overflow-y-auto border-t border-[var(--mz-border)] bg-[var(--mz-aside)] p-5 lg:w-[380px] lg:border-l lg:border-t-0 ${
           expandido ? "hidden" : "flex flex-col gap-4"
@@ -1484,7 +1484,7 @@ function ModalRevisorBase({
                 </>
               )}
             </div>
-            {/* VER EN MONITOR (feedback del dueño): en la CABECERA del panel,
+            {/* VER EN MONITOR (feedback del mantenedor): en la CABECERA del panel,
                 outline verde + icono monitor. RONDA 2 — BOTÓN FIJO: la
                 condición es el JOIN del acta (clasificación AUTO, viaja
                 persistida con el acta) — NO el registro en memoria de la
@@ -1524,14 +1524,14 @@ function ModalRevisorBase({
               </span>
             )}
           </div>
-          {/* DESPLAZADOR INTERNO (feedback del dueño — ronda 2): en ventanas
+          {/* DESPLAZADOR INTERNO (feedback del mantenedor — ronda 2): en ventanas
               medianas/pequeñas la tarjeta puede no caber entera → su
               contenido se desplaza DENTRO (max-h + overflow) con scroll
               fino (.scroll-panel). overscroll-contain solo en lg para no
               atrapar el dedo en móvil (el scroll fluye al modal). */}
           <div className="max-h-[45dvh] space-y-3 overflow-y-auto p-3.5 font-mono text-xs scroll-panel lg:overscroll-contain">
             {/* VERIFICACIÓN DE IDENTIFICADOR / CÓDIGO — el código IMPRESO
-                ENTRE LAS X del acta física (feedback del dueño; NO el
+                ENTRE LAS X del acta física (feedback del mantenedor; NO el
                 código de barras, que va en su campo propio). */}
             <div>
               <span className="mb-1 block text-center text-[10px] font-bold uppercase tracking-wide text-gray-400">
@@ -1635,7 +1635,7 @@ function ModalRevisorBase({
                   <DatoSelect
                     etiqueta="Página"
                     ariaLabel="Seleccionar página del acta"
-                    // Kit paginas-acta-e14-v1 (feedback del dueño): el total
+                    // Kit paginas-acta-e14-v1 (feedback del mantenedor): el total
                     // del select es el del ACTA (2 hojas — «en este caso
                     // serían 2 páginas»), NUNCA el del lote de ingesta ni un
                     // total dudoso del OCR. El índice preseleccionado sigue
@@ -1680,7 +1680,7 @@ function ModalRevisorBase({
 
         {/* ── Publicación en el monitor (D27 — lógica intacta, recolocada:
             feedback compacto bajo la tarjeta de datos; al fondo del panel
-            queda SOLO CERRAR, pedido del dueño). ── */}
+            queda SOLO CERRAR, pedido del mantenedor). ── */}
         <PublicacionChip publicacion={publicacion} />
 
         {/* ── Banner de rechazo (estado del acta) ── */}
@@ -1819,7 +1819,7 @@ function ModalRevisorBase({
           </div>
 
           {/* ── Cerrar (visible siempre — el redesign no tiene scrim-clic;
-              al fondo del panel queda SOLO este botón, pedido del dueño) ── */}
+              al fondo del panel queda SOLO este botón, pedido del mantenedor) ── */}
           <button
             type="button"
             onClick={onCerrar}

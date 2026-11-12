@@ -18,7 +18,7 @@
  *  · muere con la página (RAM); con COLA_PERSISTENTE=false se limpia en
  *    cargarFilas/vaciar/reiniciarEnvios (modo pruebas e64p C-1/C-2);
  *  · en producción SOBRE-VIVE a vaciar() (comportamiento histórico de
- *    mapaQrPayload — el dueño ya contaba con dedup de sesión tras vaciar);
+ *    mapaQrPayload — el mantenedor ya contaba con dedup de sesión tras vaciar);
  *  · llave OPACA: la única comparación es la IGUALDAD EXACTA del payload
  *    completo (jamás prefijos — RED LINE 10); sin umbrales, sin fuzzy
  *    (RED LINE 5). La llave nunca viaja al informe parseada (export-only).

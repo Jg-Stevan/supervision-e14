@@ -67,7 +67,7 @@ otra foto" depende de la capa perceptual: ver §5.2.
 | 12 | iOS y otros Android | Sí: corregir iOS y ampliar matriz de compatibilidad |
 | 13 | Notificaciones (D82) | Eliminada (la vista ya no existe) |
 | 14 | GitHub Pages | Retirar (bloqueo técnico abajo) |
-| 15 | `.git` accidental en `C:\Users\JG` | Borrar (bloqueo técnico abajo) |
+| 15 | `.git` accidental en el home del mantenedor | Borrar (bloqueo técnico abajo) |
 
 ---
 
@@ -92,7 +92,7 @@ de **carga masiva** del panel (el resto es web).
 | Pieza | Servicio | Motivo |
 |---|---|---|
 | Estáticos (panel y móvil) | **Cloudflare Pages** (ya hay `cloudflare-pages.yml`) | Gratis, conectado a GitHub, headers propios |
-| API del hub | **Cloudflare Worker** (`e14-puente`, ya existe) | Mismo dueño, gratis hasta 100k req/día |
+| API del hub | **Cloudflare Worker** (`e14-puente`, ya existe) | Mismo mantenedor, gratis hasta 100k req/día |
 | Fotos subidas | **Cloudflare R2** | 10 GB gratis, sin costo de salida |
 | COOP/COEP (multi-hilo) | Headers en `public/_headers` de Pages y en el Worker | Requisito del OCR multihilo |
 
@@ -175,15 +175,15 @@ En `digielect14` queda `deploy-pages.yml`; decidir lo mismo y borrarlo junto con
 sus menciones en comentarios (`deploy-cf.yml`, `quality.yml`, `frescura-deploys.yml`).
 *(El agente no ejecutó el DELETE remoto: acción externa bloqueada en auto mode.)*
 
-### 5.9 `.git` accidental en `C:\Users\JG` (decisión 15) — paso manual
+### 5.9 `.git` accidental en el home del mantenedor (decisión 15) — paso manual
 Es un repo sin commits que ve todo el home. El agente no pudo moverlo (permiso
 denegado; posible bloqueo del propio editor/indexador). Cerrar el editor que lo
 tenga abierto y ejecutar:
 
 ```powershell
-Move-Item C:\Users\JG\.git C:\Users\JG\git-accidental-home-2026-11-11
+Move-Item <ruta-local-del-mantenedor>\.git <ruta-local-del-mantenedor>\git-accidental-home-2026-11-11
 # o, si no está en uso:
-Remove-Item -Recurse -Force C:\Users\JG\.git
+Remove-Item -Recurse -Force <ruta-local-del-mantenedor>\.git
 ```
 
 ### 5.10 Rama `feat/fusion-evidencia-divipol` (decisión 2)
@@ -211,10 +211,10 @@ código mantenible y una descarga mínima para quien lo pruebe.
   compartidos en un solo lugar y tests junto al código que cubren.
 
 ### 6.2 Comentarios y atribuciones personales
-- **~399 menciones a «dueño» en código y scripts** (350 del tipo «el/del dueño»).
+- **~399 menciones al rol de propietario en código y scripts** (350 del tipo «el/del propietario»).
   Se deben neutralizar: la decisión se documenta como decisión
   (p. ej. «Decisión D-8: …») sin atribuir a una persona.
-- Revisar «feedback del dueño», «regla del dueño» y similares en comentarios;
+- Revisar «feedback del propietario», «regla del propietario» y similares en comentarios;
   conservar el *qué* y el *porqué*, no el quién.
 - Comentarios solo para el porqué no obvio; eliminar los que narran la tarea o
   el historial de una corrección.

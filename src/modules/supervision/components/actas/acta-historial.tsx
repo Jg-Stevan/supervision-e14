@@ -6,12 +6,12 @@ import { useRelojVivo } from "../reloj-vivo";
 
 /**
  * Timeline vertical del acta (KIT VISOR-MONITOR-GLOBAL-v1 §4-T7 — diseño
- * del dueño): línea border-l outline-variant, puntos de color SEMÁNTICOS
+ * del mantenedor): línea border-l outline-variant, puntos de color SEMÁNTICOS
  * (verde = publicación/envío · ámbar = recibido en cola · gris = pendiente
  * /cierre · rojo = crítico · teal = aprobada), evento más reciente ARRIBA
  * (el orden del array — los eventos nuevos se insertan al frente).
  *
- * Mapeo del punto (T7.2 — la imagen del dueño: verde PUBLICADO, ámbar
+ * Mapeo del punto (T7.2 — la imagen del mantenedor: verde PUBLICADO, ámbar
  * RECIBIDO EN COLA, gris PENDIENTE): el nivel D19 solo distingue
  * CRITICO/ALERTA/NEUTRAL/APROBADA y la publicación viaja como NEUTRAL —
  * el color semanticamente correcto se resuelve por TÍTULO del evento

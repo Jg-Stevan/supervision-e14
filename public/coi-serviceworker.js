@@ -32,7 +32,7 @@
  * vez (guard sessionStorage) para heredar el aislamiento de la navegación.
  * Subsecuentes visitas nacen aisladas sin recarga.
  *
- * Kill-switch del dueño: no registrar el SW (el script del layout es la
+ * Kill-switch del mantenedor: no registrar el SW (el script del layout es la
  * única línea que lo activa) → byte-idéntico a hoy.
  */
 

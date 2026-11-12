@@ -27,16 +27,16 @@ import type { EstadoGlobal, FiltrosPuestos } from "../domain/types";
  * KIT monitor-jornada-v1: el select FECHA lista la semana electoral real
  * (lun 15 → dom 21 de junio de 2026). Elegir un día filtra la matriz Y
  * los KPIs — cada jornada se supervisa aislada, sin mezclar puestos de
- * días distintos (pedido del dueño). La regla de resumen es la MISMA
+ * días distintos (pedido del mantenedor). La regla de resumen es la MISMA
  * derivación del store (resumenDePuestos) sobre el conjunto del día.
  *
- * RONDA «RELOJ REAL» (pedido del dueño): los puestos se proyectan sobre
+ * RONDA «RELOJ REAL» (pedido del mantenedor): los puestos se proyectan sobre
  * el reloj real ANTES de alimentar KPIs, resumen y matriz — el estado,
  * la hora del país emisor y el TIEMPO cambian solos conforme avanza el
  * reloj (NO INICIADO antes de las 16:00 del emisor · verde < 1 hr ·
  * amarillo > 1 hr · rojo CRÍTICO > 3 hrs). La vista abre en la jornada
  * EN CURSO según Colombia (la LOCAL del supervisor): es la única que el
- * reloj real está viviendo ahora — el hash restaurado del dueño gana si
+ * reloj real está viviendo ahora — el hash restaurado del mantenedor gana si
  * trae otro día.
  */
 export function VistaMonitor() {
@@ -59,18 +59,18 @@ export function VistaMonitor() {
   // minuto vivo que alimenta la proyección (ambos: reloj-vivo.ts).
   const ahoraMinuto = useRelojVivo();
   const ahoraSegundo = useRelojSegundos();
-  // Pedido del dueño (ronda «reloj real»): la vista abre en la jornada EN
+  // Pedido del mantenedor (ronda «reloj real»): la vista abre en la jornada EN
   // CURSO según Colombia — antes abría en LUNES (fijo del demo); con el
   // reloj real, las jornadas pasadas quedan atrás (rezagados críticos
   // reales) y la viva es HOY. La fecha NO se lee en el render (impura —
   // lint de pureza): la fija el effect de restauración de más abajo, que
-  // además deja ganar al día que el dueño dejó en el hash.
+  // además deja ganar al día que el mantenedor dejó en el hash.
   const [filtros, setFiltros] = useState<FiltrosPuestos>({});
 
   // R4-M7 — restauración de los filtros desde el espejo hash, UNA vez al
   // montar (ref anti-doble-invoke). setState diferido a microtask (misma
   // regla de lint que C8). Ronda «reloj real»: si el hash no trae el día
-  // que dejó elegido el dueño, el default es la jornada EN CURSO según
+  // que dejó elegido el mantenedor, el default es la jornada EN CURSO según
   // Colombia (la LOCAL del supervisor) — Date.now() vive AQUÍ (effect),
   // nunca en el render.
   const filtrosRestauradosRef = useRef(false);

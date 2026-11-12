@@ -1,14 +1,14 @@
 /**
  * KIT perfil-recursos-v1 — plan de recursos RECOMENDADO por dispositivo.
  *
- * La parte "APROVECHAR" de la petición del dueño: no basta con degradar en
+ * La parte "APROVECHAR" de la petición del mantenedor: no basta con degradar en
  * gama baja (lo hace la capa adaptativa D74) — un dispositivo ALTO debe
  * poder RENDIR más (más workers, más hilos OCR, precalor ampliado, más
  * caché, precarga de modelos) y un celular debe UI distinta a un PC.
  *
  * D6: esto es un CATÁLOGO — el panel lo muestra y los módulos lo consumen
  * de forma ACOTADA y REVOCABLE (cada consumidor decide; el override manual
- * del dueño manda siempre). Nada aquí configura la app solo.
+ * del mantenedor manda siempre). Nada aquí configura la app solo.
  *
  * Tabla base = flags/defaults del pipeline (FLAGS_DEFAULT + gama.ts BASE).
  */
@@ -118,7 +118,7 @@ export function planRecomendado(tier: Tier, senales: RecursoSenales | null): Pla
         base: "siempre",
         recomendado: redDebil ? "solo en wifi" : "siempre",
         nota: redDebil
-          ? "Red lenta o saveData activo — evita consumir el plan del dueño"
+          ? "Red lenta o saveData activo — evita consumir el plan del mantenedor"
           : "Red holgada",
       },
     ];

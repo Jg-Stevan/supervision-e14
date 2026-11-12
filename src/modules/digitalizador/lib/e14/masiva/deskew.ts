@@ -27,7 +27,7 @@
  *  Partes PURAS (sin DOM — overnight 3B-B2a: dejaron de ser export, su
  *  único consumidor es preProcesoEscaneo en este mismo módulo). Partes DOM
  *  (decode/rotación/encode): solo corren en el navegador — el humo de bun
- *  cubre la matemática; el desenlace real lo valida el dueño con sus
+ *  cubre la matemática; el desenlace real lo valida el mantenedor con sus
  *  escaneos. */
 
 // R8 — re-apuntado directo al módulo canónico (fin del re-export temporal

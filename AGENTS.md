@@ -14,7 +14,7 @@
 ## Privacidad e integridad
 - Son datos electorales reales: no commitees actas, capturas ni credenciales, y no envíes actas a endpoints externos.
 - No añadas dependencias, telemetría ni servicios externos sin preguntarlo antes.
-- Nunca `git push --force` ni reescritura de historial. **Excepción única y autorizada por el dueño**: purgas puntuales de binarios del historial (p. ej. `git filter-repo` para dejar de versionar modelos). Requisitos: bundle de respaldo con `--all`, verificación post-reescritura, `--force-with-lease` (nunca `--force` a secas) y registrar en `docs/adr/README.md` el SHA previo y el motivo. Cualquier otro caso sigue prohibido.
+- Nunca `git push --force` ni reescritura de historial. **Excepción única y autorizada por el mantenedor**: purgas puntuales de binarios del historial (p. ej. `git filter-repo` para dejar de versionar modelos). Requisitos: bundle de respaldo con `--all`, verificación post-reescritura, `--force-with-lease` (nunca `--force` a secas) y registrar en `docs/adr/README.md` el SHA previo y el motivo. Cualquier otro caso sigue prohibido.
 - No commitees binarios de `public/` (modelos `.onnx`, `traineddata.gz`, OpenCV, vendor). Van en `.gitignore` y los genera `bun run preparar`; si hace falta un asset nuevo, se declara en `scripts/assets.lock.json` con su SHA-256.
 
 ## Paridad con `digielect14` (el mismo motor, dos productos)

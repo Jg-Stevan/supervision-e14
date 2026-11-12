@@ -1,6 +1,6 @@
 /**
  * KIT e14-orientacion-qr-v1 — QR-BRÚJULA de orientación (el cuadrante del QR
- * manda). Evidencia del bench v8.3 del dueño (4 fotos reales: 2 JPG 8MP de
+ * manda). Evidencia del bench v8.3 del mantenedor (4 fotos reales: 2 JPG 8MP de
  * Galaxy A56 con papel arrugado/blotchy + 2 HEIC; corrida 26/10 en el
  * navegador, worker real de producción):
  *
@@ -38,7 +38,7 @@
  *   · round-robin de esquinas (lección del bench: 9 intentos se quemaban en
  *     la esquina equivocada): RONDA 1 = {1.5G, 2G} × esquinas — RONDA 2 =
  *     variantes restantes {L, jsQR@2, θ ±10°} × esquinas.
- *   · ORDEN base +180° (tiempos del run v8.3 del dueño): el hogar efectivo
+ *   · ORDEN base +180° (tiempos del run v8.3 del mantenedor): el hogar efectivo
  *     del QR cayó +180° de la regla H/W en 4/4 (vert→BR · horiz→TR); probar
  *     la predicción primero quemó 6–8 intentos (QR-HR 5.1/4.5 s vs 1.4/1.3
  *     s de los que cayeron al 1.º). Base INVERTIDO del bench v8.4:
@@ -51,7 +51,7 @@
  *   · Payload OPACA: no se parsea, no se invierte, no se compara por
  *     prefijos (solo guard de longitud ≥ 8 contra basura).
  *   · Traza en línea PROPIA `[e14] orientacion-qr …` (D51: solo AÑADIR —
- *     los instrumentos del dueño parsean por prefijo; la línea del probe
+ *     los instrumentos del mantenedor parsean por prefijo; la línea del probe
  *     `[e14] orientacion …` NO cambia de forma).
  *   · Kill-switch: flags.qrBrujulaOrientacion (default true; OFF = byte-
  *     idéntico a hoy).
@@ -388,7 +388,7 @@ async function vertDelWarp(fotoOcr: string): Promise<boolean> {
   }
 }
 
-/** Orden de esquinas del rescate (tiempos del run v8.3 del dueño): el hogar
+/** Orden de esquinas del rescate (tiempos del run v8.3 del mantenedor): el hogar
  *  efectivo del QR cayó +180° de la regla H/W en 4/4 (160903/durazno4: BR
  *  real vs TL predicho · 160922/durazno1: TR real vs BL predicho) — la
  *  predicción primera quemó 6–8 intentos. Base INVERTIDO (bench v8.4,

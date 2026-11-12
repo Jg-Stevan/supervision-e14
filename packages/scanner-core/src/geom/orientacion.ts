@@ -1,6 +1,6 @@
 /**
  * KIT e14-orientacion-auto-v1 (§2) — probe de orientación por confianza de
- * rec + anclas de lectura. Causa raíz del informe del dueño 19/10 (12
+ * rec + anclas de lectura. Causa raíz del informe del mantenedor 19/10 (12
  * RECHAZADAS score 4.9, «BAJO — NO SE RECONOCE INFORMACIÓN», lectura DEBIL:
  * actas físicamente ROTADAS 90°/180° al fotografiarlas — tira Consulado de
  * Egipto, KIT 399). El EXIF ya lo aplica el core (F-IMPORT) — NO es bug de
@@ -27,14 +27,14 @@
  *
  * Presupuesto (§2.2 / D56 §3 T3): PROBE_BUDGET_MS = 12000 — si a mitad de
  * probe se pasa, aborta y sigue con 0° (comportamiento de hoy; el 4000
- * original NUNCA alcanzó el primer desafiante en la HP 4 cores del dueño:
+ * original NUNCA alcanzó el primer desafiante en la HP 4 cores del mantenedor:
  * det1920 3037 ms + rec0 ~3000 ms = 6030 > 4000 → aplicado=0 garantizado).
  * SIM: el probe NO corre
  * (guard en el bridge — chips 8.2/7.0/4.3 intactos). Sin recorte: corre igual
  * (no hay quad, pero la rotación del contenido es independiente — §2.2; en
  * ESTA base sinRecorte solo existe en SIM → el guard del bridge lo cubre).
  *
- * Traza en línea PROPIA (§2.1 paso 5 — los instrumentos del dueño parsean por
+ * Traza en línea PROPIA (§2.1 paso 5 — los instrumentos del mantenedor parsean por
  * prefijo; NO mezclar campos con pipeline/recorte; solo AÑADIR):
  *   [e14] orientacion crop=WxH rot=R probe={0:a,90:b,180:c,270:d} anclasR=n confR=0.xx aplicado=0|1 ms=NNN cortes=sana|presupuesto|vacio|completo
  * (en probe={} aparecen SOLO las rotaciones sondeadas — los atajos cortan;
@@ -47,7 +47,7 @@
  * Sin línea si el probe ni siquiera corrió (SIM o error duro de det/init —
  * catch general: el probe JAMÁS tumba el pipeline, §5).
  *
- * KIT e70-orientacion-condicional-v1 (P4.1 del dueño): el EXIF de cámara YA
+ * KIT e70-orientacion-condicional-v1 (P4.1 del mantenedor): el EXIF de cámara YA
  * NO omite el sondeo por sí solo — dice cómo estaba el TELÉFONO, no cómo
  * quedó el acta (evidencia: 3 fotos landscape con EXIF rechazadas score 4.9,
  * anclas 0, cabeceraE14 false). El bridge entra en MODO CONFIRMACIÓN
@@ -58,7 +58,7 @@
  * condición fallida (anclas 0, conf 0.3, quad de fallback) ⇒ sondeo completo
  * 0/90/180/270 y el MARGEN decide. En este modo el atajo T1 sana NO aplica
  * (su MEDIA por chars>=150 perdonaba lecturas basura de actas de lado — el
- * criterio del dueño es EL gate). Sin opciones → comportamiento de hoy byte
+ * criterio del mantenedor es EL gate). Sin opciones → comportamiento de hoy byte
  * a byte (recorte manual y flujos sin EXIF). Traza: exif=0|1 ADITIVO AL
  * FINAL (1 = el caller pidió modo confirmación).
  *
@@ -103,7 +103,7 @@ import {
   rapidOcrRecLote,
 } from "../ocr/rapidocr";
 import { logger } from "../dominio/logger"; // SPRINT-A A6 — console→logger (mensajes byte-idénticos)
-// KIT e14-probe-mini768-v1 — el lado de la miniatura del sondeo lo fija el dueño.
+// KIT e14-probe-mini768-v1 — el lado de la miniatura del sondeo lo fija el mantenedor.
 // KIT e14-ocr-tessbest-v1 — presupuesto del probe de orientación por tier.
 // FASE 2 (§3.1/D3): lo adaptativo entra por OpcionesPlan — el paquete no
 // conoce adaptacion/plan.ts (la app lo inyecta).
@@ -144,7 +144,7 @@ export interface ProbeOrientacion {
 
 /** e70 (P4.1) — opciones del probe. Su PRESENCIA activa el MODO
  *  CONFIRMACIÓN (solo el branch exif-camara del bridge): el criterio del
- *  dueño reemplaza al atajo T1 sana como ÚNICO gate a 0°. quadWorker=false
+ *  mantenedor reemplaza al atajo T1 sana como ÚNICO gate a 0°. quadWorker=false
  *  → sin atajo («el quad se detectó mal» — fallback sobel fabricó la
  *  geometría → sondeo completo). Ausente → comportamiento de hoy byte a
  *  byte (recorte manual, flujos sin EXIF). */
@@ -156,7 +156,7 @@ export interface OpcionesProbeOrientacion {
 }
 
 /** §2.2 — tope duro del probe: a mitad, abortar y seguir con 0° (hoy).
- *  D56 §3 T3: 4000 → 12000 — presupuesto HONESTO. El caso roto del dueño
+ *  D56 §3 T3: 4000 → 12000 — presupuesto HONESTO. El caso roto del mantenedor
  *  (HP 4 cores: det a 1920 = 3037 ms) ya agotaba 4000 con el baseline a 0°.
  *  Con det del probe a DET_CAP_RAPIDO (T2) el caso roto cabe: det ~1.2 s +
  *  rec0 ~3 s + rec90 ~3 s + rec270 ~3 s ≈ 10.2 s < 12 s. Solo lo pagan actas
@@ -180,7 +180,7 @@ const TOPE_SCORE = 10;
 // ─── KIT REPARTE-3-AGENTES-v1 (Agente A, Cambio 1): MINI-PROBE ──────────────
 // El probe de HOY corre det (cap 1280) + rec ×4 rotaciones sobre la foto a
 // resolución completa — el paso más caro invisible del pipeline (lote 1 del
-// dueño: 5.3–13.6 s por acta, ~488 s del lote, 46/46 actas lo pagaron). La
+// mantenedor: 5.3–13.6 s por acta, ~488 s del lote, 46/46 actas lo pagaron). La
 // miniatura hace det+rec ~50-100× más barato; el FALLO SEGURO devuelve el
 // comportamiento de HOY (sondeo a resolución original) en cuanto la
 // miniatura no alcanza confianza — la decisión final JAMÁS cambia por este
@@ -210,7 +210,7 @@ const PROBE_MINI_ANCLAS_MIN = 2;
 const PROBE_MINI_CONF_MIN = 0.6;
 
 // ─── KIT e14-probe-adaptativo-v1 (D62 T1): ganador persistente del sondeo ───
-// El patrón del escáner/fotógrafo del dueño es consistente (lote 15:04: CCW →
+// El patrón del escáner/fotógrafo del mantenedor es consistente (lote 15:04: CCW →
 // ganador rot=270): con el ganador sondeado ANTES que el resto, cada acta
 // rotada se ahorra una pasada completa (~2-4 s). Persistencia en localStorage
 // (clave e14-probe-ganador-v1) con try/catch TOTAL — modo privado / cuota /
@@ -429,7 +429,7 @@ async function sondeoDe(
       : [0, gan, ...base.filter((r) => r !== 0 && r !== gan)];
   let mejor: Rotacion | null = null;
   // D56 §3 T4 — por qué terminó el sondeo (solo para la traza, aditivo).
-  // e70: + "confirmada" (criterio del dueño — valor ADITIVO, los previos
+  // e70: + "confirmada" (criterio del mantenedor — valor ADITIVO, los previos
   // no cambian de forma; D51).
   let corte: "sana" | "presupuesto" | "completo" | "confirmada" = "completo";
   for (const rot of orden) {
@@ -457,7 +457,7 @@ async function sondeoDe(
     anclas[rot] = nAnclas;
     conf[rot] = confMedia;
     if (rot === 0) {
-      // e70 — MODO CONFIRMACIÓN (P4.1): el criterio del dueño es EL gate —
+      // e70 — MODO CONFIRMACIÓN (P4.1): el criterio del mantenedor es EL gate —
       // quad del WORKER + anclas >= 3 Y conf >= 0.7 a 0° ⇒ la primera
       // pasada rápida CONFIRMÓ la orientación ⇒ sin challengers. En este
       // modo T1 sana NO aplica (su MEDIA por chars>=150 perdonaba lecturas
@@ -477,7 +477,7 @@ async function sondeoDe(
       // D56 §3 T1 — atajo de lectura-sana: si el texto a 0° YA se lee,
       // ninguna rotación puede necesitar aplicarse y ninguna debe arriesgar
       // la lectura (rotar es riesgo puro). El acta sana sale en ~4 s sin
-      // sondear 90/270/180; la rotada del dueño leyó anclas0=0 chars=9 →
+      // sondear 90/270/180; la rotada del mantenedor leyó anclas0=0 chars=9 →
       // DEBIL → sigue a los challengers ✓. Regresión nula esperada: el
       // MARGEN ya protegía parcialmente; esto lo hace explícito y barato.
       if (senalDeLectura(texto).nivel !== "DEBIL") {
@@ -509,7 +509,7 @@ async function sondeoDe(
  *    ≥2 anclas — senalDeLectura). La miniatura SUB-LEE respecto a la
  *    original: si ELLA ya lee, la original lee ≥ ⇒ también "sana" ⇒
  *    aplicado=0 en ambos.
- *  · corte "confirmada": el gate del dueño (quadWorker + anclas ≥ 3 Y
+ *  · corte "confirmada": el gate del mantenedor (quadWorker + anclas ≥ 3 Y
  *    conf ≥ 0.7 a 0°) — su evidencia ya es fuerte por construcción.
  *  · aplicado=1 con ganadora FUERTE: ≥ PROBE_MINI_ANCLAS_MIN anclas Y
  *    ≥ PROBE_MINI_CONF_MIN conf en la rotación ganadora (señal estructural
@@ -559,7 +559,7 @@ async function miniaturaDataUrlDe(fotoOcr: string, lado: number): Promise<string
   }
 }
 
-/** Traza del sondeo DECISOR (formato §2.1 paso 5 — los instrumentos del dueño
+/** Traza del sondeo DECISOR (formato §2.1 paso 5 — los instrumentos del mantenedor
  *  parsean por prefijo; UNA línea por probe, los campos previos NO cambian de
  *  forma). `escala=` es ADITIVO AL FINAL (D51/D56): lado mayor del canvas que
  *  produjo la decisión (`probeMiniLado` = camino miniatura; el lado real de la

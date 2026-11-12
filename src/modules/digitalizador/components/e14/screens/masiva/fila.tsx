@@ -131,7 +131,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
     >
       <div className="flex items-start gap-3.5">
       {/* Thumb (marco blanco del diseño — la miniatura SIEMPRE es la foto
-          real de la fila; regla del dueño: jamás fotos inventadas) */}
+          real de la fila; regla del mantenedor: jamás fotos inventadas) */}
       {f.thumb ? (
         <img
           src={f.thumb}
@@ -216,7 +216,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               presencia, JAMÁS payload — red line 10). QR ✗ solo en
               LISTA: en PENDIENTE/PROCESANDO aún no hay veredicto
               (honestidad del kit). Resuelve la mitad de los
-              reportes «no lee»: el dueño VERÁ cuándo sí leyó. */}
+              reportes «no lee»: el mantenedor VERÁ cuándo sí leyó. */}
           {f.qrEstado === "leido" && (
             <span
               className="flex items-center gap-1 rounded px-1 py-0.5 text-[9px] font-bold tracking-wider text-[#00e599]"
@@ -306,7 +306,7 @@ export const FilaMasivaVista = memo(function FilaMasivaVista({
               reprocesar la gemela COMPLETA por si el dhash la
               confundió (fotos distintas parecidas en thumb).
               e65 (T-7): también sobre YA-ENVIADA — ÚNICO escape del
-              dueño para estampar QR/OCR en una fila ya enviada. */}
+              mantenedor para estampar QR/OCR en una fila ya enviada. */}
           {(f.estado === "DUPLICADA" || f.estado === "YA-ENVIADA") && (
             <button
               type="button"

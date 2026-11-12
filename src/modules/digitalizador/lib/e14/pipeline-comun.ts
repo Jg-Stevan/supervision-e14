@@ -55,7 +55,7 @@ import type { Acta, DiagnosticoActa, ProgresoAnalisis } from "./types";
 
 /**
  * §D1 (SPEC-e14-score-ocr): SEÑAL DE CONTENIDO del acta — se calcula DESPUÉS
- * del OCR + clasificación. El score del dueño mide el RECONOCIMIENTO («el
+ * del OCR + clasificación. El score del mantenedor mide el RECONOCIMIENTO («el
  * score se basa en el reconocimiento del acta por ocr y que el acta esté
  * completa»), no solo las métricas fotográficas. Señales: cabecera E-14 o
  * alguna lectura cruda del clasificador (MESA/tipo). `ocrTextIsValid` NO es

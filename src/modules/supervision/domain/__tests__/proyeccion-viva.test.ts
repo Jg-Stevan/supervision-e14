@@ -1,7 +1,7 @@
 /**
  * PROYECCIÓN EN VIVA bajo el RELOJ REAL (ronda «reloj real») — pruebas.
  *
- * Fija el contrato del dueño:
+ * Fija el contrato del mantenedor:
  *  · el ESTADO del puesto cambia con el reloj real: NO INICIADO antes de
  *    las 16:00 del país emisor · PENDIENTE en curso · CRITICO > 3 hrs;
  *  · un COMPLETO jamás se degrada ni cambia su horario sembrado;
@@ -55,7 +55,7 @@ describe("estadoGlobalEnVivo — el estado cambia con el reloj", () => {
     expect(estadoGlobalEnVivo("NO_INICIADO", 179)).toBe("PENDIENTE");
   });
 
-  test("min ≥ 180 → CRITICO (umbral del dueño)", () => {
+  test("min ≥ 180 → CRITICO (umbral del mantenedor)", () => {
     expect(estadoGlobalEnVivo("PENDIENTE", 180)).toBe("CRITICO");
     expect(estadoGlobalEnVivo("NO_INICIADO", 2_000)).toBe("CRITICO");
   });

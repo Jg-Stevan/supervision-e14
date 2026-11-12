@@ -56,7 +56,7 @@ export interface OpcionesEscaneo {
    * §D3 (SPEC-e14-simulacion-scores): true SOLO cuando el disparo viene de un
    * chip de simulación (store.simularScore). Con `simular` el pipeline corre
    * NORMAL sobre el asset FIJO de la banda (resuelto por `scoreSimulado`) y
-   * OMITE la verificación de completitud (la acta cortada del dueño es a
+   * OMITE la verificación de completitud (la acta cortada del mantenedor es a
    * propósito — un chip jamás cae INCOMPLETA, AC6). El recorte manual NUNCA
    * simula (re-evaluación real, §D4).
    */
@@ -74,7 +74,7 @@ export interface OpcionesEscaneo {
    *  runner ya la tenía en la traza y en el diagnóstico; ahora también viaja
    *  al pipeline). "exif-camara" = EXIF de cámara presente (el core ya horneó
    *  la orientación al decodificar) → el probe de rotaciones se OMITE
-   *  (evidencia del dueño: aplicado=0 SIEMPRE en exif-camara, 4-10 s c/u).
+   *  (evidencia del mantenedor: aplicado=0 SIEMPRE en exif-camara, 4-10 s c/u).
    *  SOLO MASIVA lo llena (mismo criterio de origenActa); los flujos
    *  individual/video/recorte-manual corren el probe de siempre. */
   origenSenales?: string | null;

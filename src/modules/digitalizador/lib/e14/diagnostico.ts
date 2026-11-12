@@ -3,9 +3,9 @@
  * Módulo PURO (sin React): montaje del registro del desenlace (C1) que el
  * bridge adjunta como `acta.diagnostico`.
  *
- * KIT e14-fuera-informes-v1 (R-2.2 — mandato del dueño: fuera los informes
+ * KIT e14-fuera-informes-v1 (R-2.2 — mandato del mantenedor: fuera los informes
  * automáticos): el módulo queda RECORTADO a SOLO lo que alimenta el B7
- * (`construirDiagnostico` — el dueño podrá reusar `acta.diagnostico` con
+ * (`construirDiagnostico` — el mantenedor podrá reusar `acta.diagnostico` con
  * su propio sistema). FUERA: `registrarDesenlace` (acumulador localStorage
  * §5), `descargarPaqueteDiagnostico` (paquete ZIP §3), el reporte de
  * comportamiento y `causaPrincipal` — sus únicos consumidores eran los

@@ -22,7 +22,7 @@ import { logger } from "../../dominio/logger";
 
 // 3.3: la URL del sidecar entra por CONFIGURACIÓN (S: leerFlags().ocrNativoUrl
 // — validador SEC-10: solo localhost). D la hereda apagada (null) hasta que
-// su dueño la cablee — doctrina: el sidecar es ACELERACIÓN, jamás requisito.
+// su mantenedor la cablee — doctrina: el sidecar es ACELERACIÓN, jamás requisito.
 let urlNativo: string | null = null;
 /** Fija la URL del sidecar nativo (null/string vacío = apagado). */
 export function configurarNativo(url: string | null): void {
@@ -151,7 +151,7 @@ export function invalidarSondaNativo(): void {
 /** POOL que el sidecar declaró para sí (`--sesiones N`) en el último sondeo;
  *  0 = sin sondeo bueno o sidecar que no lo anuncia. Lo consume el relé de
  *  `prefacta.ts`: el ancho del cuello lo fija quien tiene los núcleos, en vez
- *  de una flag nueva que el dueño tenga que recordar al arrancar el sidecar. */
+ *  de una flag nueva que el mantenedor tenga que recordar al arrancar el sidecar. */
 export function sesionesLadoNativo(): number {
   return info?.sesiones ?? 0;
 }

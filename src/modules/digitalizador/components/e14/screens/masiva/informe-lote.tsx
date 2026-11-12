@@ -8,7 +8,7 @@
  * · LATENCIA MEDIA — media de totalMs de la corrida viva (metricas-vista).
  * · ID LOTE — ordinal de la corrida en el historial (#LOTE-N; el id REAL
  *   completo viaja en el title).
- * (La fila «INTEGRIDAD SHA-256» se retiró a pedido del dueño — el hash
+ * (La fila «INTEGRIDAD SHA-256» se retiró a pedido del mantenedor — el hash
  *  por acta sigue vivo en el ledger e65b, solo deja de pintarse aquí.)
  */
 

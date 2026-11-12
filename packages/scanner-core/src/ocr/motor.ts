@@ -51,7 +51,7 @@ export interface PresupuestoMotor {
   timeoutMs: number;
   /** Intentos que la cascada puede pagar en este motor. */
   intentos: number;
-  /** false = la cascada NO lo abre (kill-switch del dueño). */
+  /** false = la cascada NO lo abre (kill-switch del mantenedor). */
   habilitado?: boolean;
 }
 

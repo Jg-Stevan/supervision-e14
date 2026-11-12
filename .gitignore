@@ -41,7 +41,7 @@ native/*.json
 
 # Evidencia de corridas locales: scripts/bench-navegador.mjs escribe
 # bench-navegador-<tag>.json con los tiempos crudos y el texto OCR de las actas
-# del dueño. Es dato de sesión (y contiene nombres leídos de actas reales):
+# del mantenedor. Es dato de sesión (y contiene nombres leídos de actas reales):
 # nunca al repo.
 /bench-navegador-*.json
 /out/fotos*/
@@ -62,6 +62,12 @@ yarn-error.log*
 .z-ai-config
 .claude
 local-*
+
+# SEC-10/D86 — jamás versionar actas reales ni capturas con datos de jurados
+docs/capturas-actas-reales*/
+docs/capturas-divipola*/
+actas-reales/
+*.acta-e14-real.jpg
 
 # Hub local de E2E (scripts/hub-local.mjs): actas REALES recibidas del
 # celular + certificados self-signed. Dato de sesión, jamás al repo.

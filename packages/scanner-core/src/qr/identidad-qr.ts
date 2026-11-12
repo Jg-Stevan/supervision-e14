@@ -10,7 +10,7 @@
  *
  * El QR del E-14 es DATO LEÍDO, no imagen: dos fotos del MISMO papel
  * producen el MISMO payload byte-a-byte aunque el dhash no pueda separarlas
- * (banco #72 — GO medido del dueño: 88.2% decode, 0 colisiones, re-encodes
+ * (banco #72 — GO medido del mantenedor: 88.2% decode, 0 colisiones, re-encodes
  * dhash 8-33 agrupan por payload EXACTO; la separación criptográfica del
  * peligro dhash: par estilo G2/G4 con prefijo de 21 chars común y payload
  * DISTINTO no agrupa — sin zona de falso positivo). Esta capa corre ANTES de

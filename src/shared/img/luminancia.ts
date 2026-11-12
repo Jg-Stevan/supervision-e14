@@ -11,14 +11,14 @@
  *                    (mismos pesos, redondeo entero distinto — hot loops con
  *                    indexado de histograma: NO se extraen v1, ver abajo)
  *   BT.709 float   — integridad.ts:82 · masiva/qr-pixeles.ts:355
- *                    (0.2126·R + 0.7152·G + 0.0722·B)       ← PENDIENTE DUEÑO
+ *                    (0.2126·R + 0.7152·G + 0.0722·B)       ← PENDIENTE MANTENEDOR
  *
  * DECISIÓN R2 (conservadora): canónica BT.601 (5 de 6 puntos de uso;
  * umbrales de tinta/papel — TINTA_LUMA_OSCURA y companía — están calibrados
  * en ese espacio). El punto BT.709 (integridad.ts + qr-pixeles.ts) se
  * conservó COMO ESTÁ en sus archivos: cambiar sus pesos mueve los valores de
  * luma y con ellos umbrales/medias (binarizada local, marcas de esquina) —
- * es la decisión pendiente del dueño (§B5 (6): «unificar en 601 tras
+ * es la decisión pendiente del mantenedor (§B5 (6): «unificar en 601 tras
  * medir»). `lumaBT709` queda expuesta aquí marcada como tal para que la
  * migración futura tenga un solo hogar.
  *
@@ -41,7 +41,7 @@ export function luma(data: DatosRgba, i: number): number {
 }
 
 /** Luma BT.709 (0..255 float) — el espacio de integridad.ts:82 y
- *  qr-pixeles.ts:355. PENDIENTE DEL DUEÑO: unificar 601 vs 709 con una
+ *  qr-pixeles.ts:355. PENDIENTE DEL MANTENEDOR: unificar 601 vs 709 con una
  *  medición (cambiar pesos mueve umbrales de tinta/papel y medias de
  *  binarización — §B5 (6)). NO adoptar sin bench. */
 export function lumaBT709(data: DatosRgba, i: number): number {

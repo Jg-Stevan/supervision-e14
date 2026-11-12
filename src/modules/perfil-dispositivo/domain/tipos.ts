@@ -21,7 +21,7 @@
 /** Tier del dispositivo. "PENDIENTE" = sin medir (SSR / primer pase). */
 export type Tier = "ALTO" | "MEDIO" | "BAJO" | "PENDIENTE";
 
-/** Factor de forma del dispositivo (computador o celular — petición del dueño). */
+/** Factor de forma del dispositivo (computador o celular — petición del mantenedor). */
 export type FactorForma = "escritorio" | "tablet" | "celular" | "desconocido";
 
 /** Confianza del tier = proporción de señales decisivas DISPONIBLES. */
@@ -136,7 +136,7 @@ export interface FilaRecomendacion {
 /** Plan de recursos SUGERIDO para este dispositivo (catálogo D6-safe).
  *  Los valores numéricos son consumibles por módulos (MASIVA, supervisión)
  *  de forma ACOTADA y REVOCABLE — cada consumidor decide, el override
- *  manual del dueño siempre manda. */
+ *  manual del mantenedor siempre manda. */
 export interface PlanRecursos {
   tier: Tier;
   forma: FactorForma;

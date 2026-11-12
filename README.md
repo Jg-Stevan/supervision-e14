@@ -82,7 +82,7 @@ vas a correr la suite sin arrancar el dev, ejecuta `bun run preparar` antes.
 | `bun run build` | Export estático a `out/` (con `preparar` previo). |
 | `bun run typecheck` | `tsc --noEmit` en modo estricto. |
 | `bun run lint` | ESLint (flat config). |
-| `bun test` | Suite de `bun:test` (33 archivos, 385 pruebas). |
+| `bun test` | Suite de `bun:test` (48 archivos, 556 pruebas — verificado 2026-11-12). |
 | `bun run verificar` | typecheck + lint + test, la misma puerta que CI. |
 | `bun scripts/qa-paridad-motor.ts` | Paridad del motor con el repo gemelo `digielect14` (T-16): corre desde cualquiera de los dos checkouts lado a lado y compara las copias de `packages/scanner-core` byte a byte (script idéntico en ambos repos; `E14_HERMANO` señala el hermano; sin hermano en disco sale «omitido»). Meta: 20/20 — ver [Ola 1 del plan 2026-11-12](https://github.com/Jg-Stevan/supervision-e14). |
 | `bun scripts/hub-local.mjs` | Hub E2E en esta máquina: sirve el móvil y el panel por HTTPS/HTTP y recibe `POST /actas`. Ver [`docs/RUNBOOK-e2e-local-v1.md`](docs/RUNBOOK-e2e-local-v1.md). |
@@ -101,11 +101,13 @@ imágenes sin optimizar.
   require-corp`, lo que activa `SharedArrayBuffer` y el OCR multihilo. Los wasm
   que superan el límite de 25 MiB se parten en el build y una Pages Function los
   reensambla por la misma ruta.
-- **GitHub Pages (canal secundario):** sirve el mismo export sin cabeceras; en
-  esa URL el OCR corre con un hilo. `.nojekyll` es obligatorio.
+- **GitHub Pages: retirado.** Era el canal secundario sin cabeceras (OCR a un
+  hilo); el workflow `deploy-pages.yml` ya no existe en `.github/workflows/`
+  (verificado 2026-11-12). **Cloudflare Pages es el canal único.**
 
-Los detalles operativos —y la matriz de errores— están en
-[`docs/RUNBOOK-deploy-pages-v1.md`](docs/RUNBOOK-deploy-pages-v1.md).
+El runbook de destrabe del deploy (incidente R2/D80 de 2026-11-03, con la
+matriz de errores que sigue siendo útil) quedó archivado en
+[`docs/archivo/RUNBOOK-deploy-pages-v1.md`](docs/archivo/RUNBOOK-deploy-pages-v1.md).
 
 ## Datos y privacidad
 
@@ -115,7 +117,7 @@ Los detalles operativos —y la matriz de errores— están en
 - **Actas de demostración:** 4 fixtures sintéticas del modo SIM
   (`acta-sim-*.jpg` en `src/modules/digitalizador/assets/`). Las fotos reales
   que poblaron el lote DEMO original fueron retiradas del HEAD (D87, 2026-11-11)
-  y su purga de historia está preparada (D90 — Fase 3 del dueño). No se versionan
+  y su purga de historia está preparada (D90 — Fase 3 del mantenedor). No se versionan
   fotos de particulares ni datos personales.
 - **Sin telemetría remota:** no hay backend, ni cuentas, ni envío de datos a
   terceros. El histórico de deduplicación y las métricas viven en IndexedDB local.
@@ -124,7 +126,8 @@ Los detalles operativos —y la matriz de errores— están en
 
 - Publicación y recepción en memoria: recargar restablece (por diseño, sin backend).
 - El monitor lista 949 puestos sin paginación ni virtualización.
-- En GitHub Pages el OCR es mono-hilo (sin COOP/COEP).
+- Sin cabeceras COOP/COEP (cualquier host estático que no las aplique) el OCR
+corre mono-hilo: no hay `SharedArrayBuffer`.
 - El sidecar nativo es un ZIP sin firmar para Windows x64; SmartScreen lo advierte.
 - El ledger remoto de envíos está cortado (`LEDGER_REMOTO_ACTIVO = false`).
 
@@ -133,7 +136,7 @@ Deuda y pendientes priorizados: [`docs/DEUDA.md`](docs/DEUDA.md).
 ## Estructura del repositorio
 
 ```
-.github/workflows/   CI, deploy GH Pages, deploy Cloudflare y release del sidecar
+.github/workflows/   CI, deploy Cloudflare, paridad y release del sidecar
 functions/           Pages Function que reensambla los wasm partidos
 native/              Sidecar Python (OCR nativo opcional)
 public/              Modelos ONNX, diccionarios, wasm, workers y catálogo DIVIPOL
@@ -149,14 +152,14 @@ docs/                Arquitectura, ADR, mediciones, notas OCR/QR y runbooks
 | Documento | Para qué |
 |---|---|
 | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Módulos, flujo de datos, invariantes y contratos. |
-| [`docs/adr/README.md`](docs/adr/README.md) | Decisiones (D1–D82) con mapa de supersesión. |
+| [`docs/adr/README.md`](docs/adr/README.md) | Decisiones (D1–D94) con mapa de supersesión. |
 | [`docs/MEDICIONES.md`](docs/MEDICIONES.md) | Números reales de rendimiento y calidad. |
-| [`docs/NOTAS-OCR-QR.md`](docs/NOTAS-OCR-QR.md) | Router OCR, modelos y cadena de decodificadores QR. |
+| [`docs/NOTAS-OCR-QR.md`](docs/NOTAS-OCR-QR.md) | Cascada OCR fija (el router murió), modelos y cadena de decodificadores QR. |
 | [`docs/DEUDA.md`](docs/DEUDA.md) | Lo que falta, lo cortado y sus condiciones de retorno. |
-| [`docs/RUNBOOK-deploy-pages-v1.md`](docs/RUNBOOK-deploy-pages-v1.md) | Despliegue Cloudflare y wasm partido. |
+| [`docs/archivo/RUNBOOK-deploy-pages-v1.md`](docs/archivo/RUNBOOK-deploy-pages-v1.md) | (archivado) Incidente R2/D80 del deploy Cloudflare y matriz de errores. |
 | [`docs/RUNBOOK-sidecar-instalable-v1.md`](docs/RUNBOOK-sidecar-instalable-v1.md) | Empaquetado y uso del sidecar nativo. |
 | [`docs/RUNBOOK-e2e-local-v1.md`](docs/RUNBOOK-e2e-local-v1.md) | Flujo E2E en una máquina: el celular envía, este panel recibe por red. |
-| [`docs/auditoria/GUIA-AUDITORIA-supervision-e14.md`](docs/auditoria/GUIA-AUDITORIA-supervision-e14.md) | Guion de verificación funcional. |
+| [`docs/archivo/auditoria/GUIA-AUDITORIA-supervision-e14.md`](docs/archivo/auditoria/GUIA-AUDITORIA-supervision-e14.md) | (archivado) Guion de verificación funcional. |
 
 ## Contribuir
 

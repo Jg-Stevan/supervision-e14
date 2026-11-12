@@ -32,11 +32,12 @@ operación; **P2** mejora deseable.
 
 ## 3. Operación y despliegue
 
-- **Cloudflare Pages:** verificar en cada despliegue que COOP/COEP llegan y que
+- **Cloudflare Pages (canal único):** verificar en cada despliegue que COOP/COEP llegan y que
   los dos wasm grandes se sirven por la Function con el tamaño correcto. La
-  matriz de errores está en el runbook.
-- **GitHub Pages:** sigue publicando en paralelo sin cabeceras (OCR mono-hilo).
-  Retirarlo cuando migre el DNS.
+  matriz de errores histórica está en `docs/archivo/RUNBOOK-deploy-pages-v1.md`.
+- **GitHub Pages: retirado (verificado 2026-11-12 — `deploy-pages.yml` ya no
+  está en `.github/workflows/`).** Cloudflare Pages es el único canal; sin sus
+  cabeceras COOP/COEP cualquier host estático corre el OCR a un hilo.
 - **Wasm partido:** el manifiesto debe quedar en `/e14/`, no en `/vendor/`, y
   `out/_routes.json` debe incluir solo los archivos partidos.
 - **Sidecar:** construir en Windows (PyInstaller no cross-compila), publicar con
@@ -58,7 +59,7 @@ operación; **P2** mejora deseable.
   fueron: cero consumidores en `src`, `functions`, `scripts` y `native`, y no
   hay `prisma/` (el `@prisma/client` de `db.ts` no era ni generable). Lección
   para el gate: si algo se borra, hay que borrar también su import huérfano.
-- **PENDIENTE DE DECISIÓN DEL DUEÑO — datos personales en un repo que va a
+- **PENDIENTE DE DECISIÓN DEL MANTENEDOR — datos personales en un repo que va a
   público.** Dos niveles, verificados abriendo los archivos, no deducidos del
   nombre:
   · *Capturas de sesión* (`docs/capturas-actas-reales-v1/` y

@@ -68,7 +68,7 @@ const COLUMNAS_MESAS = [
  * puesto, agrega notificación + toast (el store lo hace; aquí solo se
  * desencadena y se muestra el estado de carga).
  *
- * KIT monitor-jornada-v1 — retiro del botón NOTIFICAR (pedido del dueño:
+ * KIT monitor-jornada-v1 — retiro del botón NOTIFICAR (pedido del mantenedor:
  * «en el momento no se está utilizando»): la única acción de mesa es
  * REINSPECCIONAR, y SOLO se pinta cuando `accionSugerida ===
  * "reinspeccionar"` (mesas con alerta de rescaneo). Para el resto de

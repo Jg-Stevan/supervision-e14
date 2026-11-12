@@ -220,7 +220,7 @@ export function contarActasRuntime(): number {
 //   · SIN_JOIN (solo `recepcion-log`, sin join confiable)   → ❌ NO
 //   · Rechazada en masiva: nunca llega a publicarse         → ❌ NO
 //   · Mesa NO_INICIADO (sin transmisión)                    → ❌ NO
-// BRECHA ABIERTA (decisión del dueño — docs/adr/README.md D-8): la APROBACIÓN en
+// BRECHA ABIERTA (decisión del mantenedor — docs/adr/README.md D-8): la APROBACIÓN en
 // Recepción HOY no produce ningún registro consultable por el repositorio
 // (`recepcion-log` solo documenta el embudo; no hay acción de aprobación
 // en `vista-recepcion.tsx`) → el gate usa runtime + sembradas; cuando

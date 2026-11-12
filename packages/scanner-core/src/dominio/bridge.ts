@@ -36,7 +36,7 @@ export interface OpcionesEscaneo {
    * §D3 (SPEC-e14-simulacion-scores): true SOLO cuando el disparo viene de un
    * chip de simulación (store.simularScore). Con `simular` el pipeline corre
    * NORMAL sobre el asset FIJO de la banda (resuelto por `scoreSimulado`) y
-   * OMITE la verificación de completitud (la acta cortada del dueño es a
+   * OMITE la verificación de completitud (la acta cortada del mantenedor es a
    * propósito — un chip jamás cae INCOMPLETA, AC6). El recorte manual NUNCA
    * simula (re-evaluación real, §D4).
    */

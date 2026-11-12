@@ -1,5 +1,5 @@
 /**
- * PROYECCIÓN EN VIVO del puesto bajo el RELOJ REAL — pedido del dueño:
+ * PROYECCIÓN EN VIVO del puesto bajo el RELOJ REAL — pedido del mantenedor:
  *   «reloj real, cambia el estado del puesto, local es colombia país es
  *   el q emite»
  *
@@ -11,11 +11,11 @@
  * - Hora actual = hora REAL del país emisor (avanza en vivo).
  * - «Cierre COL» = 4:00 p. m. local del país emisor convertida a Bogotá.
  * - TIEMPO = minutos reales desde ese cierre → tramo NO INICIADO / <1 /
- *   1-2 / 2-3 / >3 (clasificaciones del dueño).
+ *   1-2 / 2-3 / >3 (clasificaciones del mantenedor).
  * - ESTADO GLOBAL en vivo (cambia con el reloj, jamás degrada):
  *     · COMPLETO  → sembrado/mesas completas (queda al fondo, verde).
  *     · min < 0   → NO_INICIADO (aún no son las 16:00 del país emisor).
- *     · min ≥ 180 → CRITICO (umbral del dueño, UMBRAL_CRITICO_MIN).
+ *     · min ≥ 180 → CRITICO (umbral del mantenedor, UMBRAL_CRITICO_MIN).
  *     · resto     → PENDIENTE (en curso; el color fino lo da el TIEMPO).
  * - Coherencia de recepción: un puesto que AÚN NO CIERRA no ha recibido
  *   nada → sus pcts se muestran en 0 (la subtabla conserva la semilla —

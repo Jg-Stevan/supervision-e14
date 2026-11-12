@@ -10,7 +10,7 @@
  * identifica un acta; la identidad es la composición.
  *
  * Pesos y umbrales: §3.4/§3.5 EXACTOS, calibrados contra el divipol real.
- * NO se ajustan sin aprobación del dueño (D89).
+ * NO se ajustan sin aprobación del mantenedor (D89).
  *
  * Sin dependencias externas. Reutiliza la carga/estructura del catálogo de
  * `divipol.ts`; la normalización (I↔L, letra→dígito, permutaciones ≤64,

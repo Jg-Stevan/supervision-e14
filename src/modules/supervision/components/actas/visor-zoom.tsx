@@ -238,7 +238,7 @@ export const VisorZoom = forwardRef<VisorZoomHandle, VisorZoomProps>(
       const cont = contRef.current;
       if (!cont) return;
       const onWheel = (e: WheelEvent) => {
-        e.preventDefault(); // la rueda es ZOOM, no scroll (pedido del dueño)
+        e.preventDefault(); // la rueda es ZOOM, no scroll (pedido del mantenedor)
         const rect = cont.getBoundingClientRect();
         const dy =
           e.deltaMode === 1

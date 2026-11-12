@@ -17,7 +17,7 @@ import type { Puesto } from "../../domain/types";
 
 /**
  * Header del visor de actas (KIT VISOR-MONITOR-GLOBAL-v1 §4-T2 — diseño
- * del dueño, imagen de referencia EGIPTO (335) → El Cairo):
+ * del mantenedor, imagen de referencia EGIPTO (335) → El Cairo):
  *
  * - DESKTOP (≥768px), 1 fila: breadcrumb `PAÍS (código) › ZONA n › PUESTO`,
  *   nav de mesas `‹ MESA 001 (1/12) ∨ ›` — chevrons + DROPDOWN nativo que

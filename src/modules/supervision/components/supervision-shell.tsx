@@ -75,11 +75,11 @@ import { colorDeTono } from "@/shared/ui/tono";
 /** Vistas del shell (D11): cambio por estado interno — NO rutas nuevas
  * (el export estático sigue siendo trivial: una sola página).
  *
- * Ronda «reloj real» (pedido del dueño): «recepción debe ser el mismo que
+ * Ronda «reloj real» (pedido del mantenedor): «recepción debe ser el mismo que
  * monitor global, ese se reemplaza (el de recepción)» — la vista de
  * RECEPCIÓN quedó dormida y su lugar lo ocupó el visor del MONITOR GLOBAL.
  *
- * Ronda C (petición del dueño: «¿por qué se desactivó recepción?»): la
+ * Ronda C (petición del mantenedor: «¿por qué se desactivó recepción?»): la
  * vista VUELVE VIVA — revestida con las métricas del diseño r5 (R1–R7:
  * KPI TOTAL, RITMO/throughput, FLUJO 60 s, pausar feed, latencia media,
  * hora dual REC/ORIGEN).
@@ -347,7 +347,7 @@ function ChipGamaHeader({ onAbrir }: { onAbrir: () => void }) {
  *  · ÁMBAR — hay red, pero el sondeo del hub AÚN NO CORRIÓ (hub prendido y
  *    sin primera sync): no se puede afirmar nada — no verde prematuro.
  *  · VERDE — hay red y nada fallando. Con el hub APAGADO la red manda (el
- *    apagón del puente es decisión del dueño, no un fallo de red; la tarjeta
+ *    apagón del puente es decisión del mantenedor, no un fallo de red; la tarjeta
  *    «Hub local» muestra su propio estado). Semántica simple verde/ámbar/rojo.
  */
 /** C-24 — suscripción al estado de red del navegador (`online`/`offline`).
@@ -594,7 +594,7 @@ function ShellInterno() {
     vistaRef.current = vista;
   }, [vista]);
 
-  // E2E local — reanuda el sondeo del hub si el dueño lo dejó encendido
+  // E2E local — reanuda el sondeo del hub si el mantenedor lo dejó encendido
   // (localStorage). Con el hub apagado es un no-op, y en GitHub Pages también:
   // nunca se inicia un fetch que no existe.
   useEffect(() => {

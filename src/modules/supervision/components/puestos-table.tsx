@@ -84,7 +84,7 @@ const INDICE_CIERRE = 4;
 const INDICE_TIEMPO = 6;
 
 /**
- * Columna ordenable de la matriz (pedido del dueño): «Cierre COL» y
+ * Columna ordenable de la matriz (pedido del mantenedor): «Cierre COL» y
  * «Tiempo» dejan de ser filtros de columna (dropdown) y pasan a ser
  * controles de ORDENAMIENTO — «en realidad eran filtros de mayor a menor».
  *
@@ -157,7 +157,7 @@ function BotonOrden({
 
 /**
  * Color de señalización del «Tiempo» según la severidad del tramo — las
- * CLASIFICACIONES del dueño (ronda «reloj real»): NO INICIADO gris ·
+ * CLASIFICACIONES del mantenedor (ronda «reloj real»): NO INICIADO gris ·
  * verde < 1 hr (normal, ~1 hr de digitalización) · ámbar > 1 hr (toca
  * estar pendiente) · rojo > 3 hrs (CRÍTICO, más atento aún).
  */
@@ -171,7 +171,7 @@ const COLOR_SEVERIDAD: Record<SeveridadTiempo, string> = {
 /**
  * Celda «Tiempo» — transcurrido REAL desde el cierre de 4:00 p. m. HORA
  * LOCAL del país del puesto de digitalización (reloj real), señalizado
- * por las clasificaciones del dueño: NO INICIADO (aún no son las 16:00
+ * por las clasificaciones del mantenedor: NO INICIADO (aún no son las 16:00
  * del país emisor) · verde < 1 hr · ámbar > 1 hr · rojo > 3 hrs.
  */
 function SenalTiempo({ minutos }: { minutos: number }) {
@@ -298,12 +298,12 @@ export function PuestosTable({
   }, []);
 
   /**
-   * Orden de la matriz (pedido del dueño):
+   * Orden de la matriz (pedido del mantenedor):
    *
    * · POR DEFECTO (sin orden activo): «mostrar los urgentes» — los
    *   puestos sin COMPLETAR arriba, ordenados por el tiempo transcurrido
    *   desde el cierre de SUS mesas (los más quedados primero; los
-   *   > 3 hrs son CRÍTICO por regla del dueño); los COMPLETO, «en orden»
+   *   > 3 hrs son CRÍTICO por regla del mantenedor); los COMPLETO, «en orden»
    *   al fondo.
    * · Orden «Cierre COL» o «Tiempo» aplicado: MAYOR A MENOR en la
    *   columna elegida (toggle a asc en el segundo clic, urgencia en el
@@ -451,7 +451,7 @@ export function PuestosTable({
     };
   }, []);
 
-  // Filtro de columna «Cierre COL» retirado (feedback del dueño): era un
+  // Filtro de columna «Cierre COL» retirado (feedback del mantenedor): era un
   // dropdown de valor exacto y «en realidad era un orden de mayor a menor»
   // — la opción vive ahora en BotonOrden (ver ENCABEZADOS/INDICE_CIERRE).
 
@@ -640,7 +640,7 @@ const PuestoRow = memo(function PuestoRow({
             el navegador NO pinte/skipee los que están fuera del scrollport
             (contain-intrinsic-size estima 49px = fila h-12 + borde). La
             virtualización completa (ventana de filas) queda como propuesta
-            en pr.md — decisión del dueño. */}
+            en pr.md — decisión del mantenedor. */}
         {/** R4-C7 (reporte 02-b C1): el <tr> vuelve a ser fila semántica —
          * YA NO es el CollapsibleTrigger (un <tr> no es enfocable: sin foco
          * ni Enter/Space, todo el detalle quedaba inalcanzable por teclado,

@@ -88,7 +88,7 @@ function clasificacion(nivel: string, codigoUnico?: { crudo: string; kit: number
 const SERIE = "710000393010102";
 const CODIGO = { crudo: SERIE, kit: 39, tipoDigito: "3", ver: 1, pagina: 1, total: 2 };
 
-/** G5 (dueño, 2026-11-11): sin join DIVIPOL completo NO hay envío. Las
+/** G5 (mantenedor, 2026-11-11): sin join DIVIPOL completo NO hay envío. Las
  *  fixtures que caracterizan la fase de ENVÍO llevan una clasificación AUTO
  *  con join completo; las que prueban otras fases siguen sin códigos. */
 function clasificacionConJoin() {
@@ -872,7 +872,7 @@ describe("R8 · D — esperarDesenlaceOriginal (contrato que el fix C5 conserva)
     expect(await runnerDedup.esperarDesenlaceOriginal(esta.id, original.id)).toBe(false);
   });
 
-  test("esta fila QUITADA en la espera: la voluntad del dueño manda → false", async () => {
+  test("esta fila QUITADA en la espera: la voluntad del mantenedor manda → false", async () => {
     const esta = filaFixture();
     const original = filaFixture();
     prepararFila(esta, fileFixture("d3-esta.jpg"));
@@ -984,7 +984,7 @@ describe("R8 · F — C5: aparcado + re-visita al terminar la ola", () => {
     await procesarUno(esta as never);
     expect(filaDe(esta.id).estado).toBe("DUPLICADA");
 
-    // 2. La original QUITADA durante la ola (la voluntad del dueño manda).
+    // 2. La original QUITADA durante la ola (la voluntad del mantenedor manda).
     useMasivaStore.setState({
       filas: useMasivaStore.getState().filas.filter((f) => f.id !== original.id),
     });

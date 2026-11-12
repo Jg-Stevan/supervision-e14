@@ -1,7 +1,7 @@
 # RUNBOOK — sidecar instalable (KIT `e14-sidecar-instalable-v1`, D81)
 
 Dos procedures en uno: **A** es para quien recibe el ZIP (el visitante del sitio
-publicado), **B** es para el dueño cuando sale un release nuevo. La decisión y las
+publicado), **B** es para el mantenedor cuando sale un release nuevo. La decisión y las
 mediciones están en `docs/adr/README.md` → **D81**; acá solo hay pasos.
 
 ---
@@ -83,7 +83,7 @@ en la carpeta donde descomprimiste). Borra la carpeta y listo.
 
 ---
 
-## B. Publicar un release nuevo (el dueño)
+## B. Publicar un release nuevo (el mantenedor)
 
 El ZIP se construye **en Windows** (PyInstaller no cross-compila) y se publica desde
 el workflow. La URL que lee la tarjeta es `releases/latest/download/…`, así que la
@@ -149,7 +149,7 @@ Lo mismo con el puerto: `native/servidor.py --puerto` (8765) y la flag compilada
 `ocrNativoUrl` tienen que coincidir, y `lib/e14/ocr/__tests__/nativo.test.ts` lee el
 `.py` para fijarlo.
 
-### B.5 Matriz de corrección rápida (dueño)
+### B.5 Matriz de corrección rápida (mantenedor)
 
 | Síntoma | Causa probable | Qué hacer |
 | --- | --- | --- |
@@ -184,7 +184,7 @@ curl -si http://127.0.0.1:8765/salud -H "Origin: https://supervision-e14.pages.d
 # → 200: dev local
 curl -si http://127.0.0.1:8765/salud -H "Origin: http://localhost:3000" | head -8
 
-# file:// de custodia del dueño: SOLO con allowlist explícito
+# file:// de custodia del mantenedor: SOLO con allowlist explícito
 E14_ORIGENES="null" python native/servidor.py   # → Origin: null pasa
 python native/servidor.py                        # → Origin: null da 403
 ```

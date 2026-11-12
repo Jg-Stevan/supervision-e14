@@ -1,5 +1,5 @@
 /**
- * Tests unitarios — KIT e14-ocr-cascada-v1 (K3 fase 2 — plan flujo-dueño
+ * Tests unitarios — KIT e14-ocr-cascada-v1 (K3 fase 2 — plan flujo-mantenedor
  * paso 6). Patrón: runner-watchdog.test.ts (entorno node + mocks) + el
  * patrón PURO de ocr-escalonado (la cascada recibe TODAS sus dependencias
  * inyectadas — la producción (bridge) solo las arma).

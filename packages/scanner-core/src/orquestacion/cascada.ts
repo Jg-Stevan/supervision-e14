@@ -4,11 +4,11 @@
  * de leer con priors inflables muere; el orden de motores pasa a ser
  * CONFIGURACIÓN — §3.4). Con telemetría por etapa (EventoCascada — 3.6).
  *
- * KIT e14-ocr-cascada-v1 (K3 fase 2 — plan flujo-dueño paso 6) — núcleo PURO
+ * KIT e14-ocr-cascada-v1 (K3 fase 2 — plan flujo-mantenedor paso 6) — núcleo PURO
  * de la CASCADA OCR: intento 1 → GATE (clasificador puro) → core RapidOCR
  * como hoy → rescate por ROIs top/bottom. El flag `ocrCascada` (antes
  * `masivaOcrTesseract` — renombrado al retirar el módulo masiva; default
- * OFF — kill-switch del dueño) decide si el pipeline la corre; con
+ * OFF — kill-switch del mantenedor) decide si el pipeline la corre; con
  * flag OFF el camino es el OCR ESCALONADO de siempre byte a byte (KIT
  * e14-ocr-escalonado-v1 intacto — este módulo SOLO CONSUME `necesitaSegunda`
  * y `elegirMejor`, jamás los re-define).
@@ -104,7 +104,7 @@ export const ROI_FRACCIONES = {
 } as const;
 
 /** ¿La cascada corre en ESTA pasada? Guard del call-site del bridge:
- *  flag del dueño ON y NUNCA en SIM (chips 8.2/7.0/4.3 intactos — §3 del
+ *  flag del mantenedor ON y NUNCA en SIM (chips 8.2/7.0/4.3 intactos — §3 del
  *  kit escalonado). Con false el bridge llama al escalonado de siempre. */
 export function cascadaActiva(ocrCascada: boolean, simular: boolean | undefined): boolean {
   return ocrCascada === true && simular !== true;
@@ -258,7 +258,7 @@ async function ocrRoiSeguro(
  * ANTES del clasificador del pipeline — SIN colisión con quadPrecomputado
  * de P4, que vive en el warp, ni con el gate §4 del score, que es POST-OCR):
  *
- *  1. intento 1 ( TESSERACT BEST con GO-B del dueño · RapidOCR 1280 sin GO )
+ *  1. intento 1 ( TESSERACT BEST con GO-B del mantenedor · RapidOCR 1280 sin GO )
  *     → GATE AUTO ⇒ listo.
  *  2. sin AUTO ⇒ core RapidOCR COMO HOY: 1280 (reusada SOLO si la pasada
  *     del intento 1 es RapidOCR — `esRapidOcr` por motor declarado) →
@@ -274,7 +274,7 @@ export async function correrCascadaOcr(
   foto: string,
   deps: DepsOcrCascada,
 ): Promise<SalidaCascada> {
-  // 1) intento 1 — TESSERACT BEST (GO-B del dueño) con caída honesta a
+  // 1) intento 1 — TESSERACT BEST (GO-B del mantenedor) con caída honesta a
   //    RapidOCR 1280 (el caller declara el motor REAL en cada pasada).
   const t1 = performance.now();
   const r1 = await deps.intento1(foto);

@@ -162,7 +162,7 @@ export function construirActa(
     // KIT actas-vivas-paginas-v1 (FASE B): la página viaja COMO VENGA de
     // la clasificación (null incluido — DESCONOCIDA: el chip muestra
     // «PÁG - DE -» y el hueco va al primer libre; el default P1 mintió
-    // con la pág 2 del Frankfurt, bug del dueño 16-oct). Sin
+    // con la pág 2 del Frankfurt, bug del mantenedor 16-oct). Sin
     // clasificación → objetivo seed (hoy).
     pagina: campos.clasificacion
       ? campos.clasificacion.pagina

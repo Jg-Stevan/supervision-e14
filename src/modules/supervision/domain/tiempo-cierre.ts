@@ -4,12 +4,12 @@
  * E-14 en consulados cierran a las 4:00 p. m. HORA LOCAL del país del
  * puesto de digitalización. La columna «Tiempo» de la matriz muestra el
  * transcurrido desde ese cierre, señalizado por color según las
- * CLASIFICACIONES del dueño (ronda «reloj real»):
+ * CLASIFICACIONES del mantenedor (ronda «reloj real»):
  *
  *   < 0      → NO INICIADO (gris) — aún no son las 16:00 del país emisor
  *   < 1 hr   → ok (verde)      · digitalización al día (~1 hr normal)
  *   1-3 hrs  → alerta (ámbar)  · «toca estar pendiente del puesto»
- *   > 3 hrs  → crítico (rojo)  · «toca estar más atento» — umbral dueño
+ *   > 3 hrs  → crítico (rojo)  · «toca estar más atento» — umbral mantenedor
  *
  * Con el reloj real (domain/reloj-jornada) los minutos SON reales: el
  * tramo y el color cambian solos conforme avanza el reloj.
@@ -21,7 +21,7 @@
 export const CIERRE_LOCAL_MIN = 16 * 60;
 
 /**
- * Umbral del dueño (feedback sobre la matriz del monitor): un puesto con
+ * Umbral del mantenedor (feedback sobre la matriz del monitor): un puesto con
  * «más de 3 horas transcurridas» desde el cierre de sus mesas y que aún
  * no completa la digitalización pasa a estado CRÍTICO. Fuente ÚNICA del
  * umbral — alimenta el tramo «> 3 hrs» (columna «Tiempo»), la derivación
@@ -53,7 +53,7 @@ export interface TramoTiempo {
 /**
  * Tramos canónicos en orden — alimenta la columna «Tiempo» y su filtro.
  * El PRIMER tramo es el NO INICIADO (minutos negativos: aún no cierra el
- * puesto en su país emisor — clasificación del dueño); los puestos de
+ * puesto en su país emisor — clasificación del mantenedor); los puestos de
  * jornadas FUTURAS de la semana (días por venir) caen aquí con valores
  * muy negativos, y la severidad gris los mantiene fuera de la urgencia.
  */

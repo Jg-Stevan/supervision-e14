@@ -25,7 +25,7 @@
   al navegador reensamblados por `functions/vendor/onnxruntime/[file].ts`. Sin ellos:
   **218 s el lote demo con un acta rechazada**.
 
-**Cuenta:** `d6515fed257a88a14348718d0a45f4be` · proyecto Pages `supervision-e14`.
+**Cuenta:** `<ACCOUNT_ID>` · proyecto Pages `supervision-e14`.
 
 **Fin del runbook cuando:** el deploy verde + `curl -I` muestra COOP/COEP + el wasm
 gordo llega entero + el navegador dice `crossOriginIsolated=true`.
@@ -35,7 +35,7 @@ gordo llega entero + el navegador dice `crossOriginIsolated=true`.
 ## Paso 1 — Comprobar localmente que el split funciona (2 min, antes de mover CI)
 
 ```bash
-cd "C:/Users/JG/Documents/Qoder/2026-11-02/a8b531fd/supervision-e14"
+cd <ruta-local-del-mantenedor>/supervision-e14
 bun run build                              # o bunx next build
 bun run scripts/cf-wasm-partes.mjs --dry-run
 bun run scripts/cf-wasm-partes.mjs
@@ -79,7 +79,7 @@ bunx --yes wrangler@4.157.0 pages dev out --port 8793
 ## Paso 3 — El token de CI: alcance (ya no hace falta R2)
 
 1. GitHub → repo → **Settings → Secrets and variables → Actions** → `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
-2. `CLOUDFLARE_ACCOUNT_ID` = `d6515fed257a88a14348718d0a45f4be` exactamente.
+2. `CLOUDFLARE_ACCOUNT_ID` = `<ACCOUNT_ID>` exactamente.
 3. El token necesita **Pages:Edit** sobre esa cuenta. **R2:Edit ya no se usa** y sobra
    (mínimo privilegio). El token que se pegó en el chat está quemado: créate uno nuevo.
 4. El `wrangler.toml` de la raíz **no se toca**: de ahí lee el deploy `pages_build_output_dir`.

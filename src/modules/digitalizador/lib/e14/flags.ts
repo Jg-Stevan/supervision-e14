@@ -4,10 +4,10 @@
  *
  *   DEFAULTS ← public/flags.json (remoto, cacheado 24 h, offline-safe)
  *            ← overrides localStorage (MÁXIMA prioridad — el kill switch
- *              MANUAL del dueño, D6: la app JAMÁS se auto-configura).
+ *              MANUAL del mantenedor, D6: la app JAMÁS se auto-configura).
  *
  * flags.json es un archivo ESTÁTICO en public/ (hoy NO existe → «sin-
- * endpoint»): el dueño lo puede desplegar/editar sin tocar el código —
+ * endpoint»): el mantenedor lo puede desplegar/editar sin tocar el código —
  * same-origin con NEXT_PUBLIC_BASE_PATH (mismo patrón PUBLIC_BASE del core).
  *
  * SIN dependencias nuevas: fetch nativo + reintentos exponenciales.
@@ -34,11 +34,11 @@ const REINTENTO_TOPE_MS = REFRESH_MS;
  *  dos actas que lo aprovechan ·
  *  thumbsOn true · ocrThreadsTope 4 · telemetriaSalud true ·
  *  endpointReportes null — sin backend, D1 · colaPersistente true — ANEXO
- *  cola-persistente-v1: la masiva SOLO se elimina con vaciar() del dueño;
+ *  cola-persistente-v1: la masiva SOLO se elimina con vaciar() del mantenedor;
  *  false = MODO PRUEBAS e64p · sondeoQrPrecoz true + sondeoQrPresupuestoMs
  *  2500 — KIT e73-sondeo-qr-precoz-v1 §D: sondeo QR en INGESTA, kill-switch
- *  del dueño · hangEnCurso true — KIT e14-obs-hang-atribucion-v1 §D: sensor
- *  hang-en-curso, kill-switch del dueño). El override manual del dueño
+ *  del mantenedor · hangEnCurso true — KIT e14-obs-hang-atribucion-v1 §D: sensor
+ *  hang-en-curso, kill-switch del mantenedor). El override manual del mantenedor
  *  (e14-flags-overrides / flags.json) sigue intacto y manda sobre estos
  *  defaults — `{"poolWorkers":1}` devuelve al pool simple de e71. */
 export const FLAGS_DEFAULT: FlagsApp = {
@@ -60,26 +60,26 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // ALARGA el pipeline que el sondeo quería ayudar. Pausar 30 s es MENOS
   // trabajo (compatible con §I «jamás extender presupuesto» — aquí se
   // reduce carga); la dedup NO se pierde (capa0-qr + dhash + payload
-  // in-pool cubren las mismas gemelas). Kill-switch del dueño: false =
+  // in-pool cubren las mismas gemelas). Kill-switch del mantenedor: false =
   // comportamiento de siempre byte-idéntico.
   sondeoQrCortocircuito: true,
   hangEnCurso: true,
   // KIT e107-prescan-qr-cola-v1 (§D.4): pre-scan QR en «PROCESAR COLA» —
-  // kill-switch del dueño (flag OFF ⇒ prescanYIniciar = iniciar()
+  // kill-switch del mantenedor (flag OFF ⇒ prescanYIniciar = iniciar()
   // byte-idéntico, sin instanciar worker ni emitir estado).
   prescanQrCola: true,
   // KIT e14-orientacion-qr-v1 (§D): QR-brújula de orientación — el cuadrante
   // del QR manda la rotación y el rescate hi-res (ZXing) solo corre si
   // jsQR@warp falla (bench v8.3: 4/4 con fotos arrugadas/blotchy donde
-  // jsQR 0/4). Kill-switch del dueño: OFF = sondeo OCR de siempre byte a
+  // jsQR 0/4). Kill-switch del mantenedor: OFF = sondeo OCR de siempre byte a
   // byte (el probe D56 queda como red de seguridad).
   qrBrujulaOrientacion: true,
-  // KIT flujo-dueno-v1 (K2 — brief Agente B) — kill-switch del dueño.
+  // KIT flujo-dueno-v1 (K2 — brief Agente B) — kill-switch del mantenedor.
   // masivaSondeoCrudo default TRUE = camino de hoy (el sondeo crudo e73
   // alimenta el dedup temprano; OFF solo para la corrida de control del
-  // dueño).
+  // mantenedor).
   masivaSondeoCrudo: true,
-  // KIT e14-prescan-warp-lado-v1 — válvulas del dueño para el pre-scan
+  // KIT e14-prescan-warp-lado-v1 — válvulas del mantenedor para el pre-scan
   // (defaults = comportamiento de hoy byte-idéntico: presupuesto 4000 +
   // salida de warp hasta 4032). prescanWarpLado 1920 es el remedio REAL de
   // los hard-kill «warp» en equipos lentos: el coste del warpPerspective
@@ -92,7 +92,7 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // pipeline masiva+OCR: el tier detectado (obs/dispositivo §4.4 — BAJO/
   // MEDIO/ALTO) aplica SOLO presupuestos de recursos (pool/threads/warp/
   // prescan/watchdog/master/QR/dhash — tabla completa en gama.ts) en
-  // BAJO/MEDIO. El override MANUAL del dueño manda clave a clave (D6: la
+  // BAJO/MEDIO. El override MANUAL del mantenedor manda clave a clave (D6: la
   // app jamás pisa una mano explícita) y `false` = byte-idéntico a hoy en
   // TODOS los dispositivos (kill-switch único).
   masivaAdaptativoGama: true,
@@ -104,20 +104,20 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // donde el cortocircuito D36 pausa el sondeo y `qrPrevio` no llega. El
   // tier zxing (wasm — red line del worker e73) queda en MAIN como
   // SOLO-rescate si el worker no leyó nada (cobertura EXACTA a la cadena
-  // de hoy). Kill-switch del dueño: false = byte-idéntico a hoy (cadena
+  // de hoy). Kill-switch del mantenedor: false = byte-idéntico a hoy (cadena
   // completa en main con SU presupuesto de gama).
   capa0QrWorker: true,
-  // Decisión del dueño 2026-11-11 — la cascada de D pasa a ser el motor por
+  // Decisión del mantenedor 2026-11-11 — la cascada de D pasa a ser el motor por
   // defecto de S: Tesseract `fast` (spa 4.0.0_fast) como intento 1 → GATE de
   // producción (clasificarCabecera + divipol) → si no hay AUTO, RapidOCR
   // PP-OCRv4 escalonado 1280→1920→ROI. false = escalonado RapidOCR de
-  // siempre byte a byte (kill-switch del dueño); SIM nunca la corre.
+  // siempre byte a byte (kill-switch del mantenedor); SIM nunca la corre.
   ocrCascada: true,
   // KIT e75-qr-zoom-zbar-v1 — tier ZOOM TL re-escalado + zbar-wasm en la capa
   // 0 (recorta la banda TL 50%×30% del ORIGINAL a píxeles nativos y la pasa
   // por zxing→zbar ANTES del rescate 4096): el lab de 12 imágenes reales
   // midió 3 páginas del escáner que la cadena completa no leyó NI a 4000 px
-  // full-frame y 2 actas que SOLO zbar vio. Kill-switch del dueño: false =
+  // full-frame y 2 actas que SOLO zbar vio. Kill-switch del mantenedor: false =
   // cadena de hoy byte-idéntica.
   qrZoomTl: true,
   // R1.2 — KIT qr-cache-negativa-v1 — cuando la cadena COMPLETA de capa 0
@@ -126,9 +126,9 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // corridas del MISMO archivo saltan el ladder (2-3 ms). El informe midió
   // ~110 s de ladder inútil sobre 3 actas sin QR × 2 corridas. "PROCESAR
   // IGUAL" (forzarDedupOff) JAMÁS consulta ni escribe. Kill-switch del
-  // dueño: false = byte-idéntico a hoy.
+  // mantenedor: false = byte-idéntico a hoy.
   qrCacheNegativa: true,
-  // KIT auto-envio-umbral-v1 — palanca del dueño para el objetivo «la mayoría
+  // KIT auto-envio-umbral-v1 — palanca del mantenedor para el objetivo «la mayoría
   // de actas se envían automáticamente si son elegibles y el OCR las
   // reconoce»: "optima" (default) = solo OPTIMA se autoenvía (hoy);
   // "advertencia" = también se autoenvían las ADVERTENCIA (6.5-7.9) con
@@ -138,7 +138,7 @@ export const FLAGS_DEFAULT: FlagsApp = {
   // localStorage e14-flags-overrides {"autoEnvioUmbral":"advertencia"}.
   autoEnvioUmbral: "optima",
   // KIT e14-ocr-nativo-v1 — sidecar nativo del det+rec. Default ACTIVADO
-  // (decisión del dueño, 2026-11-03): con `python native/servidor.py --puerto
+  // (decisión del mantenedor, 2026-11-03): con `python native/servidor.py --puerto
   // 8765` levantado, el det+rec corre fuera del navegador. Cualquier fallo (no
   // responde, timeout, JSON inválido) hace caer al motor de siempre en MISMA
   // pasada — el sidecar es una aceleración, nunca un requisito. Apagar:
@@ -149,7 +149,7 @@ export const FLAGS_DEFAULT: FlagsApp = {
   actaNativa: true,
   // KIT ocr-ep-webgpu-v1 — dónde se MULTIPLICA el OCR (los mismos modelos).
   // "auto" (default) = WebGPU si hay adapter real (no fallback) y si no, wasm.
-  // El dueño lo fija a "wasm" para volver al camino de siempre SIN descargar
+  // El mantenedor lo fija a "wasm" para volver al camino de siempre SIN descargar
   // el wasm JSEP (28 MB) y a "webgpu" para forzar el intento (si falla, se
   // reintenta solo el wasm — nunca tumba la cola). Override: flags.json o
   // localStorage e14-flags-overrides {"ocrEp":"wasm"}.

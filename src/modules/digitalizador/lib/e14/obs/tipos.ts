@@ -32,7 +32,7 @@ export interface FlagsApp {
   ocrThreadsTope: number; // default 4
   telemetriaSalud: boolean; // default true
   endpointReportes: string | null; // default null — sin backend, D1
-  colaPersistente: boolean; // default true (cola-persistente-v1) — la masiva SOLO muere con vaciar() del dueño; false = MODO PRUEBAS e64p
+  colaPersistente: boolean; // default true (cola-persistente-v1) — la masiva SOLO muere con vaciar() del mantenedor; false = MODO PRUEBAS e64p
   // ─── KIT e73-sondeo-qr-precoz-v1 (§D) — campos ADITIVOS AL FINAL (D57) ───
   sondeoQrPrecoz: boolean; // default true — sondeo QR en INGESTA (worker e73); false = kill-switch (byte-idéntico a 043b2ba)
   sondeoQrPresupuestoMs: number; // default 2500 — presupuesto del reló del ladder del worker (jamás extender — kit §I)
@@ -45,22 +45,22 @@ export interface FlagsApp {
   // ─── KIT e14-orientacion-qr-v1 (§D) — campo ADITIVO AL FINAL (D57) ───
   qrBrujulaOrientacion: boolean; // default true — QR-brújula de orientación (cuadrante del QR manda + rescate hi-res ZXing; bench v8.3 4/4); false = sondeo OCR de siempre byte a byte
   // ─── KIT flujo-dueno-v1 (K2 — brief Agente B) — campo ADITIVO AL FINAL (D57) ───
-  masivaSondeoCrudo: boolean; // default TRUE = camino de hoy — el sondeo QR crudo de la cadenaDedup (e73) alimenta el dedup temprano; false = SOLO para la corrida de control del dueño (el guard fuerza sondeo=null, la fila sigue a dhash COMO HOY)
+  masivaSondeoCrudo: boolean; // default TRUE = camino de hoy — el sondeo QR crudo de la cadenaDedup (e73) alimenta el dedup temprano; false = SOLO para la corrida de control del mantenedor (el guard fuerza sondeo=null, la fila sigue a dhash COMO HOY)
   // ─── KIT e14-prescan-warp-lado-v1 — campos ADITIVOS AL FINAL (D57) ───
-  prescanQrPresupuestoMs: number; // default 4000 — presupuesto del hard-kill del pre-scan (PRESUPUESTO_FILA_MS); válvula del dueño para equipos lentos (clamp 1000..30000)
+  prescanQrPresupuestoMs: number; // default 4000 — presupuesto del hard-kill del pre-scan (PRESUPUESTO_FILA_MS); válvula del mantenedor para equipos lentos (clamp 1000..30000)
   prescanWarpLado: number; // default 4032 — maxWarpLongSide de la SALIDA del warp del pre-scan (el worker ya aceptaba msg.maxWarpLongSide sin consumidor); 1920 recorta ~4.5x el coste del warpPerspective y la QR se lee igual (el core lee QR a 1280/1920); clamp 256..4032
   // ─── KIT e14-gama-adaptativa-v1 — campo ADITIVO AL FINAL (D57) ───
-  masivaAdaptativoGama: boolean; // default true — capa adaptativa de GAMA para masiva+OCR: el tier detectado (obs/dispositivo §4.4) aplica SOLO presupuestos de recursos (pool/threads/warp/watchdog/master/QR/dhash — tabla en gama.ts) en BAJO/MEDIO; el override MANUAL del dueño manda clave a clave (D6) y false = byte-idéntico a hoy en TODOS los dispositivos (D74)
+  masivaAdaptativoGama: boolean; // default true — capa adaptativa de GAMA para masiva+OCR: el tier detectado (obs/dispositivo §4.4) aplica SOLO presupuestos de recursos (pool/threads/warp/watchdog/master/QR/dhash — tabla en gama.ts) en BAJO/MEDIO; el override MANUAL del mantenedor manda clave a clave (D6) y false = byte-idéntico a hoy en TODOS los dispositivos (D74)
   // ─── KIT e14-capa0-qr-worker-v1 (D40) — campo ADITIVO AL FINAL (D57) ───
   capa0QrWorker: boolean; // default true — la CAPA 0 QR (decode+ladder+barridos jsQR) corre en WORKER dedicado (capa0-qr.worker.js) y el hilo UI deja de comerse los ~15-17 s SYNC del peor caso sin QR; el tier zxing queda en main como rescate único (cobertura EXACTA); false = camino de hoy byte-idéntico (cadena completa en main)
-  // ─── Decisión del dueño 2026-11-11 — cascada OCR por defecto (D57) ───
-  ocrCascada: boolean; // default true — Tesseract fast (spa 4.0.0_fast) → GATE de producción → RapidOCR PP-OCRv4 escalonado 1280→1920→ROI. false = el escalonado RapidOCR de siempre byte a byte (kill-switch del dueño); SIM nunca corre la cascada
+  // ─── Decisión del mantenedor 2026-11-11 — cascada OCR por defecto (D57) ───
+  ocrCascada: boolean; // default true — Tesseract fast (spa 4.0.0_fast) → GATE de producción → RapidOCR PP-OCRv4 escalonado 1280→1920→ROI. false = el escalonado RapidOCR de siempre byte a byte (kill-switch del mantenedor); SIM nunca corre la cascada
   // ─── KIT e75-qr-zoom-zbar-v1 — campo ADITIVO AL FINAL (D57) ───
-  qrZoomTl: boolean; // default true — tier ZOOM TL re-escalado + zbar-wasm en la capa 0 (lab 12 imágenes: 3 páginas del escáner rescatadas con píxeles nativos del QR + 2 que SOLO zbar vio); false = cadena de hoy byte-idéntica (kill-switch del dueño)
+  qrZoomTl: boolean; // default true — tier ZOOM TL re-escalado + zbar-wasm en la capa 0 (lab 12 imágenes: 3 páginas del escáner rescatadas con píxeles nativos del QR + 2 que SOLO zbar vio); false = cadena de hoy byte-idéntica (kill-switch del mantenedor)
   // ─── R1.2 — KIT qr-cache-negativa-v1 — campo ADITIVO AL FINAL (D57) ───
-  qrCacheNegativa: boolean; // default true — la capa 0 que terminó null SIN presupuesto vencido se recuerda por SHA-256 de los bytes (session Map + registro.qrSinPayload): las siguientes corridas del MISMO archivo saltan el ladder (2-3 ms); "PROCESAR IGUAL" jamás consulta ni escribe; false = byte-idéntico a hoy (kill-switch del dueño)
+  qrCacheNegativa: boolean; // default true — la capa 0 que terminó null SIN presupuesto vencido se recuerda por SHA-256 de los bytes (session Map + registro.qrSinPayload): las siguientes corridas del MISMO archivo saltan el ladder (2-3 ms); "PROCESAR IGUAL" jamás consulta ni escribe; false = byte-idéntico a hoy (kill-switch del mantenedor)
   // ─── KIT auto-envio-umbral-v1 (REPORTE-perfil-medio-rendimiento-v1 — objetivo
-  // del dueño: «la mayoría de actas se envían automáticamente si son elegibles
+  // del mantenedor: «la mayoría de actas se envían automáticamente si son elegibles
   // y el OCR las reconoce») — campo ADITIVO AL FINAL ───
   autoEnvioUmbral: "optima" | "advertencia"; // default "optima" — solo OPTIMA (score ≥ 8) se autoenvía (comportamiento de siempre). "advertencia" = el auto-envío se EXTIENDE a ADVERTENCIA (6.5-7.9) cuando la clasificación es AUTO (ruta divipol completa ≥ 0.82 + mesa + tipo — el mismo requisito del join del monitor, publicarDesdeActa lo vuelve a exigir): la maquinaria de vetos (H1 ledger + remoto + dedup) corre IDÉNTICA. Las ADVERTENCIA sin AUTO siguen a revisión manual
   // ─── KIT e14-ocr-nativo-v1 — campo ADITIVO AL FINAL (D57) ───
@@ -73,7 +73,7 @@ export interface FlagsApp {
   // ─── KIT e14-ocr-nativo-v1 (FASE 2) — campo ADITIVO AL FINAL (D57) ───
   actaNativa: boolean; // default false. true + sidecar vivo = el ACTA COMPLETA (quad, warp, b/n, sondeo de orientación y OCR) corre en el sidecar en UNA sola ida: el JS conserva calidad, esquinas, completitud, score, gate, dedup y envío. El prefetched del runner masiva alimenta ADEMÁS la capa 0 (el payload del QR que el sidecar lee del warp), así que el ladder jsQR de 8-22 s no se paga. Sidecar mudo o fallo → pipeline JS de siempre, byte-idéntico
   // ─── KIT ocr-ep-webgpu-v1 — campo ADITIVO AL FINAL (D57) ───
-  ocrEp: "auto" | "wasm" | "webgpu"; // default "auto" — dónde se multiplica el OCR (los MISMOS modelos ONNX, jamás otro motor): "auto" = WebGPU si el navegador expone un adapter NO fallback (GPU real) y si no, wasm; "wasm" = el camino de siempre byte-idéntico (kill-switch del dueño, cero bytes nuevos); "webgpu" = FORZAR el intento GPU aunque no haya adapter (si el intento falla, initReal vuelve solo al wasm de siempre). Medido 2026-11-03 en HD Graphics 520: det 4,8× · rec_v5 7,4×
+  ocrEp: "auto" | "wasm" | "webgpu"; // default "auto" — dónde se multiplica el OCR (los MISMOS modelos ONNX, jamás otro motor): "auto" = WebGPU si el navegador expone un adapter NO fallback (GPU real) y si no, wasm; "wasm" = el camino de siempre byte-idéntico (kill-switch del mantenedor, cero bytes nuevos); "webgpu" = FORZAR el intento GPU aunque no haya adapter (si el intento falla, initReal vuelve solo al wasm de siempre). Medido 2026-11-03 en HD Graphics 520: det 4,8× · rec_v5 7,4×
   // ─── KIT e14-qr-previo-rapido-v1 — campo ADITIVO AL FINAL (D57) ───
   qrPrevioRapido: boolean; // default true — PASE BARATO (jsQR base + recorte TL zxing + ZOOM TL, ~1-2 s) ANTES de pagar el worker de la capa 0 y su rescate zxing en main. Lee el MISMO payload que leería la escalera; si no lee nada, la cadena de hoy corre INTACTA (aditiva, jamás recorta cobertura). false = capa 0 byte-idéntica a hoy (bench gpu5b: 10-19 s por acta)
   // ─── KIT e14-probe-mini768-v1 — campo ADITIVO AL FINAL (D57) ───

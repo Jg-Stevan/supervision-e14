@@ -260,7 +260,7 @@ export const StitchGridIcon = ({ className = "w-4 h-4" }: IconProps) => (
 /** SPRINT-B (B3): StitchFrameIcon BORRADO — su único consumidor era el botón
  *  amarillo del menú §6.3 perdido en el zip 4f9c871 (audit #7: derivado).
  *  grep src/ scripts/ = solo esta definición; el import muerto ya se había
- *  quitado en 2c011a2 (bucket A). El dueño confirma el abandono del menú
+ *  quitado en 2c011a2 (bucket A). El mantenedor confirma el abandono del menú
  *  (el segmented CÁMARA/SIM/SUBIR es la UI vigente). */
 
 /** Importar del dock (mock 1: documento con flecha descendente). */

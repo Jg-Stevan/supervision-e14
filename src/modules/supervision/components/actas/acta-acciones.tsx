@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * Acciones del supervisor (KIT VISOR-MONITOR-GLOBAL-v1 §4-T1):
  *
  * - **REPORTAR ANOMALIA** es la ÚNICA acción del visor del monitor (pedido
- *   explícito del dueño — supersede la Opción B híbrida del plan §4-D2).
+ *   explícito del mantenedor — supersede la Opción B híbrida del plan §4-D2).
  *   Crea un registro `Anomalia` REAL (tipo/severidad/mesa) + notificación +
  *   evento en el historial (lógica `reportarAnomaliaVisor` del store, sin
  *   cambios, incl. `Anomalia.detalle`).
@@ -63,7 +63,7 @@ export function ActaAcciones({
       )}
 
       {/* REPORTAR ANOMALIA — botón hazard ÚNICO del panel (diseño
-          visor_de_actas del dueño; T1 del kit VISOR-MONITOR-GLOBAL-v1). */}
+          visor_de_actas del mantenedor; T1 del kit VISOR-MONITOR-GLOBAL-v1). */}
       <button
         type="button"
         disabled={ocupado}

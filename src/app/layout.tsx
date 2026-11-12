@@ -55,7 +55,7 @@ const CSP_META = [
 // caché persistente de /vendor//models//wasm//scanner/ (P0-2.3).
 // Solo corre cuando NO hay aislamiento (host ya COOP/COEP → no-op) y
 // recarga UNA vez (guard sessionStorage) tras la primera activación.
-// Kill-switch del dueño: eliminar este <script> → byte-idéntico a hoy.
+// Kill-switch del mantenedor: eliminar este <script> → byte-idéntico a hoy.
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const SW_REGISTRO = `(function(){try{
 // KILL-SWITCH + auto-reparación: si el runtime wasm no soportó COI en una

@@ -215,7 +215,7 @@ let timerSalud: number | null = null;
 
 function condicionesOk(): boolean {
   try {
-    // A1-C7: el flag telemetriaSalud del dueño completa el guard del C5
+    // A1-C7: el flag telemetriaSalud del mantenedor completa el guard del C5
     // (default true → idéntico sin overrides; D6: nunca se auto-configura).
     return configObsBase.condicionesSalud();
   } catch {

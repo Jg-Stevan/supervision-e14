@@ -1,7 +1,7 @@
 /**
  * KIT e63k-capa2-identidad-v1 (F1) — CAPA 2 de dedup: IDENTIDAD IMPRESA.
  *
- * Evidencia de campo (consola del dueño, lote 21-oct — kit §0): el par
+ * Evidencia de campo (consola del mantenedor, lote 21-oct — kit §0): el par
  * 3992/3993-P2 (misma mesa, mismos votos, formularios DISTINTOS — delegados
  * vs transmisión) cayó con hamming=6, EXACTAMENTE en el borde de
  * DEDUP_HAMMING_MAX=6 → la marca pre-OCR lo mandó a DUPLICADA y REUTILIZÓ

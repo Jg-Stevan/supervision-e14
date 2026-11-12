@@ -4,44 +4,47 @@ Dos problemas distintos: **leer el texto** del acta (OCR) y **encontrar su
 código** (QR). Aquí está el estado final de ambos, los flags que los controlan y
 lo que ya se probó y no debe reintentarse sin una razón nueva.
 
-## 1. Router OCR
+## 1. OCR: la cascada fija (el router murió)
 
-### 1.1 Motores disponibles
+El «router OCR» — elección de motor por gama con sondas de CPU, sonda de carga,
+gobernador y castigos (`ocrMotorAdaptativo`, `ocrMotor`) — fue retirado: la
+decisión del mantenedor 2026-11-11 fijó **una cascada única para todos los tiers**
+(flag `ocrCascada`, default ON; ver `lib/e14/flags.ts` y
+`docs/MEDICIONES.md` §9 para el protocolo que regula el orden de motores).
+El orden es dato, no código: los órdenes históricos viajan inyectados en la
+telemetría de lectura.
 
-| Motor | Modelo(s) | Dónde | Cuándo se usa |
+### 1.1 Cascada vigente
+
+1. **Tesseract `fast`** — `spa.traineddata.gz` 4.0.0_fast
+   (`public/models/tesseract/4.0.0_fast/`), intento 1, el más barato.
+2. **Gate de producción** (`clasificarCabecera` + divipol): si cierra con AUTO,
+   la lectura termina ahí.
+3. **RapidOCR PP-OCRv4 escalonado** 1280 → 1920 → ROI si el gate no cerró.
+
+Kill-switch: `ocrCascada: false` vuelve al escalonado RapidOCR de siempre,
+byte a byte. SIM nunca corre la cascada.
+
+### 1.2 Motores disponibles
+
+| Motor | Modelo(s) | Dónde | Papel hoy |
 |---|---|---|---|
-| PP-OCRv4 (base) | `ch_PP-OCRv4_det/rec`, `cls` | `public/models/rapidocr/` | Ruta histórica de BAJO/MEDIO. |
-| PP-OCRv5 mobile latin | `det_v5_mobile`, `rec_v5_latin`, `latin_dict` | ídem | Gama ALTA o selección manual. |
-| Tesseract spa-best | `spa.traineddata.gz` + núcleos | `public/models/tesseract/`, `public/vendor/tesseract/` | Último recurso / override. |
-| Sidecar nativo | PP-OCRv5 en Python | `127.0.0.1:8765` | Si el usuario lo instala. |
+| Tesseract fast | `spa.traineddata.gz` (4.0.0_fast) + núcleos | `public/models/tesseract/`, `public/vendor/tesseract/` | Intento 1 de la cascada. |
+| PP-OCRv4 (base) | `ch_PP-OCRv4_det/rec`, `cls` | `public/models/rapidocr/` | Paso 2 de la cascada (escalonado). |
+| PP-OCRv5 mobile latin | `det_v5_mobile`, `rec_v5_latin`, `latin_dict` | ídem | Descargado y disponible; ya no es default de ALTO. |
+| Sidecar nativo | OCR en Python | `127.0.0.1:8765` | Si el usuario lo instala. |
 
-Los modelos se cargan de forma perezosa en `ocr/rapidocr.ts` con
-`onnxruntime-web/wasm`; `wasmPaths` apunta a `/vendor/onnxruntime/`, que se
-materializa en el build. El reconocimiento usa altura 48 y ancho máximo 480, con
-post-proceso DB en JS.
-
-### 1.2 Cómo se elige
-
-Precedencia: **override manual > gobernador > castigos > tier del dispositivo**.
-
-- **BAJO / MEDIO** → motor base PP-OCRv4 (etiqueta histórica
-  `tesseract-best-psm4`, que en producción mapea a v4).
-- **ALTO** (≥4 GB, ≥6 núcleos, 4g/wifi, SIMD) → PP-OCRv5.
-- La sonda de CPU corrige el diagnóstico: `<350/1000` fuerza Tesseract; `≥750`
-  habilita v5.
-- La **sonda de carga real** (inferencia de prueba, timeout 8 s automático /
-  30 s override) es el gate final de v5; un fallo lo castiga 7 días.
-- El **gobernador** degrada a v4 por sesión tras 2 fallos/OOM en 3 minutos.
-- `ocrEp` elige el *execution provider*: `auto` (WebGPU si hay adaptador),
-  `wasm` o `webgpu` forzado con reintento a wasm.
+Los modelos se bajan con `bun run preparar` (`scripts/assets.lock.json`) y se
+cargan de forma perezosa en `ocr/rapidocr.ts` con `onnxruntime-web/wasm`;
+`wasmPaths` apunta a `/vendor/onnxruntime/`, que se materializa en el build.
+El reconocimiento usa altura 48 y ancho máximo 480, con post-proceso DB en JS.
 
 ### 1.3 Flags relevantes
 
 | Flag | Default | Efecto |
 |---|---|---|
-| `ocrMotorAdaptativo` | ON | `false` fuerza v4 en todos los equipos. |
-| `ocrMotor` | — | `ppocrv5`, `tesseract-best-psm4` o `tesseract-spa-best-psm4`. |
-| `ocrEp` | `auto` | WebGPU vs WASM. |
+| `ocrCascada` | ON | La cascada Tesseract fast → gate → RapidOCR v4; `false` = escalonado v4 byte-idéntico. |
+| `ocrEp` | `auto` | WebGPU vs WASM (execution provider). |
 | `ocrNativoUrl` | `null` | URL local del sidecar (`http://127.0.0.1:8765`). |
 | `actaNativa` | OFF | Envía el acta completa al sidecar. |
 | `ocrCls` | ON | Clasificador de 180° por línea. |

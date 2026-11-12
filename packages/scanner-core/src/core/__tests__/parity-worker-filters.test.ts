@@ -19,10 +19,10 @@
  *    (con todo su grafo de helpers extraído por recursión).
  *  · EXCLUIDO: unsharpRgba — el worker lo implementa vía OpenCV (cv.GaussianBlur
  *    + cv.addWeighted sobre Mats) y el core por convolución JS pura: NO son
- *    comparables sin cargar cv.js en el sandbox (pendiente de decisión del dueño).
+ *    comparables sin cargar cv.js en el sandbox (pendiente de decisión del mantenedor).
  *
- * Si este test falla hay DRIFT REAL worker↔core: es un HALLAZGO para el dueño,
- * no se corrige aquí (decisión del propietario).
+ * Si este test falla hay DRIFT REAL worker↔core: es un HALLAZGO para el mantenedor,
+ * no se corrige aquí (decisión del mantenedor).
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

@@ -3,7 +3,7 @@
  *
  * El QR del E-14 es DATO LEÍDO, no imagen: dos fotos del MISMO papel
  * producen el MISMO payload byte-a-byte aunque el dhash no pueda separarlas
- * (banco #72 — GO medido del dueño: 88.2% decode, 0 colisiones, re-encodes
+ * (banco #72 — GO medido del mantenedor: 88.2% decode, 0 colisiones, re-encodes
  * dhash 8-33 agrupan por payload EXACTO; la separación criptográfica del
  * peligro dhash: par estilo G2/G4 con prefijo de 21 chars común y payload
  * DISTINTO no agrupa — sin zona de falso positivo). Esta capa corre ANTES de
@@ -750,7 +750,7 @@ export async function decodificarQrDeCapture(
     // nitidez/binarizada/rotaciones/rescate) sin leer nada. Sin re-pagar
     // trabajo: la cobertura queda EXACTA a la cadena de hoy.
     soloZxing?: boolean;
-    // KIT e75-qr-zoom-zbar-v1 (aditivo, default true = MEJORA del dueño):
+    // KIT e75-qr-zoom-zbar-v1 (aditivo, default true = MEJORA del mantenedor):
     // tier ZOOM TL re-escalado + zbar DESPUÉS de la cadena completa SIN
     // lectura y ANTES del rescate 4096 (barato ~6-50 ms vs segundos).
     // `false` = cadena de hoy byte-idéntica (kill-switch flag qrZoomTl).

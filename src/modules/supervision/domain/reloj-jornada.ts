@@ -1,5 +1,5 @@
 /**
- * RELOJ REAL de la jornada — pedido del dueño (ronda «reloj real»):
+ * RELOJ REAL de la jornada — pedido del mantenedor (ronda «reloj real»):
  *
  *   «reloj real, cambia el estado del puesto, local es colombia país es
  *   el q emite»
@@ -13,7 +13,7 @@
  * - El estado del puesto CAMBIA con el reloj: antes de las 16:00 del país
  *   emisor es NO INICIADO; al cerrar arranca la digitalización (un puesto
  *   normalmente dura ~1 hora); > 1 hora es amarillo (pendiente) y > 3
- *   horas rojo CRÍTICO (umbral del dueño, domain/tiempo-cierre).
+ *   horas rojo CRÍTICO (umbral del mantenedor, domain/tiempo-cierre).
  *
  * El instante de cierre se deriva con `Intl.DateTimeFormat` (stdlib, sin
  * librerías): ancla iterativa que ubica 16:00 LOCAL del país en la fecha

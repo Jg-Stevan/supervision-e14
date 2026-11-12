@@ -53,7 +53,7 @@ export interface AgregadoLecturaAceptante {
 }
 
 /** Agregado acumulable (el reporte lo recalcula sobre las actas retenidas;
- *  el dueño puede sumar exportaciones sucesivas sin doble conteo). */
+ *  el mantenedor puede sumar exportaciones sucesivas sin doble conteo). */
 export interface AgregadoLectura {
   actas: number;
   aceptadas: number;

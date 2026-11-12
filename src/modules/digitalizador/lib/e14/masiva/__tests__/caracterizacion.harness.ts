@@ -287,7 +287,7 @@ mock.module("@/modules/digitalizador/lib/e14/masiva/sondeo-qr.client", () => ({
 // Con D81 el default de `ocrNativoUrl` pasó a `http://127.0.0.1:8765`, y el
 // override de pruebas por localStorage NO llega: `leerOverridesFlags` lee
 // `window.localStorage`, que en bun no existe. Así que si en la máquina del que
-// corre hay un sidecar vivo (el dev del dueño, un CI con el .exe), estos
+// corre hay un sidecar vivo (el dev del mantenedor, un CI con el .exe), estos
 // fixtures le mandan 960 actas falsas, el `/acta` falla y el runner reintenta —
 // `escanearActa` se llama 2× y el veredicto depende de qué procesos estén
 // escuchando. Se fija el peor caso real (sidecar apagado), que es el camino que

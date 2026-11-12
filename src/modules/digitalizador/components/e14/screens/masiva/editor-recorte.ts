@@ -1,5 +1,5 @@
 /**
- * KIT VISOR-MASIVA-v1 (T4 — pedido N2 del dueño) — EDITOR DE RECORTE /
+ * KIT VISOR-MASIVA-v1 (T4 — pedido N2 del mantenedor) — EDITOR DE RECORTE /
  * PERSPECTIVA del modal de revisión masiva. Helper LOCAL de la carpeta
  * masiva (el kit §1 lo permite: «modal-revisor.tsx y helpers de su
  * carpeta»); el motor `src/lib/e14/**` NO se toca — solo se CONSUME

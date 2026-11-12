@@ -4,7 +4,7 @@
  * Todo colector: null HONESTO donde el navegador no da el dato, try/catch
  * total (la detección JAMÁS tumba la app) y cero dependencias nuevas.
  *
- * Señales cubiertas (lo pedido por el dueño — "identificar los recursos"):
+ * Señales cubiertas (lo pedido por el mantenedor — "identificar los recursos"):
  * · CPU: hardwareConcurrency · heap (Chromium) · deviceMemory (Chromium)
  * · GPU: renderer/vendedor reales vía WEBGL_debug_renderer_info, WebGL2,
  *   WebGPU, MAX_TEXTURE_SIZE (relevante para ONNX-web y canvas pesado)
@@ -302,7 +302,7 @@ export async function recolectarAsync(): Promise<SenalesAsync> {
   }
 }
 
-// ─── factor de forma (computador o celular — petición del dueño) ────────────
+// ─── factor de forma (computador o celular — petición del mantenedor) ────────────
 
 /** Diagonal estimada de la pantalla física en pulgadas (aprox honesta). */
 function diagonalPulgadas(w: number | null, h: number | null, dpr: number | null): number | null {

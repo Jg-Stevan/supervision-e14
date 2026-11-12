@@ -5,9 +5,10 @@
 #   · src/modules/digitalizador/assets/actas-demo (6 JPG reales del consulado)
 #   · src/modules/digitalizador/assets/acta-e14-real.jpg (copia del digitalizador)
 #   · docs/capturas-actas-reales-v1 (capturas con fotos reales)
-#   · docs/historico/actas-reales-manifest.original.json (G2: purgar también)
+#   · docs/historico/actas-reales-manifest.original.json (G2: purgar también;
+#     desde 2026-11-12 vive en docs/archivo/historico/ — se purgan las DOS rutas)
 #
-# ⚠️  LO EJECUTA EL DUEÑO, no un agente: fuerza push y reescribe SHAs.
+# ⚠️  LO EJECUTA EL MANTENEDOR, no un agente: fuerza push y reescribe SHAs.
 # Endurecido en la remediación de la auditoría 2026-11-11: bundle de respaldo
 # obligatorio, --force-with-lease (nunca --force a secas) y registro del SHA
 # previo de main. El manifest metadata-only VIGENTE
@@ -17,7 +18,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/Jg-Stevan/supervision-e14.git"
 DIR="${1:-supervision-e14-rewrite}"
-# G2 (dueño, 2026-11-11): purgar también la evidencia metadata-only original.
+# G2 (mantenedor, 2026-11-11): purgar también la evidencia metadata-only original.
 # Pon PURGA_MANIFEST_ORIGINAL=0 para conservarla.
 PURGA_MANIFEST_ORIGINAL="${PURGA_MANIFEST_ORIGINAL:-1}"
 
@@ -47,6 +48,7 @@ ARGS=(
 )
 if [ "$PURGA_MANIFEST_ORIGINAL" = "1" ]; then
   ARGS+=(--path docs/historico/actas-reales-manifest.original.json)
+  ARGS+=(--path docs/archivo/historico/actas-reales-manifest.original.json)
 fi
 
 git filter-repo --invert-paths "${ARGS[@]}" --force

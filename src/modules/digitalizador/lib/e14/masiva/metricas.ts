@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * KIT e14-metricas-corrida-v1 (D34 — pedido literal del dueño 2026-10-28):
+ * KIT e14-metricas-corrida-v1 (D34 — pedido literal del mantenedor 2026-10-28):
  * «quiero saber cuánto tardó en procesarse cada acta (individual) para saber
  * cuáles están tardando más… en el mismo masiva un informe de cómo se está
  * comportando la carga masiva, cuánto está tardando, en qué está tardando
@@ -17,7 +17,7 @@
  * · HONESTIDAD — solo se estampa lo medido (jamás inventar, RED LINE 2):
  *   etapa ausente = campo ausente. La copia DUPLICADA reporta su propio
  *   totalMs (≈0, guard e72) — jamás el OCR heredado de la original.
- * · PRIVACIDAD — el informe es LOCAL del dueño (export manual); fila id +
+ * · PRIVACIDAD — el informe es LOCAL del mantenedor (export manual); fila id +
  *   nombre de archivo SON suyos. Sin telemetría nueva al obs (el canal
  *   obs/ tiene sus reglas de privacidad — actaIdHash — y otro propósito).
  *
@@ -92,7 +92,7 @@ export interface EtapasMetrica {
    *  QR + decisiones dedup + origen + deskew + master del intento; los
    *  reintentos del watchdog re-pagan origen/deskew/master → se ACUMULAN).
    *  Hoy es invisible (ni esperaMs ni totalMs lo capturan) — evidencia del
-   *  informe 2026-10-30: 6-10 s/acta sin dueño entre decode+detect y ocr.
+   *  informe 2026-10-30: 6-10 s/acta sin mantenedor entre decode+detect y ocr.
    *  Incluye la espera APLAZADA por gemela si hubo (tiempo mural honesto).
    *  La matanza/re-creación de workers ENTRE intentos no es pre-OCR (costo
    *  del watchdog) y no se cuenta. Ausente = la fila jamás llegó al bridge
@@ -142,7 +142,7 @@ export interface EtapasMetrica {
 export interface MetricaActa {
   id: string; // id de la fila (re-put idempotente — último desenlace gana)
   corridaId: string;
-  nombre: string; // nombre del archivo (dueño local — sin hash)
+  nombre: string; // nombre del archivo (mantenedor local — sin hash)
   tsFin: number; // epoch del desenlace
   /** totalMs del pipeline (diagnostico.tiempos.totalMs — contrato: jamás
    *  incluye espera de cola). null = desenlace sin pipeline (copia sin
@@ -221,7 +221,7 @@ export interface MetricaActa {
   /** Muro del despacho: tsFin − tsInicio (la MISMA ventana del solape
    *  D44-R3). Ausente = fila sin tsInicio (ERROR temprano). */
   muroMs?: number;
-  /** Residual del muro SIN dueño: muroMs − (totalMs + preOcrMs + thumbMs +
+  /** Residual del muro SIN mantenedor: muroMs − (totalMs + preOcrMs + thumbMs +
    *  persistMs + envioMs) — SOLO con las dos paredes mayores en mano (jamás
    *  inventar). Es el 0,3-0,7 s/acta que el informe 2026-10-30 no explicaba
    *  (transfer/serialización/GC/marco del store). Puede ser negativo →
@@ -229,7 +229,7 @@ export interface MetricaActa {
   gapMs?: number;
   /** D61 medía el dispatch síncrono (envioMs) — la PUBLICACIÓN del acta al
    *  monitor (publicarDesdeActa — red real) corría fire-and-forget SIN
-   *  dueño. Ahora se mide al aterrizar: ms del roundtrip + estado final
+   *  mantenedor. Ahora se mide al aterrizar: ms del roundtrip + estado final
    *  ("publicada" | "bloqueada"). Llega DESPUÉS del desenlace (re-put
    *  idempotente — último gana). Ausente = la publicación no corrió o no
    *  aterrizó antes del export. NO compite por «cuello» (no es camino
@@ -387,7 +387,7 @@ export function iniciarCorridaMetrica(): void {
         if (abierta && abierta.fin == null) {
           // D45 — la corrida quedada abierta NO se cierra en silencio: su
           // motivo de muerte queda estampado (recarga/crash — el fin=null
-          // del informe real ya tiene dueño).
+          // del informe real ya tiene mantenedor).
           await put(STORE_CORRIDAS, { ...abierta, fin: Date.now(), motivoCierre: "recarga-o-abandono" });
         }
       }
@@ -488,7 +488,7 @@ export function registrarMetricaDesenlace(args: {
     try {
       if (!corridaIdViva) return; // sin corrida viva → sin métrica (honesto)
       const t = args.acta.diagnostico?.tiempos ?? null;
-      // D45 — muro del despacho + residual SIN dueño. tsFin es el MISMO
+      // D45 — muro del despacho + residual SIN mantenedor. tsFin es el MISMO
       // reloj del registro de abajo (una sola lectura de Date.now()).
       const tsFin = Date.now();
       let muroMs: number | null = null;
@@ -497,7 +497,7 @@ export function registrarMetricaDesenlace(args: {
         muroMs = Math.round(tsFin - args.tsInicio);
         // gap SOLO con las dos paredes mayores en mano (jamás inventar);
         // las etapas post-bridge medidas (thumb/persist/envío) RESTAN —
-        // son segmentos del muro con dueño. El sondeo NO (es paralelo).
+        // son segmentos del muro con mantenedor. El sondeo NO (es paralelo).
         if (typeof t?.totalMs === "number" && typeof args.preOcrMs === "number") {
           const thumb = typeof args.thumbMs === "number" ? args.thumbMs : 0;
           const persist = typeof t?.persistMs === "number" ? t.persistMs : 0;
@@ -758,7 +758,7 @@ export function registrarMetricaError(args: {
           ? { reintentosPreOcr: args.reintentosPreOcr }
           : {}),
         // D45-R1 — el despacho de la publicación pudo ocurrir antes del
-        // throw (el roundtrip aterrizó sin dueño): se drena igual.
+        // throw (el roundtrip aterrizó sin mantenedor): se drena igual.
         ...(envioRoundPendiente.get(args.filaId) ?? {}),
       };
       envioRoundPendiente.delete(args.filaId); // D45-R1 — drenado
@@ -891,7 +891,7 @@ export async function limpiarMetricas(): Promise<void> {
   }
 }
 
-/** Export JSON (informe completo — corridas + actas) para el dueño. */
+/** Export JSON (informe completo — corridas + actas) para el mantenedor. */
 export async function exportarInformeMetricas(): Promise<string> {
   const [corridas, db] = await Promise.all([
     listarCorridasMetricas(),
@@ -906,7 +906,7 @@ export async function exportarInformeMetricas(): Promise<string> {
     });
   }
   // KIT ocr-router-v1 fase 4 — AUTO-IDENTIFICACIÓN del informe (cierra el
-  // hueco de evidencia del A/B real del dueño 2026-10-28: dos informes con
+  // hueco de evidencia del A/B real del mantenedor 2026-10-28: dos informes con
   // el mismo kit donde era imposible saber qué motor corrió en cada uno).
   // ADITIVO AL FINAL (patrón D57 — mismo criterio de hangResumen/enviosDetalle):
   // los informes previos no cambian de forma; quien lee el JSON viejo no se

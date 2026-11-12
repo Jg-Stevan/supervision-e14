@@ -59,7 +59,7 @@ export const DETALLE_INCOMPLETA_ESCANEO =
   "EL ESCANEO PARECE CORTADO — REPITE EL ESCANEO INCLUYENDO EL ACTA COMPLETA";
 /** KIT e14-gate-v2 (FASE G2): detalle del rechazo por el MARCADOR
  *  OBLIGATORIO de votos fallido — copy CORTO y descriptivo (decisión del
- *  dueño: SIN guía de cámara). */
+ *  mantenedor: SIN guía de cámara). */
 export const DETALLE_SIN_VOTOS = "ACTA SIN VOTOS VISIBLES";
 /** §D1 (SPEC-e14-score-ocr): detalle del rechazo determinista «score bajo». */
 export const DETALLE_BAJO = "NO SE RECONOCE INFORMACIÓN DEL ACTA — REPITA LA FOTO";

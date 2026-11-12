@@ -28,7 +28,7 @@ import { planGamaActual } from "../gama";
  *  siendo evidente al muestreo: la caída es de ~1.0 a ~0.0 entre etapas. */
 const progresoMsEfectivo = (): number => planGamaActual().progresoMs;
 
-// ─── % ÚNICO DEL PROCESO COMPLETO POR ACTA (cambio pedido por el dueño) ───
+// ─── % ÚNICO DEL PROCESO COMPLETO POR ACTA (cambio pedido por el mantenedor) ───
 // Antes: el chip de la fila saltaba por tramos fijos por FASE (25→50→OCR
 // 50-95→98) y, con el OCR ESCALONADO (1.ª pasada 1280 → re-OCR 1920), el
 // número RETROCEDÍA (la 2.ª pasada re-emite su fracción 0→1: 95→50→95).

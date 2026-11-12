@@ -19,13 +19,13 @@ import { storeMasiva } from "./store-api";
 // ─── e72 — ESPERA ACOTADA por el desenlace de la original (guard de
 // ingesta × pool) ─── La rama DUPLICADA de procesarUno caía al REPROCESO
 // COMPLETO cuando la original aún no tenía desenlace (race Opt-1×Opt-3 del
-// smoke del dueño — imagen10 pagó 32 s de OCR por ser gemela exacta de
+// smoke del mantenedor — imagen10 pagó 32 s de OCR por ser gemela exacta de
 // imagen9). Sondeo SOLO-LECTURA cada INTERVALO hasta que el registro de la
 // original traiga acta (→ reutilizar copia al instante) o la espera muera:
 // original QUITADA/ERROR/YA-ENVIADA (sin acta propia — jamás habrá copia),
-// ESTA fila QUITADA (la voluntad del dueño manda) o TECHO (10 min ≈ 4× el
+// ESTA fila QUITADA (la voluntad del mantenedor manda) o TECHO (10 min ≈ 4× el
 // peor caso del watchdog D65 con reintentos — el slot del pool queda libre
-// y el fallback honesto de SIEMPRE corre: el dueño nunca pierde la foto).
+// y el fallback honesto de SIEMPRE corre: el mantenedor nunca pierde la foto).
 // PENDIENTE/PROCESANDO ESPERAN (la original siempre va delante en la FIFO
 // — el otro slot del pool la alcanza; sin deadlock por construcción).
 // C5: el CALLER (rama DUPLICADA de runner.ts) SÓLO llama con la original

@@ -1,5 +1,5 @@
 /**
- * ocr-cascada.ts — cascada OCR por defecto de ESTA app (decisión del dueño
+ * ocr-cascada.ts — cascada OCR por defecto de ESTA app (decisión del mantenedor
  * 2026-11-11): el motor de D, Tesseract `fast` (spa 4.0.0_fast) como intento 1
  * → GATE (clasificador REAL de producción) → si la cabecera no sale AUTO,
  * RapidOCR PP-OCRv4 escalonado 1280 → 1920 → rescate por ROIs.

@@ -49,7 +49,7 @@ Dependencias permitidas:
 | Visor | `components/actas/acta-viewer-modal.tsx` y subcomponentes | Foto real o documento sintético, zoom, rotación, contraste, pantalla completa y REPORTAR ANOMALIA. |
 | Dominio | `domain/types.ts`, `domain/acta.ts`, `domain/divipola.ts` | Contratos puros: puestos, mesas, actas, DIVIPOLA. |
 | Datos | `data/supervision-repository.ts`, `mock-repository.ts` | Interfaz única de lectura/mutación y su implementación demo. |
-| Ingesta estática | `data/actas-reales/` | Manifest + assets WebP de actas reales (D24). |
+| Ingesta estática | `data/actas-reales/` | Manifest metadata-only (D24): los assets WebP se retiraron del árbol (D87) y la purga de historial está preparada (D90). |
 | Ingesta runtime | `data/actas-runtime.ts` | Actas que llegan de la carga masiva durante la sesión. |
 | Validación | `data/validacion-d25.ts`, `data/divipola-adapter.ts` | Cuarentena por ubicación y carga estricta del catálogo. |
 
@@ -65,7 +65,7 @@ y la impresión verbatim.
 | Bridge | `lib/e14/scanner-core-bridge.ts`, `bridge.ts`, `get-bridge.ts` | Orquesta el pipeline real y publica al monitor. |
 | Pre-OCR | `lib/e14/masiva/prescan-qr.client.ts`, worker capa 0 | Sondeo QR temprano y en paralelo. |
 | Calidad | `lib/e14/calidad.ts`, `completitud.ts`, `marcadores.ts`, `gate.ts` | Score, veto de recorte, marcadores y desenlace. |
-| OCR | `lib/e14/ocr/*` | RapidOCR (v4/v5), Tesseract y selector por gama. |
+| OCR | `lib/e14/ocr/*` | Cascada fija: Tesseract fast → gate → RapidOCR v4 escalonado (decisión del mantenedor 2026-11-11; el router murió). |
 | Clasificación | `lib/e14/clasificador.ts`, `divipol.ts` | Normalización del encabezado a `idEnlace`. |
 | Integridad | `lib/e14/integridad.ts`, `auditoria.ts` | Dedup por bytes, telemetría y trazas. |
 | Assets | `assets/*`, `lib/e14/actas-demo.ts`, `sim-assets.ts` | Fotos demo/simulación comprimidas. |
@@ -193,10 +193,11 @@ golden vigente es `mock-determinismo.test.ts`.
 ## 8. Despliegue
 
 - `next build` genera `out/` estático.
-- **Cloudflare Pages** es el canal primario: `_headers` (un único bloque `/*`)
+- **Cloudflare Pages** es el canal único: `_headers` (un único bloque `/*`)
   activa COOP/COEP y el OCR multihilo; los wasm > 25 MiB se parten en build y
   una Pages Function los reensambla.
-- **GitHub Pages** convive como canal secundario sin cabeceras.
+- **GitHub Pages: retirado** (verificado 2026-11-12 — `deploy-pages.yml` ya no
+  está en `.github/workflows/`).
 - `public/vendor/onnxruntime/` se materializa en `predev`/`prebuild`; no se
   versiona.
 
@@ -206,7 +207,7 @@ golden vigente es `mock-determinismo.test.ts`.
 |---|---|
 | Cambiar el gate o los umbrales | `digitalizador/lib/e14/gate.ts` |
 | Cambiar la detección de recorte | `digitalizador/lib/e14/completitud.ts` |
-| Añadir/cambiar un modelo OCR | `digitalizador/lib/e14/ocr/rapidocr.ts` + `public/models/rapidocr/` |
+| Añadir/cambiar un modelo OCR | `digitalizador/lib/e14/ocr/rapidocr.ts` + `public/models/rapidocr/` (descargados por `preparar`, no versionados — D88) |
 | Cambiar la cadena QR | `digitalizador/lib/e14/masiva/prescan-qr.client.ts`, `qr-zxing.ts` |
 | Cambiar la validación de actas | `supervision/data/validacion-d25.ts` |
 | Añadir una vista | `supervision/components/supervision-shell.tsx` (estado, no ruta) |

@@ -4,7 +4,7 @@
  * KIT e107-prescan-qr-cola-v1 (§D.2) — orquestador del PRE-SCAN QR en
  * «PROCESAR COLA» + clasificador PURO + hook de progreso.
  *
- * El pedido del dueño (§0, contrato):
+ * El pedido del mantenedor (§0, contrato):
  *   Fase 1 — PRE-SCAN rápido: decode (EXIF ✓) → detección de quad con el
  *   detection-worker REAL → warp (recorte SIN rotar) → lectura de QR
  *   (BarcodeDetector → jsQR — sin el decodificador wasm lento, §F.3).
@@ -122,7 +122,7 @@ export async function clasificarPayloadPrescan(
 
 /**
  * Filas objetivo del pre-scan: SOLO PENDIENTE vivas. `forzarDedupOff`
- * (PROCESAR IGUAL / e65b) manda SIEMPRE — RL-e65b-6: el escape del dueño es
+ * (PROCESAR IGUAL / e65b) manda SIEMPRE — RL-e65b-6: el escape del mantenedor es
  * sagrado, la fila va directa a la Fase 3 sin pasar por el pre-scan.
  */
 export function objetivoPrescan(filas: FilaMasiva[]): FilaMasiva[] {
@@ -211,7 +211,7 @@ export async function aplicarVeredictoPrescan(
 
 /** Declaración local mínima — el repo NO declara BarcodeDetector (la red
  *  line de identidad-qr.ts:54 lo PROHIBE para la capa 0/identidad y ese
- *  archivo queda INTACTO). §F.1: aquí lo ordena el dueño para este módulo
+ *  archivo queda INTACTO). §F.1: aquí lo ordena el mantenedor para este módulo
  *  NUEVO y es seguro por igualdad EXACTA de payload (Reed-Solomon — no hay
  *  «casi el mismo payload»; el error siempre cae del lado conservador). */
 interface BarcodeDetectorLike {
@@ -328,13 +328,13 @@ export async function prescanYIniciar(): Promise<void> {
   // escala con los píxeles de salida, no de entrada).
   // KIT e14-gama-adaptativa-v1 (D74): lectura EFECTIVA — en gama BAJO/MEDIO
   // adaptativa el plan baja el lado (1920/2560) SIN pisar un override manual
-  // del dueño; flag OFF ⇒ el flag puro de siempre.
+  // del mantenedor; flag OFF ⇒ el flag puro de siempre.
   const warpLado = flagsMasivaEfectivos().prescanWarpLado;
-  // R1 — kill-switch del dueño: flag OFF ⇒ byte-idéntico a hoy
+  // R1 — kill-switch del mantenedor: flag OFF ⇒ byte-idéntico a hoy
   // KIT e14-ocr-nativo-v1 (FASE 2): con el acta-completa nativa el QR LO LEE
   // el sidecar sobre SU warp (capa 0 lo hereda — `hereda-nativo`), así que esta
   // lane solo consume los núcleos que ORT necesita. Medido en la máquina del
-  // dueño (4 núcleos): con el pre-scan corriendo, cada `/acta` pasaba de 7-8 s
+  // mantenedor (4 núcleos): con el pre-scan corriendo, cada `/acta` pasaba de 7-8 s
   // a 10-18 s y el lote de 6 de 1 m 11 s a 1 m 38 s. Lo que se deja de pagar
   // aquí también se deja de tener: la dedup por payload EN INGESTA de esta lane
   // — una duplicada se detecta ahora dentro del pool (capa 0/dhash/payload) en
@@ -344,9 +344,9 @@ export async function prescanYIniciar(): Promise<void> {
     store.iniciar();
     return;
   }
-  // Observabilidad del dueño — eco de la config REAL de esta corrida (la
+  // Observabilidad del mantenedor — eco de la config REAL de esta corrida (la
   // lectura de overrides de localStorage ocurre AQUÍ, en vivo). Diagnóstico
-  // pactado: si esta línea no muestra los overrides del dueño, el navegador
+  // pactado: si esta línea no muestra los overrides del mantenedor, el navegador
   // está corriendo código viejo (pestaña sin recargar tras el deploy / SW en
   // waiting del banner E-04) — NO es un problema de flags ni del prescan.
   logger.info(

@@ -57,7 +57,7 @@ import { ActaViewerModal } from "./actas/acta-viewer-modal";
  * dentro (el shell no está en la whitelist del kit). */
 
 /** Estado del visor (kit T3.2) + puestoId: el breadcrumb y el navegador
- * MESA n/N necesitan el puesto dueño de la mesa (ids de mesa se repiten
+ * MESA n/N necesitan el puesto mantenedor de la mesa (ids de mesa se repiten
  * entre puestos). Desviación menor del kit, documentada en el REPORTE. */
 export interface EstadoVisorActa {
   puestoId: string;

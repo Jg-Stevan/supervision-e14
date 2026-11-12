@@ -15,7 +15,7 @@ import { LIMITES_ZOOM_VISOR } from "./visor-zoom";
 
 /**
  * Toolbar flotante del visor (KIT VISOR-MONITOR-GLOBAL-v1 §4-T3 — diseño
- * del dueño): `🔍− % 🔍+ │ ↻ ◐ ⛶ │ SCORE`.
+ * del mantenedor): `🔍− % 🔍+ │ ↻ ◐ ⛶ │ SCORE`.
  *
  * - **Sin botón AJUSTAR** (T3.1 — el ajuste sigue disponible con doble
  *   clic/toque, gesto de VisorZoom; los title/aria del zoom lo mencionan).

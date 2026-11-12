@@ -53,7 +53,7 @@ const vuelo = new Map<string, Promise<ActaNativa | null>>();
  *
  *  EL ORIGEN DEL VUELO ÚNICO: cuando el navegador todavía hacía SU pre-OCR y SU
  *  OCR en WASM, adelantar dos actas era CONTRAPRODUCENTE en la máquina del
- *  dueño (4 núcleos): dos actas simultáneas pasaron de 6 s a 17 s CADA una
+ *  mantenedor (4 núcleos): dos actas simultáneas pasaron de 6 s a 17 s CADA una
  *  (los `--sesiones` se reparten `cpu/n` hilos y el WASM se comía el resto). De
  *  ahí la cadena única.
  *

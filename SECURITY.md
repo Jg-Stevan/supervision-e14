@@ -37,7 +37,7 @@ La aplicación es un **export estático** que corre en el navegador del usuario:
 
 ## Decisión D35 — actas reales retiradas del HEAD (2026-11-08)
 
-Se aplicó la **opción A (anonimizar)** de la decisión D35 del dueño:
+Se aplicó la **opción A (anonimizar)** de la decisión D35 del mantenedor:
 
 - **Eliminadas del HEAD**: las **8 fotos WebP** (4 actas × 2 páginas, según el
   propio manifest) de `src/modules/supervision/data/actas-reales/assets/`
@@ -49,7 +49,9 @@ Se aplicó la **opción A (anonimizar)** de la decisión D35 del dueño:
   paginación) sin referencias a archivo de foto, con el campo
   `"fotos": "eliminadas-por-D35"` y la nota de la decisión con fecha.
 - **Evidencia de auditoría**: el manifest ORIGINAL (solo JSON, sin fotos)
-  quedó en `docs/historico/actas-reales-manifest.original.json`.
+  quedó en `docs/archivo/historico/actas-reales-manifest.original.json`
+  (movido a archivo el 2026-11-12; la ruta histórica era
+  `docs/historico/…` y el script de purga cubre las dos).
 - **Historia git pendiente**: los blobs y los **nombres de archivo** (que
   revelan códigos DANE de mesa) siguen en la historia ANTERIOR a la purga.
   El rewrite es la tarea 1.3 del plan de remediación y se entrega como
@@ -112,3 +114,13 @@ inyectadas por un tercero):
   documentadas.
 - Los binarios vendidos (modelos, wasm, diccionarios) se verifican por origen y
   tamaño; `.gitattributes` evita que CRLF los corrompa.
+
+## Nota de riesgo — CSP `unsafe-eval` del detector OpenCV (2026-11-12)
+
+**Riesgo registrado 2026-11-12:** el detector (core OpenCV) requiere
+`unsafe-eval` para wasm; el scope es el bundle del detector y se re-evalúa al
+cambiar el core (D80 parte los wasm; validar tras cada bump). Introducido por
+el commit `10be269` (fix(csp): permitir unsafe-eval al core OpenCV del
+detector). Cualquier actualización del core OpenCV u otro wasm del detector
+debe re-validar que la directiva sigue limitada al scope del detector y que el
+resto de la app no hereda `unsafe-eval`.

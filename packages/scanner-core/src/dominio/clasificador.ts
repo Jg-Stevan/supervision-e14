@@ -301,7 +301,7 @@ export function candidatosCodigo1D(texto: string): string[] {
 }
 
 // BANDA (tipo copia, §D.1): señal primaria — CLAVEROS existe pero NO se archiva.
-// CORRECCIÓN con evidencia (captura del dueño 2026-10-10): el `C[OÓ]NSUL` suelto
+// CORRECCIÓN con evidencia (captura del mantenedor 2026-10-10): el `C[OÓ]NSUL` suelto
 // matcheaba la caja impresa «CONSULADO: 88 - CONSULADOS» (presente en TODAS las
 // copias de consulado) y marcaba DELEGADOS falso en un acta TRANSMISIÓN. La
 // banda de delegados imprime el literal «CÓNSUL/EMBAJADOR» (ANALISIS §D.1) →
@@ -561,7 +561,7 @@ export function clasificarCabecera(ocrTexto: string, base: DivipolBase): Clasifi
 
   // ---- PÁGINA (§C): «Ver/Pag/de» impreso primero; respaldo d12-13/d14-15 del
   //      código 1D impreso (ANALISIS §D.2 — «710003993010102» → 01/02 = «1 de 2»,
-  //      verificado en vivo con el OCR del dueño). KIT actas-vivas-paginas-v1
+  //      verificado en vivo con el OCR del mantenedor). KIT actas-vivas-paginas-v1
   //      (FASE B): los candidatos se prueban EN ORDEN y gana el PRIMERO cuya
   //      aritmética cuadre — exigir UN único código de 15 dígitos limpio era
   //      frágil (el OCR puede arrastrar códigos remanentes y la pág real del
@@ -600,7 +600,7 @@ export function clasificarCabecera(ocrTexto: string, base: DivipolBase): Clasifi
 
   // ---- PÁGINA (§C): «Ver/Pag/de» impreso primero; respaldo d12-13/d14-15 del
   //      código 1D impreso (ANALISIS §D.2 — «710003993010102» → 01/02 = «1 de 2»,
-  //      verificado en vivo con el OCR del dueño). KIT actas-vivas-paginas-v1
+  //      verificado en vivo con el OCR del mantenedor). KIT actas-vivas-paginas-v1
   //      (FASE B): los candidatos se prueban EN ORDEN y gana el PRIMERO cuya
   //      aritmética cuadre — exigir UN único código de 15 dígitos limpio era
   //      frágil (el OCR puede arrastrar códigos remanentes y la pág real del
@@ -616,7 +616,7 @@ export function clasificarCabecera(ocrTexto: string, base: DivipolBase): Clasifi
           // FIX (auditoría 2-a C1): index = grupo 2 (Pág) — el grupo 1 es
           // «Ver» (versión de diagramación, SIEMPRE 01). El swap fabricaba
           // «PÁG 1/2» en toda pág 2 sin código 1D (hueco P1 mentiroso —
-          // el bug del dueño 16-oct que el kit decía curado) y el aviso
+          // el bug del mantenedor 16-oct que el kit decía curado) y el aviso
           // VERPAG_CODIGO_DISCREPAN espurio cuando el código SÍ se leía.
           index: Math.max(1, numeroLimpio(mVerPag[2]) || 1),
           total: Math.max(1, numeroLimpio(mVerPag[3]) || 2),
@@ -831,7 +831,7 @@ export function clasificarCabecera(ocrTexto: string, base: DivipolBase): Clasifi
     // «EI Calro-Consulado» vs «El Cairo - Consulado» pasa de 0.471 (cap
     // injusto — el caso real del informe 120553) a ≥ 0.55 (sin cap).
     // KIT e63f-autoenvio-v1 (F1b — CAMBIO DE SEMÁNTICA DECLARADO, aprobación
-    // del dueño en el kit §3b): el consenso del registro KIT FRENA el
+    // del mantenedor en el kit §3b): el consenso del registro KIT FRENA el
     // downgrade — puesto resuelto POR CÓDIGO ∧ kitEnRegistro(mun, kit) existe
     // ∧ std del registro == puesto.codigo → NO capar: DOS fuentes
     // estructuradas de acuerdo (código divipol leído por OCR + kit del
@@ -921,7 +921,7 @@ export function clasificarCabecera(ocrTexto: string, base: DivipolBase): Clasifi
   //      embarcado. // Fuente: §0-F5 — public/e14/divipol.json trae p.t por
   //      puesto: El Cairo puesto 02 tiene t:1 → una lectura «MESA: 004» es
   //      IMPOSIBLE (tesseract leyó MESA 001→004 en la captura cruda del
-  //      dueño). Sin ruta completa no hay p.t → el guard no aplica. ----
+  //      mantenedor). Sin ruta completa no hay p.t → el guard no aplica. ----
   const rutaCompleta = Boolean(departamento && municipio && zona && puesto);
   const pRuta = rutaCompleta
     ? base[departamento!.codigo]?.m?.[municipio!.codigo]?.z?.[zona!.codigo]?.s?.[puesto!.codigo]
@@ -1154,7 +1154,7 @@ export function nombreExportacion(c: ClasificacionE14): string | null {
 
 /**
  * KIT actas-vivas-paginas-v1 (FASE C): RECORTADA por OCR de secciones —
- * la captura real del dueño salió con la parte inferior pisada (firmas al
+ * la captura real del mantenedor salió con la parte inferior pisada (firmas al
  * filo) SIN advertencia específica: un recorte limpio por una franja blanca
  * pasaba (solo el guard geométrico de tinta al filo y el escudo de fondo
  * atrapaban casos). Señales por página (la página es DATO — §C):

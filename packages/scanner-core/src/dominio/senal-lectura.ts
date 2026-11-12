@@ -2,7 +2,7 @@
  * KIT e14-score-lectura-v1 — señal de LECTURA para el score v2 ("la lectura
  * manda"). El score deja de medir solo "¿se ve bien?" y responde
  * "¿se va a LEER bien?" (principio «el OCR manda» §X SPEC-score-legible,
- * elevado a regla — decisión del dueño §0 del kit).
+ * elevado a regla — decisión del mantenedor §0 del kit).
  *
  * FUENTE: ANCLAS_ESTRUCTURALES de src/lib/e14/informe/analisis-texto.ts
  * (rama informe-telemetria-ocr). Esa rama NO está mergeada en esta base

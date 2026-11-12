@@ -5,7 +5,7 @@
  *
  * Sin precedente en el repo: diseño conservador de cero.
  *  · Singleton de worker + cola FIFO SERIALIZADA (1 sondeo a la vez — RAM
- *    móvil; el trabajo corre mientras el dueño revisa la cola, costo
+ *    móvil; el trabajo corre mientras el mantenedor revisa la cola, costo
  *    percibido ≈ 0).
  *  · Hard-kill anti-zombi: `setTimeout(presupuesto + 1000)` →
  *    `worker.terminate()` + respawn perezoso → resolve `null` (un worker
@@ -14,7 +14,7 @@
  *    typeof OffscreenCanvas === "undefined"` → `null` SIEMPRE (degradación
  *    honesta, cero throw).
  *  · Flag OFF (sondeoQrPrecoz, default true — §D) → `null` SIN instanciar
- *    worker (kill-switch del dueño — byte-idéntico a 043b2ba).
+ *    worker (kill-switch del mantenedor — byte-idéntico a 043b2ba).
  *  · JAMÁS throw: cualquier fallo (crear/postMessage/respuesta mala) → null.
  *
  * API única: sondearQrPrecoz(archivo: File | Blob) → {payload, tier, ms} | null

@@ -27,7 +27,7 @@
  *   · acta-sim-baja.jpg (borrosa as-is — exacta): 8.83 %
  *   · acta-e14-real.jpg (cruda con fondo — proxy; en el pipeline la zona
  *     cae sobre el papel warped): bandas de papel 7.8-17.4 %
- *   · blanco puro (control): 0.00 % · margen blanco real del dueño
+ *   · blanco puro (control): 0.00 % · margen blanco real del mantenedor
  *     (calibración D5 de completitud.ts): 0.3 %
  *   → UMBRAL_VOTOS_PCT = 0.8 (kit G1): ~2.6× el peor blanco real medido y
  *     ~11× por debajo de la acta real más tenue. CALIBRABLE con evidencia

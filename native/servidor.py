@@ -43,7 +43,7 @@ VERSION = "e14-ocr-nativo-v1"
 MAX_BYTES = 32 * 1024 * 1024  # un dataURL de un acta a 4032 px ≈ 2-4 MB
 
 # Orígenes a los que el sidecar le devuelve el cuerpo. Con `*` estaba bien
-# mientras esto fue una herramienta del dueño con el repo en su máquina; en
+# mientras esto fue una herramienta del mantenedor con el repo en su máquina; en
 # cuanto se reparte como .exe a visitantes, `*` significa que CUALQUIER página
 # abierta en ese navegador puede encolar actas en el CPU del usuario y leer el
 # texto que sale. Sin `Access-Control-Allow-Origin` en la respuesta el navegador
@@ -56,15 +56,15 @@ def origen_permitido(origen: str) -> bool:
     """C-22 — `null`/vacío se RECHAZA: un iframe sandbox (`allow-scripts`) de
     cualquier sitio público también manda `Origin: null`, así que aceptarlo
     deja que una página ajena encole actas en el CPU del visitante. La página
-    del dueño SIEMPRE manda origen real (Pages/lazo); el modo file:// del
-    dueño, si algún día hace falta, se allowlista EXPLÍCITO con
+    del mantenedor SIEMPRE manda origen real (Pages/lazo); el modo file:// del
+    mantenedor, si algún día hace falta, se allowlista EXPLÍCITO con
     `E14_ORIGENES="null"` (o el origen concreto) — nunca por omisión.
     Lazo = dev, `serve-export.py` y `pages dev`; y el proyecto de Pages con
     sus previsualizaciones (`https://<hash>.supervision-e14.pages.dev`).
     `E14_ORIGENES` añade dominios propios separados por coma sin tocar el código."""
     if origen in ("", "null"):
-        # C-22 — por defecto RECHAZADO; solo entra si el dueño lo allowlistó
-        # EXPLÍCITO en E14_ORIGENES (modo file:// de custodia del dueño).
+        # C-22 — por defecto RECHAZADO; solo entra si el mantenedor lo allowlistó
+        # EXPLÍCITO en E14_ORIGENES (modo file:// de custodia del mantenedor).
         extra = os.environ.get("E14_ORIGENES", "")
         return origen in {x.strip() for x in extra.split(",") if x.strip()}
     if origen.startswith(LAZO):
@@ -158,7 +158,7 @@ class Motor:
     def acta_desde_dataurl(self, data_url: str, cap: int):
         """Pipeline COMPLETO de un acta en una sola ida: quad → warp → sonda
         de orientación → b/n → QR → OCR. Devuelve la imagen de presentación
-        (la b/n que el dueño ve en el visor) y el texto ya enderezado, más el
+        (la b/n que el mantenedor ve en el visor) y el texto ya enderezado, más el
         quad NORMALIZADO (0..1 sobre la foto decodificada) para que el JS lo
         proyecte sobre SU propia copia del original sin depender de que ambos
         decodifiquen con el mismo tamaño — y conserve así SUS mediciones

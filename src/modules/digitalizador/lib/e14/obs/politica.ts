@@ -122,7 +122,7 @@ export function leerOverridesFlagsRaw(): string | null {
 }
 
 /** Overrides de flags — la MÁXIMA prioridad en leerFlags (kill switch
- *  manual del dueño, D6). JSON corrupto → {} silencioso.
+ *  manual del mantenedor, D6). JSON corrupto → {} silencioso.
  *
  *  R2 (§B2 #11) — DERIVA de la tabla única `sanearConEsquema` (src/shared/
  *  e14/flags-schema.ts): mismas condiciones y clamps por clave que la

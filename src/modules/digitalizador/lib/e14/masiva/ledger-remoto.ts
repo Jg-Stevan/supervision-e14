@@ -12,7 +12,7 @@
  * — solo su SHA-256 (sha256HexDeTexto), la serie y metadatos mínimos.
  *
  * RL-e65b-6: `forzarDedupOff` salta TAMBIÉN el ledger remoto (el caller lo
- * guarda — el escape del dueño manda SIEMPRE; el módulo ni se consulta).
+ * guarda — el escape del mantenedor manda SIEMPRE; el módulo ni se consulta).
  */
 
 /** fetch inyectable (tests — cero red real en vitest). */
@@ -149,14 +149,14 @@ export async function registrarEnvioRemoto(
   if (!r.ok) throw new Error(`LEDGER_REGISTRO_${r.status}`);
 }
 
-/** Válvula de pruebas del dueño (kit §A.4 — PanelDev): DELETE con la
+/** Válvula de pruebas del mantenedor (kit §A.4 — PanelDev): DELETE con la
  *  confirmación EXACTA. NUNCA se llama automáticamente (ni vaciar local ni
  *  el reset del modo de pruebas borran el remoto — esa es la garantía;
  *  literal evitado a propósito — ancla byte-idéntica del kit §1). */
 export async function vaciarLedgerRemoto(
   deps: { traer?: TraerLedger } = {},
 ): Promise<{ ok: boolean; error?: string }> {
-  // D29 — la válvula del dueño tampoco tiene receptor aquí (honesto, no simulado).
+  // D29 — la válvula del mantenedor tampoco tiene receptor aquí (honesto, no simulado).
   if (!LEDGER_REMOTO_ACTIVO) return { ok: false, error: "LEDGER_AUSENTE_E14" };
   try {
     const traer = deps.traer ?? fetch;

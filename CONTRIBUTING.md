@@ -27,8 +27,20 @@ y las decisiones relevantes en [`docs/adr/README.md`](docs/adr/README.md).
 8. **Dark only:** tokens del tema, radio 4 px, cero sombras y cero hex sueltos (D4).
 9. **No commitear artefactos de sesión:** `out/`, `.next/`, `dist/`, `build/`,
    logs, JSON de benchmarks, `public/vendor/onnxruntime/`, `node_modules/`.
-10. **Actas y capturas:** solo documentos públicos y recomprimidos. Nada de
-    fotos de particulares ni datos personales.
+10. **Jamás commitear actas reales (SEC-10/D86):** ni fotos de actas, ni
+    capturas con datos de jurados, ni volcados de sesión (ver `SECURITY.md` y
+    `.gitignore`; el kit de práctica quedó metadata-only por D35).
+11. **Jamás reescribir historial sin autorización registrada (D90/D91):**
+    cualquier `git filter-repo` / force-push requiere una decisión D-xx
+    registrada que la autorice; lo demás es historia inmutable.
+12. **`packages/scanner-core` se cambia en ESPEJO:** todo cambio del paquete se
+    aplica idéntico (byte a byte) en ambos repos (sup y dig) y deja
+    `qa-paridad-motor` en 20/20. Anúncialo en el título del PR y espera la
+    pasada espejo del hermano.
+13. **Convención de decisiones D-xx-sup / D-xx-dig:** cada repo lleva su
+    propia numeración (pueden divergir); en sup viven en `docs/adr/` y los
+    reportes de seguimiento, en dig en `docs/DECISIONS.md`. No re-numeres
+    decisiones existentes; las nuevas van al final con fecha y motivo.
 
 ## Estilo de código
 
@@ -58,5 +70,7 @@ y las decisiones relevantes en [`docs/adr/README.md`](docs/adr/README.md).
 
 ## Reportes
 
-- Bugs funcionales: issue con pasos, navegador, dispositivo y resultado esperado.
+- Bugs funcionales: issue con pasos, navegador, dispositivo y resultado
+  esperado (usa las plantillas de `.github/ISSUE_TEMPLATE/`).
 - Vulnerabilidades: **no abras un issue público**; sigue [`SECURITY.md`](SECURITY.md).
+- Conducta: ver [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).

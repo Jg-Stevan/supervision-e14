@@ -19,7 +19,7 @@
  * del kit 120 (núcleo 7%W×3%H en 2%W, 1.5%H) dejaba la marca en ~14% del
  * área → promedio del núcleo 0.87 con umbral <0.45 IMPOSIBLE de pasar → las
  * 4 esquinas «FALTA» en TODA captura real → pill + techo 7.9 sistemáticos
- * (falso positivo del dueño: Frankfurt 746 mesa 012 pág 2, fill 0.86-0.92
+ * (falso positivo del mantenedor: Frankfurt 746 mesa 012 pág 2, fill 0.86-0.92
  * medido pixel a pixel). Reproducción: research/repro_marcas.py.
  */
 

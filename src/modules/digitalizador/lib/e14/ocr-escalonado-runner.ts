@@ -41,7 +41,7 @@ import { loadImageMemo, canvasCon } from "./image-utils";
 // KIT e14-ocr-nativo-v1 — sidecar nativo del det+rec (aceleración opcional;
 // null = camino de siempre en WASM).
 import { ladoNativoDisponible, ocrNativo } from "./ocr/nativo";
-// Decisión del dueño 2026-11-11 — motor de D por defecto en S: Tesseract
+// Decisión del mantenedor 2026-11-11 — motor de D por defecto en S: Tesseract
 // fast → GATE → RapidOCR v4 escalonado. El sidecar nativo (si está
 // instalado) corre ANTES: aceleración opcional, nunca requisito.
 import { reconocerOcrCascada } from "./ocr-cascada";
@@ -327,7 +327,7 @@ export async function reconocerRapidOcrEscalonado(
 export async function ocrBanda(
   fotoProcesada: string,
   /** Espera del turno OCR de ESTA acta — la banda es la 2.ª pasada y pide su
-   *  propio turno; sin el sink su espera quedaría dentro de `ocrMs` sin dueño. */
+   *  propio turno; sin el sink su espera quedaría dentro de `ocrMs` sin mantenedor. */
   esperaSink?: EsperaOcrSink,
 ): Promise<string> {
   try {

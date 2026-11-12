@@ -2,7 +2,7 @@
  * KIT e14-gama-adaptativa-v1 — capa ADAPTATIVA de gama para el módulo MASIVA.
  *
  * PROBLEMA (evidencia del repo): todo el pipeline masiva está calibrado con
- * el peor caso del dueño (PC de escritorio): WATCHDOG_MS=75 s, master 4032,
+ * el peor caso del mantenedor (PC de escritorio): WATCHDOG_MS=75 s, master 4032,
  * pool 2 workers, barridos QR sin presupuesto de reló, dhash FULL 12 MP en
  * main thread, progreso a 4 Hz. En dispositivos de gama BAJA/MEDIA esto
  * produce: hard-kills falsos del watchdog (cada uno = workers muertos +
@@ -15,7 +15,7 @@
  *   Este módulo lo CONSUME de forma ACOTADA y REVOCABLE:
  *   1. Kill-switch ÚNICO: flag `masivaAdaptativoGama` (default ON) — OFF ⇒
  *      byte-idéntico a hoy en TODOS los dispositivos.
- *   2. El override MANUAL del dueño MANDA: si una clave existe en
+ *   2. El override MANUAL del mantenedor MANDA: si una clave existe en
  *      `e14-flags-overrides` (localStorage), la capa adaptativa NO la toca
  *      (flagsMasivaEfectivos filtra por clave).
  *   3. ALTO ⇒ plan MEDIO unificado (gama-medio-unificada-v1 — presupuestos
@@ -79,7 +79,7 @@
  *   4032² ≈ 65 MB RGBA) donde los abortos por memoria son el riesgo
  *   dominante. El det trabaja a 1280/1920 — la resolución de OCR/QR se
  *   conserva. MUERE scores ±margen → kit propio registrado (D74) y solo en
- *   BAJO; el dueño lo revierte con el flag o con un override manual.
+ *   BAJO; el mantenedor lo revierte con el flag o con un override manual.
  * · watchdogMs mayor en BAJO/MEDIO: el p95 real de gama baja puede rozar el
  *   75 s calibrado en PC — un kill falso paga re-OCR completo (coste doble).
  * · progresoMs mayor: menos re-renders de la bandeja a 4 Hz (runner-vida).
@@ -143,7 +143,7 @@ export interface PlanGama {
   /** D38 — degradación preventiva del gobernador reactivo (null = normal). */
   reactivo: { motivo: string; hasta: number } | null;
   /** Override de FLAGS consumidos vía leerFlags() — filtrado por el override
-   *  manual del dueño dentro de flagsMasivaEfectivos(). */
+   *  manual del mantenedor dentro de flagsMasivaEfectivos(). */
   flagsOverride: Partial<FlagsApp>;
   /** Precalor: masters PRECALORADOS máximos en memoria (precalor.ts). */
   precalorCola: number;
@@ -383,7 +383,7 @@ function tierSyncDe(señales: SeñalesGama): { tier: Tier; tierInferido: boolean
 }
 
 /** Plan del MOMENTO (sync — los consumidores lo leen en caliente). Cachea el
- *  TIER, no el plan: los flips del flag `masivaAdaptativoGama` del dueño se
+ *  TIER, no el plan: los flips del flag `masivaAdaptativoGama` del mantenedor se
  *  respetan EN VIVO sin recargar. D38: compone con el tier EFECTIVO (el
  *  real, o un escalón abajo si el gobernador reactivo está activo). Jamás
  *  lanza. */
@@ -486,7 +486,7 @@ export async function refrescarPlanGama(): Promise<PlanGama> {
 }
 
 /** Flags EFECTIVOS de la corrida: leerFlags() + el override adaptativo del
- *  plan — JAMÁS sobre claves que el dueño puso manualmente en
+ *  plan — JAMÁS sobre claves que el mantenedor puso manualmente en
  *  `e14-flags-overrides` (D6: el override MANUAL manda). Sustituye a
  *  leerFlags() SOLO en los puntos de consumo del pipeline masiva/OCR
  *  listados en la decisión D74. Jamás lanza. */
@@ -505,7 +505,7 @@ export function flagsMasivaEfectivos(): FlagsApp {
     }
     const aplicables: Partial<FlagsApp> = {};
     for (const clave of claves) {
-      if (manuales.has(clave)) continue; // la mano del dueño MANDA (D6)
+      if (manuales.has(clave)) continue; // la mano del mantenedor MANDA (D6)
       (aplicables as Record<string, unknown>)[clave] =
         (plan.flagsOverride as Record<string, unknown>)[clave];
     }
