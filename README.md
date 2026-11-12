@@ -84,6 +84,7 @@ vas a correr la suite sin arrancar el dev, ejecuta `bun run preparar` antes.
 | `bun run lint` | ESLint (flat config). |
 | `bun test` | Suite de `bun:test` (33 archivos, 385 pruebas). |
 | `bun run verificar` | typecheck + lint + test, la misma puerta que CI. |
+| `bun scripts/qa-paridad-motor.ts` | Paridad del motor con el repo gemelo `digielect14` (T-16): corre desde cualquiera de los dos checkouts lado a lado y compara las copias de `packages/scanner-core` byte a byte (script idéntico en ambos repos; `E14_HERMANO` señala el hermano; sin hermano en disco sale «omitido»). Meta: 20/20 — ver [Ola 1 del plan 2026-11-12](https://github.com/Jg-Stevan/supervision-e14). |
 | `bun scripts/hub-local.mjs` | Hub E2E en esta máquina: sirve el móvil y el panel por HTTPS/HTTP y recibe `POST /actas`. Ver [`docs/RUNBOOK-e2e-local-v1.md`](docs/RUNBOOK-e2e-local-v1.md). |
 
 Pruebas opcionales de medición (no son gates): `scripts/bench-navegador.mjs`,
