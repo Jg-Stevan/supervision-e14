@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Inbox, Pause, Play, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,12 @@ import {
   type EstadoRecepcion,
 } from "../data/recepcion-log";
 import { tiempoRelativo } from "./tiempo";
+// D-32/D-33 (plan 2026-11-12) — SIMULAR RECEPCIÓN y REINICIAR DEMO: el lote
+// demo (fixtures sintéticas del módulo digitalizador — MISMA puerta que el
+// DEMO ×4 de MASIVA) entra por el embudo de siempre con origen "demo".
+import { publicarActaMasiva, reiniciarDemoPanel } from "../data/actas-runtime";
+import { purgarPorOrigen } from "../data/recepcion-log";
+import { fetchActasDemo } from "@/modules/digitalizador/lib/e14/actas-demo";
 import { KpiCard } from "./kpi-card";
 import { Esqueleto } from "./esqueleto";
 // E2E local — la tarjeta que sondea el hub del celular (flujo cel → compu).
@@ -394,6 +400,89 @@ export function VistaRecepcion({
    * la lectura inicial consulta esto: nada de setState tras desmontar). */
   const montadoRef = useRef(false);
 
+  // ─── D-32 (plan 2026-11-12) — SIMULAR RECEPCIÓN ─────────────────────────
+  // Inyecta las 4 fixtures SINTÉTICAS por publicarActaMasiva con origen
+  // "demo" (el embudo de SIEMPRE: validación D25 + log + visor). El lote
+  // aterriza en las mesas del ancla demo (Roma 001/002) y el visor muestra
+  // el acta con chip DEMO — SIN depender del teléfono.
+  const [simulando, setSimulando] = useState(false);
+  const simularRecepcion = useCallback(async () => {
+    if (simulando) return;
+    setSimulando(true);
+    try {
+      const archivos = await fetchActasDemo();
+      // 4 fixtures → 4 páginas del ancla demo (Roma 88_495_010_02): el mismo
+      // reparto que resuelve el pipeline del lote DEMO ×4 de MASIVA.
+      const sobres = [
+        { mesa: "001", formulario: "TRANSMISION" as const, pagina: 1, total: 2, archivo: archivos[0] },
+        { mesa: "001", formulario: "TRANSMISION" as const, pagina: 2, total: 2, archivo: archivos[1] },
+        { mesa: "002", formulario: "TRANSMISION" as const, pagina: 1, total: 2, archivo: archivos[2] },
+        { mesa: "002", formulario: "DELEGADOS" as const, pagina: 1, total: 1, archivo: archivos[3] },
+      ];
+      for (let i = 0; i < sobres.length; i++) {
+        const { mesa, formulario, pagina, total, archivo } = sobres[i];
+        const srcFoto = await new Promise<string | null>((resolver) => {
+          const lector = new FileReader();
+          lector.onload = () => resolver(typeof lector.result === "string" ? lector.result : null);
+          lector.onerror = () => resolver(null);
+          lector.readAsDataURL(archivo);
+        });
+        await publicarActaMasiva(
+          {
+            idEnlace: "88_495_010_02",
+            mesa,
+            formulario,
+            paginaIndex: pagina,
+            paginaTotal: total,
+            srcFoto,
+            impresion: {
+              consulado: "88",
+              pais: "380 - ITALIA",
+              zona: "010",
+              puesto: "02",
+              mesa,
+              lugar: "Roma - Consulado",
+              etiquetaFormulario: formulario === "TRANSMISION" ? "TRANSMISIÓN" : "CÓNSUL/EMBAJADOR",
+            },
+            nombreArchivo: archivo.name,
+            // Telemetría informativa del lote demo (coherente con los scores
+            // anclados del modo SIM del móvil).
+            score: [9.2, 7.4, 8.6, 6.9][i] ?? 8,
+            statusActa: ["OPTIMA", "ADVERTENCIA", "OPTIMA", "ADVERTENCIA"][i] ?? "OPTIMA",
+          },
+          "demo"
+        );
+      }
+    } catch (error) {
+      // la inyección jamás rompe la vista (misma doctrina del embudo)
+      console.info(`[e14] demo: inyección falló (${String(error)})`);
+    } finally {
+      setSimulando(false);
+    }
+  }, [simulando]);
+
+  // ─── D-33 (plan 2026-11-12) — REINICIAR DEMO del panel ──────────────────
+  // Retira SOLO el rastro demo: actas runtime publicadas con origen "demo"
+  // + filas "demo" del log. El puente real y las sembradas del ancla
+  // (actas-mock) NO se tocan. Confirmación inline de 2 toques (kit §6),
+  // rearme solo a los 3 s.
+  const [resetDemoArmado, setResetDemoArmado] = useState(false);
+  useEffect(() => {
+    if (!resetDemoArmado) return;
+    const t = setTimeout(() => setResetDemoArmado(false), 3000);
+    return () => clearTimeout(t);
+  }, [resetDemoArmado]);
+  const reiniciarDemo = useCallback(() => {
+    if (!resetDemoArmado) {
+      setResetDemoArmado(true);
+      return;
+    }
+    const retiradas = reiniciarDemoPanel();
+    const filas = purgarPorOrigen("demo");
+    setResetDemoArmado(false);
+    console.info(`[e14] demo: reinicio del panel (actas ${retiradas} · filas ${filas})`);
+  }, [resetDemoArmado]);
+
   useEffect(() => {
     let vivo = true;
     montadoRef.current = true;
@@ -587,6 +676,29 @@ export function VistaRecepcion({
                 : "Pausado"
               : "Feed: transmitiendo"}
           </span>
+          {/* D-32 — SIMULAR RECEPCIÓN: lote demo por el embudo de siempre. */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="label-caps h-11 border-(--amber) text-(--amber) hover:bg-(--amber)/10"
+            onClick={() => void simularRecepcion()}
+            disabled={simulando}
+            title="Inyecta las 4 fixtures sintéticas (lote demo) por el embudo de siempre — sin depender del teléfono"
+          >
+            {simulando ? "Inyectando…" : "Simular recepción"}
+          </Button>
+          {/* D-33 — REINICIAR DEMO: 2 toques (kit §6); purga SOLO el rastro
+              demo (actas runtime "demo" + filas "demo" del log) — jamás el
+              puente real ni las sembradas del ancla. */}
+          <Button
+            variant={resetDemoArmado ? "destructive" : "outline"}
+            size="sm"
+            className="label-caps h-11"
+            onClick={reiniciarDemo}
+            title={resetDemoArmado ? "Confirma: retira las actas y filas del lote demo de esta sesión" : "Retira el rastro demo de esta sesión (2 toques)"}
+          >
+            {resetDemoArmado ? "¿SEGURO?" : "Reiniciar demo"}
+          </Button>
           <Button
             variant="outline"
             size="sm"

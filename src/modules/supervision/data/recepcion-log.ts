@@ -43,7 +43,11 @@ export type EstadoRecepcion = "PUBLICADA" | "BLOQUEADA" | "SIN_JOIN" | "DUPLICAD
 /** De dónde llegó el acta.
  *  · `puente-local` — E2E local: llegó por red desde el digitalizador móvil,
  *    traído del hub por `data/hub-local.ts` (mismo embudo, otro medio). */
-export type OrigenRecepcion = "carga-masiva" | "ingesta-inicial" | "puente-local";
+export type OrigenRecepcion =
+  | "carga-masiva"
+  | "ingesta-inicial"
+  | "puente-local"
+  | "demo"; // D-32 (plan 2026-11-12): inyección del lote demo desde el panel
 
 /** Los dos orígenes que cuentan como LLEGADA EN VIVO (destello de la fila y
  *  badge del sidebar): la bandeja de este computador y el hub local del
@@ -51,7 +55,9 @@ export type OrigenRecepcion = "carga-masiva" | "ingesta-inicial" | "puente-local
  *  llegada, y por eso no cuenta. Un solo predicado para que el criterio no se
  *  duplique en cada consumidor. */
 export function esLlegadaViva(origen: OrigenRecepcion): boolean {
-  return origen === "carga-masiva" || origen === "puente-local";
+  return (
+    origen === "carga-masiva" || origen === "puente-local" || origen === "demo"
+  );
 }
 
 /** UNA página recibida (grano del pipeline: 1 foto = 1 entrada). */
@@ -180,6 +186,25 @@ export function purgarRecepciones(): void {
       /* un oyente caído jamás rompe la purga */
     }
   }
+}
+
+/** D-33 (plan 2026-11-12) — purga SELECTIVA: elimina SOLO las filas de un
+ *  origen (hoy: "demo" — el reinicio del demo del panel jamás toca filas del
+ *  puente real ni de la bandeja local). Devuelve cuántas filas se fueron. */
+export function purgarPorOrigen(origen: OrigenRecepcion): number {
+  const antes = ENTRADAS.length;
+  // ENTRADAS es un array de módulo (mismo patrón de purgarRecepciones).
+  const vivas = ENTRADAS.filter((e) => e.origen !== origen);
+  ENTRADAS.length = 0;
+  ENTRADAS.push(...vivas);
+  for (const oyente of oyentes) {
+    try {
+      oyente(null); // cambio estructural sin llegada (misma señal del reset)
+    } catch {
+      /* un oyente caído jamás rompe la purga */
+    }
+  }
+  return antes - ENTRADAS.length;
 }
 
 /** Conteo por desenlace (KPIs de la vista; semilla incluida). */

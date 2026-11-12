@@ -413,6 +413,18 @@ function VisorAbierto() {
               />
             </div>
 
+            {/* D-32 (plan 2026-11-12) — chip DEMO del lote inyectado desde
+                el panel (origen "demo"): NO descartable y visible sobre
+                cualquier página del acta — jamás se presenta como dato real
+                (coherente con D89-sup, el banner del modo demo). */}
+            {fotoActiva?.demo && (
+              <span
+                role="status"
+                className="label-caps absolute top-20 right-4 z-10 inline-flex items-center gap-1.5 rounded-[4px] border border-(--amber) bg-(--amber)/10 px-2.5 py-1.5 text-(--amber) lg:top-4"
+              >
+                DEMO — LOTE SINTÉTICO
+              </span>
+            )}
             {/* Overlay: acta validada (§2.3) — bajo la toolbar en pantallas
                 angostas, en la esquina a partir de lg. */}
             {aprobada && !pantallaCompleta && (

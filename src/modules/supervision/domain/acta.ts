@@ -31,6 +31,10 @@ export interface FotoActa {
   alto: number;
   /** Nombre de archivo (convención digitalizador). */
   archivo: string;
+  /** D-32 (plan 2026-11-12) — la foto vino del lote DEMO inyectado desde el
+   *  panel (origen "demo"): el visor la marca con chip DEMO — jamás se
+   *  presenta como dato real (coherente con D89-sup). Ausente → no demo. */
+  demo?: boolean;
   /** Score OCR informativo 0-10 de la bandeja del digitalizador
    * (telemetría del pipeline masiva — chip SCORE del visor, plan V1).
    * Ausente → el visor deriva del estado de la página (scoreDePagina). */

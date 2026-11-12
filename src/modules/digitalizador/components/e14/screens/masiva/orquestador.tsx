@@ -783,6 +783,17 @@ export function MasivaView({ onVerEnMonitor }: PropsMasivaView) {
               </button>
             ) : null}
 
+            {/* D-31 — aviso PERMANENTE del modo demostración (no descartable). */}
+            {loteDemoActivo && (
+              <p
+                role="status"
+                className="text-[9px] leading-tight text-amber-300/80"
+              >
+                MODO DEMOSTRACIÓN — fixtures sintéticas; no usar con actas
+                reales. El lote corre el pipeline real y publica al hub.
+              </p>
+            )}
+
             {/* KIT e107-prescan-qr-cola-v1 (§D.3) + P0.3 (informe 2 §3 A7):
                 banner HOJA auto-subscrita — los emitir() del pre-scan
                 re-renderizan el banner, no el orquestador. */}

@@ -1,0 +1,36 @@
+# D-35 (plan 2026-11-12) — verificación AUTOMÁTICA de cabeceras COOP/COEP
+# contra el dominio final (antes era manual: `curl -sI | grep cross-origin`,
+# D80/SEC-3 — y se olvidaba en cada deploy). Sin COOP/COEP el OCR WASM corre
+# a 1 hilo SIN ERROR VISIBLE: el check existe para que eso jamás sea un
+# silencio.
+#
+# Sin la variable de repo DOMINIO_PRODUCCION el paso se OMITE con aviso
+# explícito (un check que no puede correr no miente verde).
+name: cabeceras-coop-coep
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Semanal — lunes 14:00 UTC (9:00 Bogotá). El dominio vive en la
+    # variable DOMINIO_PRODUCCION del repo (Settings → Variables → Actions).
+    - cron: "0 14 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  cabeceras:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Verificar COOP/COEP del dominio final"
+        env:
+          DOMINIO_PRODUCCION: ${{ vars.DOMINIO_PRODUCCION }}
+        run: node scripts/verificar-cabeceras.mjs
+      - name: "Modo local (sin variable): contra el servidor COOP/COEP del repo"
+        if: ${{ vars.DOMINIO_PRODUCCION == '' }}
+        run: |
+          echo "Sin DOMINIO_PRODUCCION en las variables del repo: el check
+          contra producción se OMITE (SKIP arriba). Para activarlo:
+          Settings → Variables → Actions → DOMINIO_PRODUCCION."
+          node scripts/verificar-cabeceras.mjs "http://localhost:1"

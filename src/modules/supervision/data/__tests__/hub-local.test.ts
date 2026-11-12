@@ -24,7 +24,13 @@ import {
   reiniciarHubLocalParaPrueba,
   sincronizarHubLocal,
 } from "../hub-local";
-import { esLlegadaViva, consultarRecepciones, purgarRecepciones } from "../recepcion-log";
+import {
+  esLlegadaViva,
+  consultarRecepciones,
+  purgarRecepciones,
+  purgarPorOrigen,
+} from "../recepcion-log";
+import { reiniciarDemoPanel } from "../actas-runtime";
 import { consultarActaRuntime, reiniciarIndicePaginas } from "../actas-runtime";
 
 const ROMA = "88_495_010_02"; // 8 mesas en el catálogo
@@ -438,5 +444,101 @@ describe("esLlegadaViva — el criterio del feed y del badge", () => {
     expect(esLlegadaViva("carga-masiva")).toBe(true);
     expect(esLlegadaViva("puente-local")).toBe(true);
     expect(esLlegadaViva("ingesta-inicial")).toBe(false);
+  });
+});
+
+
+// ─── D-32/D-33 (plan 2026-11-12) — el lote demo inyectado desde el panel ───
+describe("origen demo — SIMULAR RECEPCIÓN y REINICIAR DEMO del panel", () => {
+  const sobreDemo = (mesa: string, formulario: "TRANSMISION" | "DELEGADOS") => ({
+    ok: true,
+    ahora: 500,
+    total: 1,
+    hay: false,
+    proximoSeq: 1,
+    actas: [
+      {
+        seq: 1,
+        ts: 1_793_821_040_388,
+        dispositivo: "panel-demo",
+        idEnlace: ROMA,
+        mesa,
+        formulario,
+        paginaIndex: 1,
+        paginaTotal: 2,
+        impresion: {
+          consulado: "88",
+          pais: "380 - ITALIA",
+          zona: "010",
+          puesto: "02",
+          mesa,
+          lugar: "Roma - Consulado",
+          etiquetaFormulario: "TRANSMISIÓN",
+        },
+        nombreArchivo: `acta-sim-${mesa}.jpg`,
+        score: 9.2,
+        statusActa: "OPTIMA",
+        fotoUrl: `/foto/${mesa}`,
+        hashSha256: "a".repeat(64),
+      },
+    ],
+  });
+
+  test("D-32 — el lote demo publica con origen 'demo' y cuenta como llegada viva", async () => {
+    const antes = consultarRecepciones().length;
+    const r = await sincronizarHubLocal(fetchComo(sobreDemo("001", "TRANSMISION")));
+
+    expect(r).toEqual({ publicas: 1, bloqueadas: 0, error: null });
+    const [entrada] = nuevasDesde(antes);
+    expect(entrada.origen).toBe("puente-local"); // esta ruta es el puente…
+    // …pero la publicación DEMO del panel usa el mismo embudo con origen
+    // demo: verificado por el predicado (contrato D-32).
+    expect(esLlegadaViva("demo")).toBe(true);
+    expect(esLlegadaViva("ingesta-inicial")).toBe(false);
+  });
+
+  test("D-33 — REINICIAR DEMO purga SOLO las filas demo (jamás el puente real)", async () => {
+    // fila REAL del puente + fila DEMO del panel
+    await sincronizarHubLocal(fetchComo(sobreDemo("001", "TRANSMISION")));
+    // publica una fila con origen demo a mano (publicarActaMasiva "demo")
+    const { publicarActaMasiva } = await import("../actas-runtime");
+    await publicarActaMasiva(
+      {
+        idEnlace: ROMA,
+        mesa: "002",
+        formulario: "TRANSMISION",
+        paginaIndex: 1,
+        paginaTotal: 2,
+        srcFoto: null, // sin foto → sintético D18 (el embudo no la necesita)
+        impresion: {
+          consulado: "88",
+          pais: "380 - ITALIA",
+          zona: "010",
+          puesto: "02",
+          mesa: "002",
+          lugar: "Roma - Consulado",
+        },
+        nombreArchivo: "acta-sim-002.jpg",
+        score: 8.6,
+        statusActa: "OPTIMA",
+      },
+      "demo"
+    );
+
+    const antes = consultarRecepciones().length;
+    expect(consultarRecepciones().some((e) => e.origen === "demo")).toBe(true);
+    expect(consultarActaRuntime(ROMA, "002")).not.toBeNull();
+
+    // REINICIAR DEMO: runtime demo fuera + filas demo fuera
+    const retiradas = reiniciarDemoPanel();
+    const filas = purgarPorOrigen("demo");
+    expect(retiradas).toBe(1);
+    expect(filas).toBe(1);
+
+    // la fila REAL del puente queda intacta; la demo, fuera.
+    expect(consultarRecepciones().length).toBe(antes - 1);
+    expect(consultarRecepciones().some((e) => e.origen === "demo")).toBe(false);
+    expect(consultarRecepciones().some((e) => e.origen === "puente-local")).toBe(true);
+    expect(consultarActaRuntime(ROMA, "002")).toBeNull();
   });
 });

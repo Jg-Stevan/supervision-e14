@@ -125,6 +125,9 @@ type Oyente = (evento: EventoActaPublicada) => void;
 
 const RUNTIME = new Map<string, ActaRealLista>();
 const oyentes = new Set<Oyente>();
+/** D-32/D-33 (plan 2026-11-12): claves publicadas con origen "demo" — la
+ *  memoria del reinicio del demo (purga SOLO demo, jamás el puente real). */
+const CLAVES_DEMO = new Set<string>();
 
 // ─── Anti-reproceso (duplicados enviados desde el móvil) ────────────────
 // TRES capas de huella (P-22, plan 2026-11-12 — la deuda P2 del reporte):
@@ -415,6 +418,9 @@ export async function publicarActaMasiva(
       // Plan V1 — chip SCORE del visor: el score REAL del OCR viaja con la
       // foto (telemetría informativa de la bandeja del digitalizador).
       score: entrada.score,
+      // D-32 — el lote demo llega marcado (chip DEMO en el visor — jamás
+      // se presenta como dato real; coherente con D89-sup).
+      ...(origen === "demo" ? { demo: true } : {}),
     };
   }
 
@@ -498,5 +504,22 @@ export async function publicarActaMasiva(
       idRecepcion: registro.id,
     });
   }
+  // D-33 — la publicación demo deja constancia para su reinicio selectivo.
+  if (origen === "demo") CLAVES_DEMO.add(clave);
   return { ok: true, clave };
+}
+
+/**
+ * D-33 (plan 2026-11-12) — REINICIAR DEMO del panel: retira del runtime SOLO
+ * las actas publicadas con origen "demo" (el puente real y las sembradas del
+ * ancla demo —actas-mock— NO se tocan) y vacía el registro de claves demo.
+ * El log de Recepción lo purga la vista con purgarPorOrigen("demo").
+ */
+export function reiniciarDemoPanel(): number {
+  let retiradas = 0;
+  for (const clave of CLAVES_DEMO) {
+    if (RUNTIME.delete(clave)) retiradas += 1;
+  }
+  CLAVES_DEMO.clear();
+  return retiradas;
 }
